@@ -25,19 +25,19 @@ APP_ENV = "production"
 # STAGING ENVIRONMENT
 # ===========================
 [env.staging]
-  name = "oslira-workers-staging"
-  
-  [env.staging.vars]
-    APP_ENV = "staging"
-  
+name = "oslira-workers-staging"
+
+[env.staging.vars]
+APP_ENV = "staging"
+
 [[env.staging.routes]]
-  pattern = "api.oslira.org/*"
-  zone_name = "oslira.org"
-  
-  [[env.staging.kv_namespaces]]
-    binding = "OSLIRA_KV"
-    id = "dd86f413c4374811ac253bb9a6567182"
-  
-  [[env.staging.r2_buckets]]
-    binding = "R2_CACHE_BUCKET"
-    bucket_name = "oslira-preprocessor-cache"
+pattern = "api.oslira.org/*"
+zone_name = "oslira.org"
+
+[[env.staging.kv_namespaces]]
+binding = "OSLIRA_KV"
+id = "dd86f413c4374811ac253bb9a6567182"
+
+[[env.staging.r2_buckets]]
+binding = "R2_CACHE_BUCKET"
+bucket_name = "oslira-preprocessor-cache"
