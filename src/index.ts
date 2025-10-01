@@ -3,6 +3,7 @@ import { cors } from 'hono/cors';
 import type { Env } from './types/interfaces.js';
 import { generateRequestId, logger } from './utils/logger.js';
 import { createStandardResponse } from './utils/response.js';
+import { handlePublicConfig } from './handlers/public-config.js';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -17,6 +18,7 @@ app.use('*', cors({
 // ===============================================================================
 // BASIC ENDPOINTS
 // ===============================================================================
+app.get('/config/public', handlePublicConfig);
 
 app.get('/', (c) => {
   return c.json({
