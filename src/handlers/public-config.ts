@@ -15,25 +15,31 @@ export async function handlePublicConfig(c: Context): Promise<Response> {
     const workerEnv = c.env.APP_ENV || 'production';
     
     // Security check: Validate requested environment matches Worker environment
-    if (requestedEnv !== workerEnv) {
-      logger('warn', 'Environment mismatch in config request', {
-        requestId,
-        requestedEnv,
-        workerEnv,
-        deniedAccess: true
-      });
-      
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: 'Environment mismatch: worker not authorized for requested environment'
-        }),
-        {
-          status: 403,
-          headers: { 'Content-Type': 'application/json' }
-        }
-      );
+// Security check: Validate requested environment matches Worker environment
+if (requestedEnv !== workerEnv) {
+  logger('warn', 'Environment mismatch in config request', {
+    requestId,
+    requestedEnv,
+    workerEnv,
+    deniedAccess: true
+  });
+  
+  return new Response(
+    JSON.stringify({
+      success: false,
+      error: 'Environment mismatch: worker not authorized for requested environment'
+    }),
+    {
+      status: 403,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type'
+      }
     }
+  );
+}
 
     logger('info', 'Processing public config request', {
       requestId,
