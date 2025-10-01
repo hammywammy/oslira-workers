@@ -1,0 +1,131 @@
+name: Build Tailwind CSS
+
+on:
+  push:
+    branches: [main, staging]
+    paths: 
+      - 'src/**/*.css'
+      - 'tailwind.config.js'
+      - 'public/**/*.html'
+      - 'public/**/*.js'
+      - 'public/core/**/*.js'
+      - 'package.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
+        
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        
+    - name: Install dependencies
+      run: |
+        echo "📦 Installing dependencies with Tailwind CSS v3..."
+        npm install
+        echo "✅ Dependencies installed"
+        
+    - name: Verify Tailwind version
+      run: |
+        echo "🔍 Verifying Tailwind CSS version..."
+        npx tailwindcss --help | head -n 5 || echo "Tailwind CSS installed"
+        
+    - name: Create output directory
+      run: mkdir -p public/assets/css
+    
+    - name: Build Tailwind CSS with Component Classes
+      run: |
+        echo "🎨 Building Tailwind CSS with component classes..."
+        
+        # Build main CSS file with component classes
+        npx tailwindcss -i src/styles.css -o public/assets/css/tailwind.css --minify
+        
+        # Verify the file was created and contains component classes
+        ls -la public/assets/css/
+        echo "📊 File size: $(du -h public/assets/css/tailwind.css)"
+        
+        # Check that component classes are included
+        echo "🔍 Verifying component classes are included..."
+        if grep -q "btn-primary" public/assets/css/tailwind.css; then
+          echo "✅ Button component classes found"
+        else
+          echo "❌ Button component classes missing"
+          exit 1
+        fi
+        
+        if grep -q "dashboard" public/assets/css/tailwind.css; then
+          echo "✅ Dashboard component classes found"
+        else
+          echo "❌ Dashboard component classes missing"
+          echo "⚠️ This might be expected if no dashboard classes are used in HTML"
+        fi
+        
+        echo "✅ Tailwind CSS built successfully with component classes"
+        
+        # Show first few lines for debugging
+        echo "📝 CSS file preview:"
+        head -c 1000 public/assets/css/tailwind.css || echo "CSS file too large for preview"
+    
+    - name: Validate CSS Output
+      run: |
+        echo "🔍 Running CSS validation..."
+        
+        # Check file size (should be reasonable with component classes)
+        FILE_SIZE=$(stat -c%s public/assets/css/tailwind.css)
+        echo "📊 Generated CSS size: $FILE_SIZE bytes"
+        
+        # Size should be reasonable (not too small, not too large)
+        if [ $FILE_SIZE -lt 5000 ]; then
+          echo "⚠️ CSS file seems too small, may be missing classes"
+          exit 1
+        fi
+        
+        if [ $FILE_SIZE -gt 1000000 ]; then
+          echo "⚠️ CSS file seems too large, may have unused classes"
+          echo "💡 Consider reviewing content paths in tailwind.config.js"
+        fi
+        
+        echo "✅ CSS file size is within expected range"
+        
+        # Check for @apply processing
+        if grep -q "@apply" public/assets/css/tailwind.css; then
+          echo "❌ Unprocessed @apply directives found - component classes not processed"
+          exit 1
+        else
+          echo "✅ No unprocessed @apply directives - component classes processed correctly"
+        fi
+    
+    - name: Commit changes
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add public/assets/css/tailwind.css
+        
+        # Only commit if there are changes
+        if git diff --staged --quiet; then
+          echo "ℹ️ No changes to commit"
+        else
+          git commit -m "Auto-build Tailwind CSS v3 with component classes [skip ci]"
+          git push origin ${{ github.ref_name }}
+          echo "✅ CSS changes committed and pushed"
+        fi
+    
+    - name: Build Summary
+      run: |
+        echo "🎉 Tailwind CSS build completed successfully!"
+        echo "📁 Output file: public/assets/css/tailwind.css"
+        echo "🎨 Component classes: Included via @apply directives"
+        echo "🔧 Build method: npm + npx tailwindcss v3"
+        echo "📊 Final size: $(du -h public/assets/css/tailwind.css)"
+        echo ""
+        echo "🚀 Deployment ready - component CSS architecture working"
