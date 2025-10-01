@@ -30,9 +30,9 @@ APP_ENV = "production"
   [env.staging.vars]
     APP_ENV = "staging"
   
-  [[env.staging.routes]]
-    pattern = "staging-api.oslira.com/*"
-    zone_name = "oslira.com"
+[[env.staging.routes]]
+  pattern = "api.oslira.org/*"
+  zone_name = "oslira.org"
   
   [[env.staging.kv_namespaces]]
     binding = "OSLIRA_KV"
