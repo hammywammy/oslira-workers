@@ -35,7 +35,14 @@ app.get('/', (c) => {
   });
 });
 
-app.get('/health', (c) => c.json({ status: 'healthy', timestamp: new Date().toISOString() }));
+app.get('/health', (c) => c.json({ 
+  status: 'healthy', 
+  timestamp: new Date().toISOString(),
+  environment: c.env.APP_ENV || 'NOT_SET',
+  hasAWSKey: !!c.env.AWS_ACCESS_KEY_ID,
+  hasAWSSecret: !!c.env.AWS_SECRET_ACCESS_KEY,
+  region: c.env.AWS_REGION || 'NOT_SET'
+}));
 
 
 // ===============================================================================
