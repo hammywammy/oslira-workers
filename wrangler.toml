@@ -1,7 +1,7 @@
 name = "oslira-workers"
 main = "src/index.ts"
 compatibility_date = "2025-01-01"
-node_compat = true
+compatibility_flags = ["nodejs_compat"]
 
 [vars]
 APP_ENV = "production"
