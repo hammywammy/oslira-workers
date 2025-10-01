@@ -1,36 +1,43 @@
-name = "ai-outreach-api"
+name = "oslira-workers"
 main = "src/index.ts"
-compatibility_date = "2025-08-01"
+compatibility_date = "2025-01-01"
+node_compat = true
 
 [vars]
 APP_ENV = "production"
 
-routes = [
-  { pattern = "api.oslira.com/*", zone_name = "oslira.com" }
-]
+# Production routes
+[[routes]]
+  pattern = "api.oslira.com/*"
+  zone_name = "oslira.com"
 
+# KV Namespace for caching/session data
 [[kv_namespaces]]
-binding = "OSLIRA_KV"
-id = "dd86f413c4374811ac253bb9a6567182"
+  binding = "OSLIRA_KV"
+  id = "dd86f413c4374811ac253bb9a6567182"
 
+# R2 Bucket for media/cache storage
 [[r2_buckets]]
-binding = "R2_CACHE_BUCKET"
-bucket_name = "oslira-preprocessor-cache"
+  binding = "R2_CACHE_BUCKET"
+  bucket_name = "oslira-preprocessor-cache"
 
+# ===========================
+# STAGING ENVIRONMENT
+# ===========================
 [env.staging]
-name = "oslira-api-stg"
-
-[env.staging.vars]
-APP_ENV = "staging"
-
-routes = [
-  { pattern = "api-staging.oslira.com/*", zone_name = "oslira.com" }
-]
-
-[[env.staging.kv_namespaces]]
-binding = "OSLIRA_KV"
-id = "dd86f413c4374811ac253bb9a6567182"
-
-[[env.staging.r2_buckets]]
-binding = "R2_CACHE_BUCKET"
-bucket_name = "oslira-preprocessor-cache"
+  name = "oslira-workers-staging"
+  
+  [env.staging.vars]
+    APP_ENV = "staging"
+  
+  [[env.staging.routes]]
+    pattern = "staging-api.oslira.com/*"
+    zone_name = "oslira.com"
+  
+  [[env.staging.kv_namespaces]]
+    binding = "OSLIRA_KV"
+    id = "dd86f413c4374811ac253bb9a6567182"
+  
+  [[env.staging.r2_buckets]]
+    binding = "R2_CACHE_BUCKET"
+    bucket_name = "oslira-preprocessor-cache"
