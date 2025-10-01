@@ -203,4 +203,25 @@ available_endpoints: [
   }, 404);
 });
 
-export default app;
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    try {
+      return await app.fetch(request, env, ctx);
+    } catch (error: any) {
+      console.error('❌ Worker crashed:', error);
+      return new Response(JSON.stringify({
+        success: false,
+        error: 'Worker initialization failed',
+        message: error.message,
+        stack: error.stack,
+        timestamp: new Date().toISOString()
+      }), {
+        status: 500,
+        headers: { 
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
+    }
+  }
+};
