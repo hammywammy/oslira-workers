@@ -162,8 +162,7 @@ export async function insertAnalysisRun(
       niche_fit_score: Math.round(parseFloat(analysisResult.niche_fit) || 0),
       engagement_score: Math.round(parseFloat(analysisResult.engagement_score) || 0),
       
-summary_text: (() => {
-  // Store appropriate summary based on analysis depth
+
 summary_text: (() => {
   switch(analysisType) {
     case 'light':
