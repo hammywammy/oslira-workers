@@ -308,7 +308,7 @@ const analysisData = {
   confidence_level: psychProfileAnalysis.confidence_level,
   
   xray_payload: {
-    deep_summary: deepSummary,
+    deep_summary: psychProfileAnalysis.deep_summary,  // Use AI-generated deep_summary
     copywriter_profile: {
       demographics: psychProfileAnalysis.demographics,
       psychographics: psychProfileAnalysis.psychographics,
@@ -359,12 +359,12 @@ private async executePsychographicProfiling(profile: ProfileData, business: any)
   const response = await this.aiAdapter.executeRequest({
     model_name: 'gpt-5-mini', // Downgrade from GPT-5 for cost efficiency
     system_prompt: 'Extract psychological profile from Instagram data. Focus on demographics, psychographics, pain points, and aspirations. Be precise and evidence-based.',
-    user_prompt: `Psychographic Analysis: @${profile.username} (${profile.followersCount})
+user_prompt: `Psychographic Analysis: @${profile.username} (${profile.followersCount})
 
 Bio: "${profile.bio}"
 Content Sample: ${profile.latestPosts?.slice(0, 3).map(p => `"${p.caption?.slice(0, 60)}..."`).join(' | ') || 'No posts'}
 
-Extract observable demographics, psychographics, pain points, and dreams/desires for ${business.target_audience} business context.`,
+Extract observable demographics, psychographics, pain points, and dreams/desires for ${business.target_audience} business context. Also provide a comprehensive deep_summary synthesizing the psychological profile into a cohesive narrative.`,
     max_tokens: 2000,
     json_schema: {
       name: 'PsychographicProfile',
@@ -379,6 +379,7 @@ Extract observable demographics, psychographics, pain points, and dreams/desires
           niche_fit: { type: 'integer', minimum: 0, maximum: 100 },
           quick_summary: { type: 'string', maxLength: 800 },
           confidence_level: { type: 'number', minimum: 0, maximum: 1 },
+          deep_summary: { type: 'string', maxLength: 2000 },
           // Psychographic data
           demographics: { type: 'string', maxLength: 300 },
           psychographics: { type: 'string', maxLength: 400 },
@@ -395,7 +396,7 @@ Extract observable demographics, psychographics, pain points, and dreams/desires
             maxItems: 6 
           }
         },
-        required: ['score', 'engagement_score', 'niche_fit', 'quick_summary', 'confidence_level', 'demographics', 'psychographics', 'pain_points', 'dreams_desires']
+        required: ['score', 'engagement_score', 'niche_fit', 'quick_summary', 'confidence_level', 'deep_summary', 'demographics', 'psychographics', 'pain_points', 'dreams_desires']
       }
     },
     response_format: 'json',
