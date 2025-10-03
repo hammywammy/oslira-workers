@@ -14,7 +14,7 @@ export function getLightAnalysisJsonSchema() {
       additionalProperties: false,
       properties: {
         score: { type: 'integer', minimum: 0, maximum: 100 },
-        summary: { type: 'string', maxLength: 100 },
+        summary: { type: 'string', maxLength: 400 },
         confidence: { type: 'number', minimum: 0.0, maximum: 1.0 }
       },
       required: ['score', 'summary', 'confidence']
@@ -36,7 +36,7 @@ export function getDeepAnalysisJsonSchema() {
         niche_fit: { type: 'integer', minimum: 0, maximum: 100 },
         quick_summary: { 
           type: 'string', 
-          maxLength: 200,
+          maxLength: 600,
           description: 'Short 1-2 sentence summary for dashboard lists'
         },
         confidence_level: { 
@@ -111,7 +111,7 @@ export function getXRayAnalysisJsonSchema() {
         niche_fit: { type: 'integer', minimum: 0, maximum: 100 },
         quick_summary: { 
           type: 'string', 
-          maxLength: 200,
+          maxLength: 800,
           description: 'Short 1-2 sentence summary for dashboard lists'
         },
         confidence_level: { 
@@ -130,6 +130,10 @@ export function getXRayAnalysisJsonSchema() {
               type: 'object',
               additionalProperties: false,
               properties: {
+                    deep_summary: { 
+      type: 'string',
+      description: 'Comprehensive X-Ray analysis explaining psychological profile, commercial intelligence, and persuasion strategy'
+    },
                 demographics: { 
                   type: 'string',
                   description: 'Age, gender, location, lifestyle demographics'
@@ -153,7 +157,7 @@ export function getXRayAnalysisJsonSchema() {
                   description: 'Goals, aspirations, and desired outcomes'
                 }
               },
-              required: ['demographics', 'psychographics', 'pain_points', 'dreams_desires']
+              required: ['deep_summary', 'copywriter_profile', 'commercial_intelligence', 'persuasion_strategy']
             },
             commercial_intelligence: {
               type: 'object',
