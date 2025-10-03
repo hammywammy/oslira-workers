@@ -204,7 +204,7 @@ Score 0-100 for niche fit, engagement, overall match. Generate partnership strat
           score: { type: 'integer', minimum: 0, maximum: 100 },
           engagement_score: { type: 'integer', minimum: 0, maximum: 100 },
           niche_fit: { type: 'integer', minimum: 0, maximum: 100 },
-          quick_summary: { type: 'string', maxLength: 200 },
+          quick_summary: { type: 'string', maxLength: 800 },
           confidence_level: { type: 'number', minimum: 0, maximum: 1 },
           engagement_breakdown: {
             type: 'object',
@@ -295,35 +295,40 @@ Score 0-100 for niche fit, engagement, overall match. Generate partnership strat
     this.executeCommercialIntelligence(profile, business)
   ]);
 
-  // Merge results into X-Ray structure
-  const analysisData = {
-    score: psychProfileAnalysis.score,
-    engagement_score: psychProfileAnalysis.engagement_score,
-    niche_fit: psychProfileAnalysis.niche_fit,
-    quick_summary: psychProfileAnalysis.quick_summary,
-    confidence_level: psychProfileAnalysis.confidence_level,
-    
-    xray_payload: {
-      copywriter_profile: {
-        demographics: psychProfileAnalysis.demographics,
-        psychographics: psychProfileAnalysis.psychographics,
-        pain_points: psychProfileAnalysis.pain_points,
-        dreams_desires: psychProfileAnalysis.dreams_desires
-      },
-      commercial_intelligence: {
-        budget_tier: commercialAnalysis.budget_tier,
-        decision_role: commercialAnalysis.decision_role,
-        buying_stage: commercialAnalysis.buying_stage,
-        objections: commercialAnalysis.objections
-      },
-      persuasion_strategy: {
-        primary_angle: commercialAnalysis.primary_angle,
-        hook_style: commercialAnalysis.hook_style,
-        proof_elements: commercialAnalysis.proof_elements,
-        communication_style: commercialAnalysis.communication_style
-      }
+
+// Generate comprehensive deep summary for X-Ray
+const deepSummary = `Demographics: ${psychProfileAnalysis.demographics}. Psychographics: ${psychProfileAnalysis.psychographics}. Pain Points: ${psychProfileAnalysis.pain_points.join('; ')}. Dreams: ${psychProfileAnalysis.dreams_desires.join('; ')}. Commercial Profile: ${commercialAnalysis.budget_tier} budget tier, ${commercialAnalysis.decision_role} decision role, ${commercialAnalysis.buying_stage} buying stage. Persuasion Strategy: Use ${commercialAnalysis.primary_angle} angle with ${commercialAnalysis.hook_style} hook style. Communication: ${commercialAnalysis.communication_style} tone.`;
+
+// Merge results into X-Ray structure
+const analysisData = {
+  score: psychProfileAnalysis.score,
+  engagement_score: psychProfileAnalysis.engagement_score,
+  niche_fit: psychProfileAnalysis.niche_fit,
+  quick_summary: psychProfileAnalysis.quick_summary,
+  confidence_level: psychProfileAnalysis.confidence_level,
+  
+  xray_payload: {
+    deep_summary: deepSummary,
+    copywriter_profile: {
+      demographics: psychProfileAnalysis.demographics,
+      psychographics: psychProfileAnalysis.psychographics,
+      pain_points: psychProfileAnalysis.pain_points,
+      dreams_desires: psychProfileAnalysis.dreams_desires
+    },
+    commercial_intelligence: {
+      budget_tier: commercialAnalysis.budget_tier,
+      decision_role: commercialAnalysis.decision_role,
+      buying_stage: commercialAnalysis.buying_stage,
+      objections: commercialAnalysis.objections
+    },
+    persuasion_strategy: {
+      primary_angle: commercialAnalysis.primary_angle,
+      hook_style: commercialAnalysis.hook_style,
+      proof_elements: commercialAnalysis.proof_elements,
+      communication_style: commercialAnalysis.communication_style
     }
-  };
+  }
+};
 
   const processingTime = Date.now() - startTime;
   const totalCost = psychProfileAnalysis.cost + commercialAnalysis.cost;
@@ -372,7 +377,7 @@ Extract observable demographics, psychographics, pain points, and dreams/desires
           score: { type: 'integer', minimum: 0, maximum: 100 },
           engagement_score: { type: 'integer', minimum: 0, maximum: 100 },
           niche_fit: { type: 'integer', minimum: 0, maximum: 100 },
-          quick_summary: { type: 'string', maxLength: 200 },
+          quick_summary: { type: 'string', maxLength: 800 },
           confidence_level: { type: 'number', minimum: 0, maximum: 1 },
           // Psychographic data
           demographics: { type: 'string', maxLength: 300 },
