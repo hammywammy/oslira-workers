@@ -162,10 +162,38 @@ export async function insertAnalysisRun(
       niche_fit_score: Math.round(parseFloat(analysisResult.niche_fit) || 0),
       engagement_score: Math.round(parseFloat(analysisResult.engagement_score) || 0),
       
-      summary_text: analysisResult.summary || 
-                   analysisResult.quick_summary || 
-                   analysisResult.summary_text ||
-                   `${analysisType} analysis completed - Score: ${Math.round(parseFloat(analysisResult.score) || 0)}/100`,
+summary_text: (() => {
+  // Store appropriate summary based on analysis depth
+  switch(analysisType) {
+    case 'light':
+      // Light has only quick summary
+      return analysisResult.summary || 
+             analysisResult.quick_summary || 
+             `Light analysis completed - Score: ${Math.round(parseFloat(analysisResult.score) || 0)}/100`;
+    
+    case 'deep':
+      // Deep should store FULL deep_summary in runs table
+      return analysisResult.deep_payload?.deep_summary || 
+             analysisResult.deep_summary || 
+             analysisResult.quick_summary || 
+             `Deep analysis completed - Score: ${Math.round(parseFloat(analysisResult.score) || 0)}/100`;
+    
+    case 'xray':
+      // X-Ray should construct comprehensive summary from profile data
+      const xrayPayload = analysisResult.xray_payload;
+      if (xrayPayload?.copywriter_profile?.demographics) {
+        const demo = xrayPayload.copywriter_profile.demographics;
+        const psych = xrayPayload.copywriter_profile.psychographics;
+        const commercial = xrayPayload.commercial_intelligence;
+        return `Demographics: ${demo}. Psychographics: ${psych}. Budget tier: ${commercial?.budget_tier || 'unknown'}. ${analysisResult.quick_summary || ''}`.slice(0, 2000);
+      }
+      return analysisResult.quick_summary || 
+             `X-Ray analysis completed - Score: ${Math.round(parseFloat(analysisResult.score) || 0)}/100`;
+    
+    default:
+      return `Analysis completed - Score: ${Math.round(parseFloat(analysisResult.score) || 0)}/100`;
+  }
+})(),
       confidence_level: parseFloat(analysisResult.confidence_level) || 
                        parseFloat(analysisResult.confidence) || 
                        (analysisType === 'light' ? 0.6 : analysisType === 'deep' ? 0.75 : 0.85),
