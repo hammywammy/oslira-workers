@@ -164,30 +164,23 @@ export async function insertAnalysisRun(
       
 summary_text: (() => {
   // Store appropriate summary based on analysis depth
+summary_text: (() => {
   switch(analysisType) {
     case 'light':
-      // Light has only quick summary
       return analysisResult.summary || 
              analysisResult.quick_summary || 
              `Light analysis completed - Score: ${Math.round(parseFloat(analysisResult.score) || 0)}/100`;
     
     case 'deep':
-      // Deep should store FULL deep_summary in runs table
       return analysisResult.deep_payload?.deep_summary || 
              analysisResult.deep_summary || 
              analysisResult.quick_summary || 
              `Deep analysis completed - Score: ${Math.round(parseFloat(analysisResult.score) || 0)}/100`;
     
     case 'xray':
-      // X-Ray should construct comprehensive summary from profile data
-      const xrayPayload = analysisResult.xray_payload;
-      if (xrayPayload?.copywriter_profile?.demographics) {
-        const demo = xrayPayload.copywriter_profile.demographics;
-        const psych = xrayPayload.copywriter_profile.psychographics;
-        const commercial = xrayPayload.commercial_intelligence;
-        return `Demographics: ${demo}. Psychographics: ${psych}. Budget tier: ${commercial?.budget_tier || 'unknown'}. ${analysisResult.quick_summary || ''}`.slice(0, 2000);
-      }
-      return analysisResult.quick_summary || 
+      return analysisResult.xray_payload?.deep_summary || 
+             analysisResult.deep_summary || 
+             analysisResult.quick_summary || 
              `X-Ray analysis completed - Score: ${Math.round(parseFloat(analysisResult.score) || 0)}/100`;
     
     default:
