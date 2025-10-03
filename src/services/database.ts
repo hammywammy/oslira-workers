@@ -284,14 +284,15 @@ export async function insertAnalysisPayload(
         };
         break;
         
-      case 'xray':
-        const xrayData = analysisData.xray_payload || analysisData;
-        structuredPayload = {
-          copywriter_profile: xrayData.copywriter_profile || {},
-          commercial_intelligence: xrayData.commercial_intelligence || {},
-          persuasion_strategy: xrayData.persuasion_strategy || {}
-        };
-        break;
+case 'xray':
+  const xrayData = analysisData.xray_payload || analysisData;
+  structuredPayload = {
+    deep_summary: xrayData.deep_summary || null,
+    copywriter_profile: xrayData.copywriter_profile || {},
+    commercial_intelligence: xrayData.commercial_intelligence || {},
+    persuasion_strategy: xrayData.persuasion_strategy || {}
+  };
+  break;
         
       default:
         structuredPayload = analysisData;
