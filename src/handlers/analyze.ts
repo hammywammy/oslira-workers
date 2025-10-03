@@ -53,15 +53,52 @@ export async function handleAnalyze(c: Context<{ Bindings: Env }>): Promise<Resp
         requestId
       });
       
-    } catch (scrapeError: any) {
-      logger('error', 'Profile scraping failed', { error: scrapeError.message, requestId });
+} catch (scrapeError: any) {
+  logger('error', 'Profile scraping failed', { error: scrapeError.message, requestId });
+  
+  // If profile not found, charge 1 token before returning error
+  if (scrapeError.message.includes('not found') || scrapeError.message.includes('does not exist')) {
+    try {
+      const { updateCreditsAndTransaction } = await import('../services/database.js');
+      
+      // Charge 1 token for failed lookup
+      const failedRunId = 'failed-' + requestId;
+      await updateCreditsAndTransaction(
+        user_id,
+        1, // Cost 1 token
+        analysis_type,
+        failedRunId,
+        {
+          actual_cost: 0,
+          tokens_in: 0,
+          tokens_out: 0,
+          model_used: 'none',
+          block_type: 'profile_not_found',
+          processing_duration_ms: 0
+        },
+        c.env
+      );
+      
+      logger('info', 'Charged 1 token for profile not found', { username, user_id, requestId });
+      
       return c.json(createStandardResponse(
         false, 
         undefined, 
-        `Profile scraping failed: ${scrapeError.message}`, 
+        'User does not exist. 1 token has been charged.', 
         requestId
-      ), 400);
+      ), 404);
+    } catch (chargeError: any) {
+      logger('error', 'Failed to charge token for not found error', { error: chargeError.message, requestId });
     }
+  }
+  
+  return c.json(createStandardResponse(
+    false, 
+    undefined, 
+    `Profile scraping failed: ${scrapeError.message}`, 
+    requestId
+  ), 400);
+}
 
     // Pre-screen for light analysis (early exit optimization)
     if (analysis_type === 'light') {
