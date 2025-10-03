@@ -112,10 +112,19 @@ export async function upsertLead(
       throw new Error('Failed to create/update lead record - no data returned');
     }
 
-    const lead_id = leadResult[0].lead_id;
-    logger('info', 'Lead upserted successfully', { lead_id, username: leadData.username });
-    
-    return lead_id;
+const lead_id = leadResult[0].lead_id;
+
+// Ensure last_updated_at is refreshed on every analysis
+const updateQuery = `${supabaseUrl}/rest/v1/leads?lead_id=eq.${lead_id}`;
+await fetch(updateQuery, {
+  method: 'PATCH',
+  headers,
+  body: JSON.stringify({ last_updated_at: new Date().toISOString() })
+});
+
+logger('info', 'Lead upserted successfully', { lead_id, username: leadData.username });
+
+return lead_id;
 
   } catch (error: any) {
     logger('error', 'upsertLead failed', { error: error.message });
