@@ -73,18 +73,44 @@ async function scrapeWithConfigs(
       });
 
       const url = buildScraperUrl(config.endpoint, token);
-      const response = await callWithRetry(url, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'User-Agent': 'InstagramAnalyzer/3.0'
-        },
-        body: JSON.stringify(config.input(username))
-      }, config.maxRetries, config.retryDelay, config.timeout);
+const response = await callWithRetry(url, {
+  method: 'POST',
+  headers: { 
+    'Content-Type': 'application/json',
+    'User-Agent': 'InstagramAnalyzer/3.0'
+  },
+  body: JSON.stringify(config.input(username))
+}, config.maxRetries, config.retryDelay, config.timeout);
 
-      if (!response || !Array.isArray(response) || response.length === 0) {
-        throw new Error(`${config.name} returned no usable data`);
-      }
+// Check for error response from Apify
+if (!response || !Array.isArray(response) || response.length === 0) {
+  throw new Error(`${config.name} returned no usable data`);
+}
+
+const firstItem = response[0];
+
+// Detect Apify error responses
+if (firstItem.error || firstItem.errorDescription) {
+  const errorType = firstItem.error || 'unknown_error';
+  const errorDesc = firstItem.errorDescription || 'An error occurred';
+  
+  logger('warn', 'Apify returned error response', { 
+    username, 
+    error: errorType, 
+    description: errorDesc 
+  });
+  
+  if (errorType === 'not_found' || errorDesc.toLowerCase().includes('does not exist') || errorDesc.toLowerCase().includes('not found')) {
+    throw new Error('Instagram profile not found');
+  }
+  
+  throw new Error(`Scraper error: ${errorDesc}`);
+}
+
+// Validate username exists
+if (!firstItem.username && !firstItem.handle) {
+  throw new Error('No valid profile data returned');
+}
 
       // Transform using scraper-specific field mapping
       const rawData = response[0];
