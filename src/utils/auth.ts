@@ -41,14 +41,14 @@ async function verifyJWTSignature(token: string, env: Env): Promise<boolean> {
   try {
     const { getApiKey } = await import('../services/enhanced-config-manager.js');
     const supabaseUrl = await getApiKey('SUPABASE_URL', env, env.APP_ENV);
-    const serviceRole = await getApiKey('SUPABASE_SERVICE_ROLE', env, env.APP_ENV);
-    
-    const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'apikey': serviceRole
-      }
-    });
+const anonKey = await getApiKey('SUPABASE_ANON_KEY', env, env.APP_ENV);
+
+const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+  headers: {
+    'Authorization': `Bearer ${token}`,
+    'apikey': anonKey
+  }
+});
 
     return response.ok;
 
