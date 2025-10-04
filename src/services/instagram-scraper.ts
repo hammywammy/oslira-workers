@@ -187,6 +187,20 @@ function buildEnhancedProfile(
   profile.scraperUsed = scraperUsed;
   profile.dataQuality = determineDataQuality(profile, analysisType);
   
+  // NEW: Run pre-processing for deep/xray analysis
+  if ((analysisType === 'deep' || analysisType === 'xray') && profile.latestPosts.length > 0) {
+    const { runPreProcessing } = require('./pre-processor.js');
+    const preProcessed = runPreProcessing(profile);
+    
+    // Attach pre-processed data to profile
+    (profile as any).preProcessed = preProcessed;
+    
+    logger('info', 'Pre-processing attached to profile', {
+      username: profile.username,
+      hasSummary: !!preProcessed.summary
+    });
+  }
+  
   return profile;
 }
 
