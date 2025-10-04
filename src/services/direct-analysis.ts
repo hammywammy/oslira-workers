@@ -661,7 +661,7 @@ private async executePersonalityAnalysis(profile: ProfileData): Promise<any> {
       model_name: 'gpt-5-mini',
       system_prompt: 'DISC personality expert analyzing social media. Base analysis ONLY on observable behavior. NO business context. Be honest about AI vs human content.',
       user_prompt: buildPersonalityAnalysisPrompt(profile),
-      max_tokens: 600,
+      max_tokens: 2000,
       json_schema: getPersonalityAnalysisJsonSchema(),
       response_format: 'json',
       temperature: 0.3,
