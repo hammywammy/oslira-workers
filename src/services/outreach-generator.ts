@@ -1,3 +1,8 @@
+// ===============================================================================
+// OUTREACH GENERATOR - COMPLETE REWRITE
+// Token limit increased to 2000, prompts condensed, maximized intelligence
+// ===============================================================================
+
 import { UniversalAIAdapter } from './universal-ai-adapter.js';
 import { logger } from '../utils/logger.js';
 import type { ProfileData } from '../types/interfaces.js';
@@ -45,165 +50,56 @@ export class OutreachGenerator {
       requestId: this.requestId
     });
 
-    // VALIDATION PHASE
-    const validation = this.validateInputs(profile, business);
-    if (!validation.isValid) {
+    // Quick validation
+    if (!profile?.username || !business?.business_name) {
       logger('error', '❌ Outreach validation failed', {
-        errors: validation.errors,
+        hasProfile: !!profile,
+        hasUsername: !!profile?.username,
+        hasBusiness: !!business,
+        hasBusinessName: !!business?.business_name,
         requestId: this.requestId
       });
       
-      return this.createErrorResponse(validation.errors.join(', '));
+      return {
+        outreach_message: 'Outreach generation failed: Missing profile or business data',
+        cost: 0,
+        tokens_in: 0,
+        tokens_out: 0,
+        model_used: 'error'
+      };
     }
 
-    // SAFE DATA EXTRACTION
-    const safeData = this.extractSafeData(profile, business, analysisContext);
-    
-    logger('info', '✅ Outreach data extracted', {
-      username: safeData.username,
-      followerCount: safeData.followerCount,
-      businessOffering: safeData.businessOffering,
-      hasContextPrompt: !!safeData.contextPrompt,
-      requestId: this.requestId
-    });
-
-    // AI GENERATION
     try {
-      return await this.executeAIGeneration(safeData);
+      return await this.executeGeneration(profile, business, analysisContext);
     } catch (error: any) {
-      logger('error', '❌ Outreach AI generation failed', {
+      logger('error', '❌ Outreach generation failed', {
         error: error.message,
         stack: error.stack,
-        username: safeData.username,
-        requestId: this.requestId
-      });
-      
-      return this.createErrorResponse(error.message);
-    }
-  }
-
-  private validateInputs(profile: ProfileData, business: BusinessProfile): { 
-    isValid: boolean; 
-    errors: string[] 
-  } {
-    const errors: string[] = [];
-
-    // Profile validation
-    if (!profile) {
-      errors.push('Profile is null/undefined');
-    } else {
-      logger('info', '🔍 Profile validation', {
-        hasUsername: !!profile.username,
         username: profile.username,
-        hasFollowerCount: profile.followersCount !== undefined,
-        hasBio: !!profile.bio,
         requestId: this.requestId
       });
-
-      if (!profile.username) {
-        errors.push('Profile missing username');
-      }
-    }
-
-    // Business validation
-    if (!business) {
-      errors.push('Business is null/undefined');
-    } else {
-      logger('info', '🔍 Business validation', {
-        hasBusinessName: !!business.business_name,
-        businessName: business.business_name,
-        hasOneLiner: !!business.business_one_liner,
-        hasTargetAudience: !!business.target_audience,
-        businessKeys: Object.keys(business),
-        requestId: this.requestId
-      });
-
-      if (!business.business_name) {
-        errors.push('Business missing business_name');
-      }
-    }
-
-    return {
-      isValid: errors.length === 0,
-      errors
-    };
-  }
-
-  private extractSafeData(
-    profile: ProfileData, 
-    business: BusinessProfile, 
-    analysisContext?: AnalysisContext
-  ) {
-    const username = profile.username || 'Unknown';
-    const followerCount = profile.followersCount ?? 0;
-    const bio = profile.bio ?? 'No bio available';
-    const isVerified = profile.isVerified ?? false;
-    const isBusinessAccount = profile.isBusinessAccount ?? false;
-    const businessOffering = business.business_one_liner ?? business.target_audience ?? 'Creator services';
-    
-    let contextPrompt = '';
-    if (analysisContext) {
-      const score = analysisContext.score ?? 'N/A';
-      const nicheFit = analysisContext.niche_fit ?? 'N/A';
-      const insights = analysisContext.key_insights ?? 'Standard outreach';
-      const audienceType = analysisContext.audience_type ?? 'General';
       
-      contextPrompt = `
-Context from analysis:
-- Partnership Score: ${score}/100
-- Niche Fit: ${nicheFit}/100
-- Key Insight: ${insights}
-- Audience Type: ${audienceType}`;
+      return {
+        outreach_message: `Outreach generation failed: ${error.message}`,
+        cost: 0,
+        tokens_in: 0,
+        tokens_out: 0,
+        model_used: 'error'
+      };
     }
-
-    return {
-      username,
-      followerCount,
-      bio,
-      isVerified,
-      isBusinessAccount,
-      businessName: business.business_name,
-      businessOffering,
-      contextPrompt
-    };
   }
 
-  private async executeAIGeneration(safeData: any): Promise<OutreachResult> {
-    logger('info', '🤖 AI generation starting', {
-      username: safeData.username,
-      requestId: this.requestId
-    });
-
+  private async executeGeneration(
+    profile: ProfileData, 
+    business: BusinessProfile,
+    context?: AnalysisContext
+  ): Promise<OutreachResult> {
+    
     const response = await this.aiAdapter.executeRequest({
       model_name: 'gpt-5-mini',
-      system_prompt: `You are an expert at writing personalized influencer outreach messages. 
-      
-Rules:
-- Address them by name/username personally
-- Reference specific details from their profile (follower count, niche, bio)
-- Show genuine interest in their content/audience
-- Clearly state the collaboration opportunity
-- Include specific value proposition
-- End with clear call-to-action
-- Keep 150-250 words
-- Professional but friendly tone
-- Never use generic templates
-
-Focus on mutual benefit and be specific about the opportunity.`,
-      user_prompt: `Write outreach message for partnership:
-
-Profile: @${safeData.username}
-Followers: ${safeData.followerCount.toLocaleString()}
-Bio: "${safeData.bio}"
-Verified: ${safeData.isVerified ? 'Yes' : 'No'}
-Business Account: ${safeData.isBusinessAccount ? 'Yes' : 'No'}
-
-Your Business: ${safeData.businessName}
-Offering: ${safeData.businessOffering}
-${safeData.contextPrompt}
-
-Write a compelling, personalized outreach message.`,
-      max_tokens: 1500,
+      system_prompt: 'Write concise partnership outreach. Keep under 150 words. Personal, specific, direct.',
+      user_prompt: this.buildPrompt(profile, business, context),
+      max_tokens: 2000,
       json_schema: {
         name: 'OutreachMessage',
         strict: true,
@@ -211,7 +107,7 @@ Write a compelling, personalized outreach message.`,
           type: 'object',
           additionalProperties: false,
           properties: {
-            outreach_message: { type: 'string', maxLength: 1000 }
+            outreach_message: { type: 'string', maxLength: 800 }
           },
           required: ['outreach_message']
         }
@@ -232,8 +128,8 @@ Write a compelling, personalized outreach message.`,
 
     const parsed = JSON.parse(response.content);
     
-    logger('info', '✅ Outreach generated successfully', {
-      username: safeData.username,
+    logger('info', '✅ Outreach generated', {
+      username: profile.username,
       messageLength: parsed.outreach_message?.length ?? 0,
       cost: response.usage.total_cost,
       requestId: this.requestId
@@ -248,13 +144,40 @@ Write a compelling, personalized outreach message.`,
     };
   }
 
-  private createErrorResponse(errorMessage: string): OutreachResult {
-    return {
-      outreach_message: `Outreach generation failed: ${errorMessage}`,
-      cost: 0,
-      tokens_in: 0,
-      tokens_out: 0,
-      model_used: 'error'
-    };
+  private buildPrompt(
+    profile: ProfileData, 
+    business: BusinessProfile, 
+    context?: AnalysisContext
+  ): string {
+    
+    const bio = profile.bio?.slice(0, 100) || 'No bio';
+    const followers = profile.followersCount?.toLocaleString() || '0';
+    const businessDesc = business.business_one_liner || business.target_audience || business.business_name;
+    
+    let prompt = `Outreach to @${profile.username}
+
+Bio: "${bio}"
+Followers: ${followers}${profile.isVerified ? ' ✓' : ''}
+
+Your Company: ${business.business_name}
+What You Do: ${businessDesc}`;
+
+    if (context) {
+      prompt += `\nFit Score: ${context.score || 'N/A'}/100`;
+      if (context.key_insights) {
+        prompt += `\nInsight: ${context.key_insights.slice(0, 80)}`;
+      }
+    }
+
+    prompt += `\n\nWrite personalized DM:
+- Use their name
+- Reference bio/niche
+- State opportunity clearly
+- Show mutual value
+- 100-150 words max
+- Professional but warm
+- End with clear next step`;
+
+    return prompt;
   }
 }
