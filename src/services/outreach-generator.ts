@@ -10,6 +10,12 @@ export interface OutreachResult {
   model_used: string;
 }
 
+interface BusinessProfile {
+  business_name: string;
+  business_one_liner?: string;
+  target_audience?: string;
+}
+
 export class OutreachGenerator {
   private aiAdapter: UniversalAIAdapter;
   private requestId: string;
@@ -19,28 +25,61 @@ export class OutreachGenerator {
     this.requestId = requestId;
   }
 
-  async generate(
-    profile: ProfileData, 
-    business: any,
-    analysisContext?: {
-      score?: number;
-      niche_fit?: number;
-      key_insights?: string;
-      audience_type?: string;
-    }
-  ): Promise<OutreachResult> {
+async generate(
+  profile: ProfileData, 
+  business: BusinessProfile,
+  analysisContext?: { ... }
+): Promise<OutreachResult>
+  
+  // Validate required inputs
+  const validationErrors: string[] = [];
+  
+  if (!profile) validationErrors.push('Profile is null/undefined');
+  if (!business) validationErrors.push('Business is null/undefined');
+  if (profile && !profile.username) validationErrors.push('Profile missing username');
+  if (business && !business.business_name) validationErrors.push('Business missing business_name');
+  
+  if (validationErrors.length > 0) {
+    logger('error', 'Outreach generation validation failed', {
+      errors: validationErrors,
+      hasProfile: !!profile,
+      hasBusiness: !!business,
+      requestId: this.requestId
+    });
     
-    // Build context-aware prompt
-    let contextPrompt = '';
-    if (analysisContext) {
-      contextPrompt = `
-Context from analysis:
-- Partnership Score: ${analysisContext.score || 'N/A'}/100
-- Niche Fit: ${analysisContext.niche_fit || 'N/A'}/100
-- Key Insight: ${analysisContext.key_insights || 'Standard outreach'}
-- Audience Type: ${analysisContext.audience_type || 'General'}`;
-    }
+    return {
+      outreach_message: `Outreach generation failed: ${validationErrors.join(', ')}`,
+      cost: 0,
+      tokens_in: 0,
+      tokens_out: 0,
+      model_used: 'validation-failed'
+    };
+  }
 
+  // Safe extraction with defaults
+  const followerCount = profile.followersCount ?? 0;
+  const bio = profile.bio ?? 'No bio available';
+  const isVerified = profile.isVerified ?? false;
+  const isBusinessAccount = profile.isBusinessAccount ?? false;
+  const businessOffering = business.business_one_liner ?? business.target_audience ?? 'Creator services';
+  
+  // Build context string
+  let contextPrompt = '';
+  if (analysisContext) {
+    const score = analysisContext.score ?? 'N/A';
+    const nicheFit = analysisContext.niche_fit ?? 'N/A';
+    const insights = analysisContext.key_insights ?? 'Standard outreach';
+    const audienceType = analysisContext.audience_type ?? 'General';
+    
+    contextPrompt = `
+Context from analysis:
+- Partnership Score: ${score}/100
+- Niche Fit: ${nicheFit}/100
+- Key Insight: ${insights}
+- Audience Type: ${audienceType}`;
+  }
+
+  try {
     const response = await this.aiAdapter.executeRequest({
       model_name: 'gpt-5-mini',
       system_prompt: `You are an expert at writing personalized influencer outreach messages. 
@@ -60,13 +99,13 @@ Focus on mutual benefit and be specific about the opportunity.`,
       user_prompt: `Write outreach message for partnership:
 
 Profile: @${profile.username}
-Followers: ${profile.followersCount.toLocaleString()}
-Bio: "${profile.bio || 'No bio'}"
-Verified: ${profile.isVerified ? 'Yes' : 'No'}
-Business Account: ${profile.isBusinessAccount ? 'Yes' : 'No'}
+Followers: ${followerCount.toLocaleString()}
+Bio: "${bio}"
+Verified: ${isVerified ? 'Yes' : 'No'}
+Business Account: ${isBusinessAccount ? 'Yes' : 'No'}
 
 Your Business: ${business.business_name}
-Offering: ${business.business_one_liner || business.target_audience}
+Offering: ${businessOffering}
 ${contextPrompt}
 
 Write a compelling, personalized outreach message.`,
@@ -92,17 +131,32 @@ Write a compelling, personalized outreach message.`,
     
     logger('info', 'Outreach generated', {
       username: profile.username,
-      message_length: parsed.outreach_message.length,
+      message_length: parsed.outreach_message?.length ?? 0,
       cost: response.usage.total_cost,
       requestId: this.requestId
     });
 
     return {
-      outreach_message: parsed.outreach_message,
+      outreach_message: parsed.outreach_message ?? 'Generation failed',
       cost: response.usage.total_cost,
       tokens_in: response.usage.input_tokens,
       tokens_out: response.usage.output_tokens,
       model_used: response.model_used
+    };
+    
+  } catch (error: any) {
+    logger('error', 'Outreach generation API call failed', {
+      error: error.message,
+      username: profile.username,
+      requestId: this.requestId
+    });
+    
+    return {
+      outreach_message: `Outreach generation failed: ${error.message}`,
+      cost: 0,
+      tokens_in: 0,
+      tokens_out: 0,
+      model_used: 'error'
     };
   }
 }
