@@ -35,13 +35,31 @@ async generate(
   }
 ): Promise<OutreachResult> {
   
-  // Validate required inputs
-  const validationErrors: string[] = [];
+// Validate required inputs with detailed logging
+const validationErrors: string[] = [];
+
+if (!profile) {
+  validationErrors.push('Profile is null/undefined');
+} else if (!profile.username) {
+  validationErrors.push('Profile missing username');
+}
+
+if (!business) {
+  validationErrors.push('Business is null/undefined');
+} else {
+  // Log business object structure for debugging
+  logger('info', 'Business object structure', {
+    hasBusinessName: !!business.business_name,
+    hasOneLiner: !!business.business_one_liner,
+    hasTargetAudience: !!business.target_audience,
+    businessKeys: Object.keys(business),
+    requestId: this.requestId
+  });
   
-  if (!profile) validationErrors.push('Profile is null/undefined');
-  if (!business) validationErrors.push('Business is null/undefined');
-  if (profile && !profile.username) validationErrors.push('Profile missing username');
-  if (business && !business.business_name) validationErrors.push('Business missing business_name');
+  if (!business.business_name) {
+    validationErrors.push('Business missing business_name');
+  }
+}
   
   if (validationErrors.length > 0) {
     logger('error', 'Outreach generation validation failed', {
