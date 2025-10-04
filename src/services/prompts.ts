@@ -234,29 +234,37 @@ export function buildDeepAnalysisPrompt(
     preprocessor?: any;
   }
 ): string {
-  const hasEngagement = profile.engagement?.postsAnalyzed > 0;
-  const engagementData = hasEngagement 
-    ? `${profile.engagement.engagementRate}% ER (${profile.engagement.avgLikes} likes, ${profile.engagement.avgComments} comments, ${profile.engagement.postsAnalyzed} posts)`
-    : `No engagement data (${profile.followersCount} followers)`;
-
-  const recentContent = profile.latestPosts?.slice(0, 2).map(p => 
-    `"${p.caption?.slice(0, 40)}..." (${p.likesCount} likes)`
-  ).join(' | ') || 'No recent posts';
-
-  return `PARTNERSHIP ANALYSIS
+  const preProcessed = (profile as any).preProcessed;
+  
+  let prompt = `PARTNERSHIP ANALYSIS
 
 Profile: @${profile.username}
 Followers: ${profile.followersCount.toLocaleString()} | Posts: ${profile.postsCount}
 Bio: "${profile.bio || 'None'}"
 Status: ${profile.isVerified ? 'Verified' : 'Unverified'} ${profile.isBusinessAccount ? 'Business' : 'Personal'}
-Contact: ${profile.externalUrl ? 'Has link' : 'No link'}
-Engagement: ${engagementData}
-Recent: ${recentContent}
+Contact: ${profile.externalUrl ? 'Has link' : 'No link'}`;
 
-Business: ${business.name} targeting ${business.target_audience}
+  // Use pre-processed summary if available
+  if (preProcessed?.summary) {
+    prompt += `\n\nDATA INTELLIGENCE:\n${preProcessed.summary}`;
+  } else if (profile.engagement) {
+    const eng = profile.engagement;
+    prompt += `\nEngagement: ${eng.engagementRate}% ER (${eng.avgLikes} likes, ${eng.avgComments} comments, ${eng.postsAnalyzed} posts)`;
+  }
+
+  // Add sample content
+  const recentContent = profile.latestPosts?.slice(0, 2).map(p => 
+    `"${p.caption?.slice(0, 40)}..." (${p.likesCount} likes)`
+  ).join(' | ') || 'No recent posts';
+  
+  prompt += `\nRecent Content: ${recentContent}`;
+
+  prompt += `\n\nBusiness: ${business.name} targeting ${business.target_audience}
 
 Score collaboration potential (0-100) and generate outreach strategy.
 Return JSON with deep_summary, selling_points, outreach_message, engagement_breakdown, audience_insights, reasons.`;
+
+  return prompt;
 }
 
 export function buildXRayAnalysisPrompt(
@@ -267,20 +275,33 @@ export function buildXRayAnalysisPrompt(
     preprocessor?: any;
   }
 ): string {
-  const contentSample = profile.latestPosts?.slice(0, 3).map(p => 
-    `"${p.caption?.slice(0, 50)}..." (${p.likesCount}♡ ${p.commentsCount}💬)`
-  ).join(' | ') || 'No posts';
-
-  return `X-RAY PROFILE ANALYSIS
+  const preProcessed = (profile as any).preProcessed;
+  
+  let prompt = `X-RAY PROFILE ANALYSIS
 
 @${profile.username} (${profile.followersCount} followers)
 Bio: "${profile.bio || 'None'}"
-Type: ${profile.isVerified ? '✓' : ''}${profile.isBusinessAccount ? 'Biz' : 'Personal'}
-Content: ${contentSample}
+Type: ${profile.isVerified ? '✓' : ''}${profile.isBusinessAccount ? 'Biz' : 'Personal'}`;
 
-Extract observable demographics, psychographics, pain_points, dreams_desires from visible data only.
+  // Add pre-processed intelligence if available
+  if (preProcessed?.summary) {
+    prompt += `\n\nDATA INTELLIGENCE:\n${preProcessed.summary}`;
+  } else if (profile.engagement) {
+    prompt += `\nEngagement: ${profile.engagement.engagementRate}% ER (${profile.engagement.postsAnalyzed} posts)`;
+  }
+
+  // Add content sample
+  const contentSample = profile.latestPosts?.slice(0, 3).map(p => 
+    `"${p.caption?.slice(0, 50)}..." (${p.likesCount}♡ ${p.commentsCount}💬)`
+  ).join(' | ') || 'No posts';
+  
+  prompt += `\nContent Sample: ${contentSample}`;
+
+  prompt += `\n\nExtract observable demographics, psychographics, pain_points, dreams_desires from visible data only.
 Score partnership viability for ${business.target_audience} business.
-Return JSON with xray_payload structure.`;
+Return JSON with xray_payload structure including deep_summary, copywriter_profile, commercial_intelligence, persuasion_strategy.`;
+
+  return prompt;
 }
 
 export function buildMarketCompletionPrompt(
@@ -530,20 +551,23 @@ JSON only.`;
 export function buildSpeedLightAnalysisPrompt(
   profile: ProfileData, 
   business: BusinessProfile
-): string {    
-  const prompt = `Score @${profile.username} (${profile.followersCount} followers) for: ${business.business_one_liner || business.target_audience || business.business_name}
+): string {
+  // Check for pre-processed data
+  const preProcessed = (profile as any).preProcessed;
+  
+  let prompt = `Score @${profile.username} (${profile.followersCount} followers) for: ${business.business_one_liner || business.target_audience || business.business_name}
 
 Bio: "${profile.bio || 'No bio'}"
-Business: ${profile.isBusinessAccount ? 'Yes' : 'No'}
+Business: ${profile.isBusinessAccount ? 'Yes' : 'No'}`;
 
-Return JSON: {"score": 0-100, "summary": "one sentence why", "confidence": 0.8}`;
+  // Add pre-computed metrics if available
+  if (preProcessed?.summary) {
+    prompt += `\n\nPRE-COMPUTED METRICS:\n${preProcessed.summary}`;
+  } else if (profile.engagement) {
+    prompt += `\nEngagement: ${profile.engagement.engagementRate}% (${profile.engagement.postsAnalyzed} posts)`;
+  }
 
-  logger('info', 'Speed light analysis prompt', { 
-    prompt, 
-    business_one_liner: business.business_one_liner,
-    target_audience: business.target_audience,
-    business_name: business.business_name
-  });
+  prompt += `\n\nReturn JSON: {"score": 0-100, "summary": "one sentence why", "confidence": 0.8}`;
 
   return prompt;
 }
