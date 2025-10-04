@@ -65,10 +65,10 @@ async function verifyJWTSignature(token: string, env: Env): Promise<boolean> {
 export async function extractUserFromJWT(token: string, env: Env, requestId: string = 'default'): Promise<AuthResult> {
   try {
     const { getApiKey } = await import('../services/enhanced-config-manager.js');
-const supabaseUrl = await getApiKey('SUPABASE_URL', env, env.APP_ENV);
-const supabaseKey = await getApiKey('SUPABASE_SERVICE_ROLE', env, env.APP_ENV);
+    const supabaseUrl = await getApiKey('SUPABASE_URL', env, env.APP_ENV);
+    const supabaseAnonKey = await getApiKey('SUPABASE_ANON_KEY', env, env.APP_ENV);
     
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
     
     const { data: { user }, error } = await supabase.auth.getUser(token);
     
