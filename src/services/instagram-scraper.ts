@@ -96,6 +96,19 @@ const response = await callWithRetry(url, {
   body: JSON.stringify(config.input(username))
 }, config.maxRetries, config.retryDelay, config.timeout);
 
+// EXTENSIVE LOGGING: Raw response structure
+logger('info', '📦 RAW SCRAPER RESPONSE RECEIVED', {
+  scraper: config.name,
+  username,
+  analysisType,
+  responseType: Array.isArray(response) ? 'array' : typeof response,
+  responseLength: Array.isArray(response) ? response.length : 'N/A',
+  firstItemKeys: response && response[0] ? Object.keys(response[0]).slice(0, 20) : [],
+  hasLatestPosts: response && response[0] && response[0].latestPosts ? true : false,
+  latestPostsCount: response && response[0] && response[0].latestPosts ? response[0].latestPosts.length : 0,
+  postsCount: response && response[0] && response[0].postsCount ? response[0].postsCount : 0
+});
+
 // Check for error response from Apify
 if (!response || !Array.isArray(response) || response.length === 0) {
   throw new Error(`${config.name} returned no usable data`);
@@ -126,31 +139,66 @@ if (!firstItem.username && !firstItem.handle) {
   throw new Error('No valid profile data returned');
 }
 
-      // Transform using scraper-specific field mapping
-      const rawData = response[0];
-      const transformedData = validateAndTransformScraperData(rawData, config);
-      
-      logger('info', 'Scraper data transformation', {
-        scraper: config.name,
-        username: transformedData.username,
-        followers: transformedData.followersCount,
-        following: transformedData.followingCount,
-        originalFollowing: rawData.followsCount || rawData.followingCount,
-        transformedFollowing: transformedData.followingCount
-      });
-
-      // Enhanced profile building for deep/xray analysis
-      let profileData: ProfileData;
-      
-      if (analysisType === 'light') {
-        profileData = buildLightProfile(transformedData, config.name);
-      } else {
-        // For deep/xray, process posts if available
-// For deep/xray, process posts if available
+// CRITICAL: Extract posts BEFORE transformation
+const rawData = response[0];
 const posts = extractPostsFromResponse(response, analysisType);
-// CRITICAL: Pass rawData (which has latestPosts), not transformedData
-profileData = buildEnhancedProfile(transformedData, posts, rawData, config.name, analysisType);
-      }
+
+logger('info', '🔍 POST EXTRACTION CHECKPOINT', {
+  scraper: config.name,
+  username,
+  analysisType,
+  postsExtractedCount: posts.length,
+  rawDataHasLatestPosts: !!rawData.latestPosts,
+  rawDataLatestPostsCount: rawData.latestPosts ? rawData.latestPosts.length : 0,
+  extractedPostsSample: posts.length > 0 ? {
+    firstPostId: posts[0].id || posts[0].shortCode,
+    firstPostType: posts[0].type,
+    firstPostHasEngagement: !!(posts[0].likesCount || posts[0].commentsCount)
+  } : null
+});
+
+// Transform using scraper-specific field mapping
+const transformedData = validateAndTransformScraperData(rawData, config);
+
+logger('info', '🔄 SCRAPER DATA TRANSFORMATION COMPLETE', {
+  scraper: config.name,
+  username: transformedData.username,
+  followers: transformedData.followersCount,
+  following: transformedData.followingCount,
+  postsCount: transformedData.postsCount,
+  originalFollowing: rawData.followsCount || rawData.followingCount,
+  transformedFollowing: transformedData.followingCount,
+  transformedDataHasLatestPosts: !!(transformedData as any).latestPosts,
+  transformedDataKeys: Object.keys(transformedData)
+});
+
+// Enhanced profile building for deep/xray analysis
+let profileData: ProfileData;
+
+if (analysisType === 'light') {
+  logger('info', '🏃 BUILDING LIGHT PROFILE', {
+    username: transformedData.username,
+    analysisType
+  });
+  profileData = buildLightProfile(transformedData, config.name);
+} else {
+  logger('info', '🔬 BUILDING ENHANCED PROFILE', {
+    username: transformedData.username,
+    analysisType,
+    postsToProcess: posts.length,
+    hasRawData: !!rawData
+  });
+  profileData = buildEnhancedProfile(transformedData, posts, rawData, config.name, analysisType);
+}
+
+logger('info', '✅ PROFILE BUILD COMPLETE', {
+  username: profileData.username,
+  analysisType,
+  hasLatestPosts: !!(profileData.latestPosts && profileData.latestPosts.length > 0),
+  latestPostsCount: profileData.latestPosts?.length || 0,
+  hasEngagement: !!profileData.engagement,
+  dataQuality: profileData.dataQuality
+});
       
       return profileData;
     }
@@ -170,30 +218,77 @@ function buildLightProfile(data: any, scraperUsed: string): ProfileData {
 function buildEnhancedProfile(
   data: any, 
   posts: any[],
-  rawData: any,  // ADD THIS
+  rawData: any,  // ADD THIS PARAMETER
   scraperUsed: string, 
   analysisType: AnalysisType
 ): ProfileData {
-  // Build base profile
-// Build base profile
-const profile = validateProfileData(data, analysisType);
-
-// CRITICAL FIX: Extract posts from rawData.latestPosts if posts array is empty
-let finalPosts = posts;
-if ((!finalPosts || finalPosts.length === 0) && rawData.latestPosts && Array.isArray(rawData.latestPosts)) {
-  finalPosts = rawData.latestPosts;
-  logger('info', 'Posts extracted from rawData.latestPosts', { count: finalPosts.length });
-}
-
-// Add posts if available
-if (finalPosts && finalPosts.length > 0) {
-  profile.latestPosts = finalPosts.slice(0, analysisType === 'xray' ? 50 : 12);
+  logger('info', '🏗️ BUILD ENHANCED PROFILE START', {
+    username: data.username,
+    analysisType,
+    postsProvided: posts.length,
+    rawDataHasLatestPosts: !!rawData.latestPosts,
+    rawDataLatestPostsCount: rawData.latestPosts?.length || 0
+  });
   
-  // Calculate real engagement if we have posts
-  if (profile.latestPosts.length > 0) {
-    profile.engagement = calculateRealEngagement(profile.latestPosts, profile.followersCount);
+  // Build base profile
+  const profile = validateProfileData(data, analysisType);
+  
+  // CRITICAL FIX: Fallback to rawData.latestPosts if posts array is empty
+  let finalPosts = posts;
+  if ((!finalPosts || finalPosts.length === 0) && rawData.latestPosts && Array.isArray(rawData.latestPosts)) {
+    logger('info', '🔄 USING RAWDATA.LATESTPOSTS FALLBACK', { 
+      rawLatestPostsCount: rawData.latestPosts.length,
+      username: data.username 
+    });
+    finalPosts = rawData.latestPosts;
   }
-}
+  
+  logger('info', '📊 POSTS PROCESSING DECISION', {
+    username: data.username,
+    postsProvidedCount: posts.length,
+    finalPostsCount: finalPosts.length,
+    usedFallback: finalPosts !== posts,
+    willProcessPosts: finalPosts && finalPosts.length > 0
+  });
+  
+  // Add posts if available
+  if (finalPosts && finalPosts.length > 0) {
+    const sliceLimit = analysisType === 'xray' ? 50 : 12;
+    profile.latestPosts = finalPosts.slice(0, sliceLimit);
+    
+    logger('info', '✂️ POSTS SLICED FOR PROFILE', {
+      username: data.username,
+      originalCount: finalPosts.length,
+      slicedCount: profile.latestPosts.length,
+      sliceLimit,
+      analysisType
+    });
+    
+    // Calculate real engagement if we have posts
+    if (profile.latestPosts.length > 0) {
+      logger('info', '🧮 CALCULATING ENGAGEMENT', {
+        username: data.username,
+        postsToAnalyze: profile.latestPosts.length,
+        followers: profile.followersCount
+      });
+      profile.engagement = calculateRealEngagement(profile.latestPosts, profile.followersCount);
+      
+      logger('info', '✅ ENGAGEMENT CALCULATED', {
+        username: data.username,
+        hasEngagement: !!profile.engagement,
+        avgLikes: profile.engagement?.avgLikes,
+        avgComments: profile.engagement?.avgComments,
+        engagementRate: profile.engagement?.engagementRate
+      });
+    }
+  } else {
+    logger('warn', '⚠️ NO POSTS AVAILABLE FOR ENHANCED PROFILE', {
+      username: data.username,
+      postsProvidedCount: posts.length,
+      rawDataHasLatestPosts: !!rawData.latestPosts,
+      analysisType
+    });
+  }
   
   profile.scraperUsed = scraperUsed;
   profile.dataQuality = determineDataQuality(profile, analysisType);
@@ -216,16 +311,56 @@ if (finalPosts && finalPosts.length > 0) {
 }
 
 function extractPostsFromResponse(response: any[], analysisType: AnalysisType): any[] {
-  // For shu scraper, posts might be in the response array after profile data
-  if (response.length > 1) {
-    return response.slice(1); // Skip first item (profile), rest are posts
+  logger('info', '🎯 EXTRACT POSTS FROM RESPONSE START', {
+    analysisType,
+    responseLength: response.length,
+    responseIsArray: Array.isArray(response)
+  });
+  
+  const rawProfile = response[0];
+  
+  logger('info', '🔍 CHECKING RAW PROFILE FOR POSTS', {
+    analysisType,
+    hasLatestPosts: !!rawProfile.latestPosts,
+    latestPostsIsArray: Array.isArray(rawProfile.latestPosts),
+    latestPostsCount: rawProfile.latestPosts?.length || 0,
+    rawProfileKeys: Object.keys(rawProfile).slice(0, 30)
+  });
+  
+  // CRITICAL: Check for latestPosts in raw response FIRST
+  if (rawProfile.latestPosts && Array.isArray(rawProfile.latestPosts)) {
+    logger('info', '✅ POSTS EXTRACTED FROM LATESTPOSTS', { 
+      count: rawProfile.latestPosts.length,
+      analysisType,
+      firstPostSample: rawProfile.latestPosts[0] ? {
+        id: rawProfile.latestPosts[0].id,
+        type: rawProfile.latestPosts[0].type,
+        hasLikes: !!rawProfile.latestPosts[0].likesCount
+      } : null
+    });
+    return rawProfile.latestPosts;
   }
   
-  // For dS scraper or if posts are embedded in profile
-  const profile = response[0];
-  if (profile.latestPosts && Array.isArray(profile.latestPosts)) {
-    return profile.latestPosts;
+  // For shu scraper, posts might be in array after profile
+  if (response.length > 1) {
+    logger('info', '✅ POSTS EXTRACTED FROM RESPONSE ARRAY', { 
+      count: response.length - 1,
+      analysisType,
+      secondItemSample: response[1] ? {
+        id: response[1].id,
+        type: response[1].type
+      } : null
+    });
+    return response.slice(1);
   }
+  
+  logger('warn', '❌ NO POSTS FOUND IN SCRAPER RESPONSE', { 
+    responseLength: response.length,
+    hasLatestPosts: !!rawProfile.latestPosts,
+    latestPostsType: rawProfile.latestPosts ? typeof rawProfile.latestPosts : 'undefined',
+    analysisType,
+    availableFields: Object.keys(rawProfile).filter(k => k.toLowerCase().includes('post'))
+  });
   
   return [];
 }
