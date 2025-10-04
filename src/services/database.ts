@@ -76,16 +76,6 @@ const cleanLeadData = {
   platform_type: 'instagram',
   profile_url: leadData.profile_url || `https://instagram.com/${leadData.username}`,
   
-  // NEW: Pre-computed metrics
-  computed_engagement_rate: leadData.computed_engagement_rate || null,
-  computed_avg_likes: leadData.computed_avg_likes || null,
-  computed_avg_comments: leadData.computed_avg_comments || null,
-  computed_posts_analyzed: leadData.computed_posts_analyzed || null,
-  computed_content_themes: leadData.computed_content_themes || null,
-  computed_posting_frequency: leadData.computed_posting_frequency || null,
-  computed_last_post_days_ago: leadData.computed_last_post_days_ago || null,
-  computed_primary_format: leadData.computed_primary_format || null,
-  
   last_updated_at: new Date().toISOString()
 };
 
@@ -267,24 +257,27 @@ export async function insertAnalysisPayload(
     let structuredPayload;
     
     switch (analysisType) {        
-      case 'deep':
-        const deepData = analysisData.deep_payload || analysisData;
-        const engagementData = deepData.engagement_breakdown || {};
-        
-        structuredPayload = {
-          deep_summary: deepData.deep_summary || null,
-          selling_points: deepData.selling_points || [],
-          outreach_message: deepData.outreach_message || null,
-          engagement_breakdown: {
-            avg_likes: parseInt(engagementData.avg_likes) || parseInt(analysisData.avg_likes) || 0,
-            avg_comments: parseInt(engagementData.avg_comments) || parseInt(analysisData.avg_comments) || 0,
-            engagement_rate: parseFloat(engagementData.engagement_rate) || parseFloat(analysisData.engagement_rate) || 0
-          },
-          latest_posts: deepData.latest_posts || null,
-          audience_insights: deepData.audience_insights || analysisData.engagement_insights || null,
-          reasons: deepData.reasons || []
-        };
-        break;
+case 'deep':
+  const deepData = analysisData.deep_payload || analysisData;
+  const engagementData = deepData.engagement_breakdown || {};
+  
+  structuredPayload = {
+    deep_summary: deepData.deep_summary || null,
+    selling_points: deepData.selling_points || [],
+    outreach_message: deepData.outreach_message || null,
+    engagement_breakdown: {
+      avg_likes: parseInt(engagementData.avg_likes) || parseInt(analysisData.avg_likes) || 0,
+      avg_comments: parseInt(engagementData.avg_comments) || parseInt(analysisData.avg_comments) || 0,
+      engagement_rate: parseFloat(engagementData.engagement_rate) || parseFloat(analysisData.engagement_rate) || 0
+    },
+    latest_posts: deepData.latest_posts || null,
+    audience_insights: deepData.audience_insights || analysisData.engagement_insights || null,
+    reasons: deepData.reasons || [],
+    
+    // NEW: Store all pre-processed metrics in payload
+    pre_processed_metrics: analysisData.pre_processed_metrics || null
+  };
+  break;
         
 case 'xray':
   const xrayData = analysisData.xray_payload || analysisData;
@@ -292,7 +285,10 @@ case 'xray':
     deep_summary: xrayData.deep_summary || null,
     copywriter_profile: xrayData.copywriter_profile || {},
     commercial_intelligence: xrayData.commercial_intelligence || {},
-    persuasion_strategy: xrayData.persuasion_strategy || {}
+    persuasion_strategy: xrayData.persuasion_strategy || {},
+    
+    // NEW: Store all pre-processed metrics in payload
+    pre_processed_metrics: analysisData.pre_processed_metrics || null
   };
   break;
         
