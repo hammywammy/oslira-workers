@@ -86,262 +86,285 @@ If profile audience does not match business target, reflect this in low score an
   // DEEP ANALYSIS
   // ============================================================================
 
-  async executeDeep(profile: ProfileData, business: any): Promise<DirectAnalysisResult> {
-    const startTime = Date.now();
-    
-    logger('info', '🔬 Deep analysis starting', { 
-      username: profile.username, 
-      requestId: this.requestId 
-    });
+// ===============================================================================
+// UPDATED METHODS FOR src/services/direct-analysis.ts
+// Replace your existing executeDeep() and executeXRay() with these versions
+// ===============================================================================
 
-    try {
-      // Execute parallel: core strategy + outreach
-      logger('info', '📊 Starting parallel core strategy + outreach', {
-        username: profile.username,
-        requestId: this.requestId
-      });
-
-      const [coreStrategyAnalysis, outreachAnalysis] = await Promise.all([
-        this.executeCoreStrategyMerged(profile, business),
-        this.executeOutreachGeneration(profile, business, {
-          key_insights: 'Deep partnership analysis'
-        })
-      ]);
-
-      logger('info', '✅ Core strategy + outreach complete', {
-        strategyScore: coreStrategyAnalysis.score,
-        outreachLength: outreachAnalysis.outreach_message?.length,
-        strategyCost: coreStrategyAnalysis.cost,
-        outreachCost: outreachAnalysis.cost,
-        requestId: this.requestId
-      });
-
-  const preProcessedMetrics = (profile as any).preProcessed ? {
-  engagement: (profile as any).preProcessed.engagement || null,
-  content: (profile as any).preProcessed.content || null,
-  posting: (profile as any).preProcessed.posting || null,
-  summary: (profile as any).preProcessed.summary || null
-} : null;
-
-const analysisData = {
-  score: coreStrategyAnalysis.score,
-  engagement_score: coreStrategyAnalysis.engagement_score,
-  niche_fit: coreStrategyAnalysis.niche_fit,
-  quick_summary: coreStrategyAnalysis.quick_summary,
-  confidence_level: coreStrategyAnalysis.confidence_level,
-  pre_processed_metrics: preProcessedMetrics,
+async executeDeep(profile: ProfileData, business: any): Promise<DirectAnalysisResult> {
+  const startTime = Date.now();
   
-  deep_payload: {
-    deep_summary: coreStrategyAnalysis.deep_summary,
-    selling_points: coreStrategyAnalysis.selling_points,
-    reasons: coreStrategyAnalysis.reasons,
-    audience_insights: coreStrategyAnalysis.audience_insights,
-    outreach_message: outreachAnalysis.outreach_message,
-    engagement_breakdown: coreStrategyAnalysis.engagement_breakdown,
-    pre_processed_metrics: preProcessedMetrics
-  }
-};
+  logger('info', '🔬 Deep analysis starting', { 
+    username: profile.username, 
+    requestId: this.requestId 
+  });
 
-      const processingTime = Date.now() - startTime;
-      const totalCost = coreStrategyAnalysis.cost + outreachAnalysis.cost;
-      const totalTokensIn = coreStrategyAnalysis.tokens_in + outreachAnalysis.tokens_in;
-      const totalTokensOut = coreStrategyAnalysis.tokens_out + outreachAnalysis.tokens_out;
-
-      logger('info', '✅ Deep analysis complete', {
-        username: profile.username,
-        score: analysisData.score,
-        processingTime,
-        totalCost,
-        requestId: this.requestId
-      });
-
-      return {
-        analysisData,
-        costDetails: {
-          actual_cost: totalCost,
-          tokens_in: totalTokensIn,
-          tokens_out: totalTokensOut,
-          model_used: 'gpt-5-mini-merged',
-          block_type: 'optimized_deep',
-          processing_duration_ms: processingTime
-        }
-      };
-    } catch (error: any) {
-      logger('error', '❌ Deep analysis failed', {
-        error: error.message,
-        stack: error.stack,
-        requestId: this.requestId
-      });
-      throw error;
-    }
-  }
-
-  // ============================================================================
-  // X-RAY ANALYSIS
-  // ============================================================================
-
-  async executeXRay(profile: ProfileData, business: any): Promise<DirectAnalysisResult> {
-    const startTime = Date.now();
-    
-    // PRE-FLIGHT VALIDATION
-    logger('info', '🔍 X-Ray pre-flight validation', {
-      hasProfile: !!profile,
-      hasBusiness: !!business,
-      username: profile?.username,
-      businessName: business?.business_name,
-      profileKeys: profile ? Object.keys(profile).slice(0, 10) : [],
-      businessKeys: business ? Object.keys(business) : [],
+  try {
+    // PHASE 1: Core strategy + parallel workers (outreach + personality)
+    logger('info', '📊 Starting core strategy analysis', {
+      username: profile.username,
       requestId: this.requestId
     });
 
-    if (!profile) {
-      throw new Error('❌ X-Ray failed: Profile is null/undefined');
-    }
+    const coreStrategyAnalysis = await this.executeCoreStrategyMerged(profile, business);
 
-    if (!business) {
-      throw new Error('❌ X-Ray failed: Business is null/undefined');
-    }
-
-    if (!profile.username) {
-      throw new Error('❌ X-Ray failed: Profile missing username');
-    }
-
-    if (!business.business_name) {
-      throw new Error('❌ X-Ray failed: Business missing business_name');
-    }
-
-    logger('info', '✅ X-Ray validation passed, starting analysis', { 
-      username: profile.username,
-      businessName: business.business_name,
-      requestId: this.requestId 
+    logger('info', '✅ Core strategy complete, starting parallel workers', {
+      strategyScore: coreStrategyAnalysis.score,
+      strategyCost: coreStrategyAnalysis.cost,
+      requestId: this.requestId
     });
 
-    try {
-      // PHASE 1: Psychographic + Commercial Intelligence (Parallel)
-      logger('info', '📊 Phase 1: Starting psychographic + commercial analysis', {
-        username: profile.username,
-        requestId: this.requestId
-      });
+    // PHASE 2: Run outreach + personality in parallel
+    const [outreachAnalysis, personalityAnalysis] = await Promise.all([
+      this.executeOutreachGeneration(profile, business, {
+        key_insights: coreStrategyAnalysis.deep_summary || 'Deep partnership analysis'
+      }),
+      this.executePersonalityAnalysis(profile)
+    ]);
 
-      const [psychProfileAnalysis, commercialAnalysis] = await Promise.all([
-        this.executePsychographicProfiling(profile, business),
-        this.executeCommercialIntelligence(profile, business)
-      ]);
+    logger('info', '✅ Parallel workers complete', {
+      outreachLength: outreachAnalysis.outreach_message?.length,
+      discProfile: personalityAnalysis.disc_profile,
+      outreachCost: outreachAnalysis.cost,
+      personalityCost: personalityAnalysis.cost,
+      requestId: this.requestId
+    });
 
-      logger('info', '✅ Phase 1 complete', {
-        psychScore: psychProfileAnalysis.score,
-        psychNicheFit: psychProfileAnalysis.niche_fit,
-        commercialBudget: commercialAnalysis.budget_tier,
-        commercialRole: commercialAnalysis.decision_role,
-        psychCost: psychProfileAnalysis.cost,
-        commercialCost: commercialAnalysis.cost,
-        requestId: this.requestId
-      });
+    const preProcessedMetrics = (profile as any).preProcessed ? {
+      engagement: (profile as any).preProcessed.engagement || null,
+      content: (profile as any).preProcessed.content || null,
+      posting: (profile as any).preProcessed.posting || null,
+      summary: (profile as any).preProcessed.summary || null
+    } : null;
 
-      // PHASE 2: Outreach Generation (Sequential - needs analysis context)
-      logger('info', '📝 Phase 2: Starting outreach with analysis context', {
-        score: psychProfileAnalysis.score,
-        nicheFit: psychProfileAnalysis.niche_fit,
-        psychographics: psychProfileAnalysis.psychographics?.substring(0, 50),
-        budgetTier: commercialAnalysis.budget_tier,
-        requestId: this.requestId
-      });
+    const analysisData = {
+      score: coreStrategyAnalysis.score,
+      engagement_score: coreStrategyAnalysis.engagement_score,
+      niche_fit: coreStrategyAnalysis.niche_fit,
+      quick_summary: coreStrategyAnalysis.quick_summary,
+      confidence_level: coreStrategyAnalysis.confidence_level,
+      pre_processed_metrics: preProcessedMetrics,
+      
+      deep_payload: {
+        deep_summary: coreStrategyAnalysis.deep_summary,
+        selling_points: coreStrategyAnalysis.selling_points,
+        reasons: coreStrategyAnalysis.reasons,
+        audience_insights: coreStrategyAnalysis.audience_insights,
+        outreach_message: outreachAnalysis.outreach_message,
+        engagement_breakdown: coreStrategyAnalysis.engagement_breakdown,
+        pre_processed_metrics: preProcessedMetrics,
+        personality_profile: personalityAnalysis  // NEW
+      }
+    };
 
-      const outreachAnalysis = await this.executeOutreachGeneration(profile, business, {
+    const processingTime = Date.now() - startTime;
+    const totalCost = coreStrategyAnalysis.cost + outreachAnalysis.cost + personalityAnalysis.cost;
+    const totalTokensIn = coreStrategyAnalysis.tokens_in + outreachAnalysis.tokens_in + personalityAnalysis.tokens_in;
+    const totalTokensOut = coreStrategyAnalysis.tokens_out + outreachAnalysis.tokens_out + personalityAnalysis.tokens_out;
+
+    logger('info', '✅ Deep analysis complete', {
+      username: profile.username,
+      score: analysisData.score,
+      discProfile: personalityAnalysis.disc_profile,
+      processingTime,
+      totalCost,
+      requestId: this.requestId
+    });
+
+    return {
+      analysisData,
+      costDetails: {
+        actual_cost: totalCost,
+        tokens_in: totalTokensIn,
+        tokens_out: totalTokensOut,
+        model_used: 'gpt-5-mini-merged',
+        block_type: 'optimized_deep',
+        processing_duration_ms: processingTime
+      }
+    };
+  } catch (error: any) {
+    logger('error', '❌ Deep analysis failed', {
+      error: error.message,
+      stack: error.stack,
+      requestId: this.requestId
+    });
+    throw error;
+  }
+}
+
+// ============================================================================
+// X-RAY ANALYSIS
+// ============================================================================
+
+async executeXRay(profile: ProfileData, business: any): Promise<DirectAnalysisResult> {
+  const startTime = Date.now();
+  
+  // PRE-FLIGHT VALIDATION
+  logger('info', '🔍 X-Ray pre-flight validation', {
+    hasProfile: !!profile,
+    hasBusiness: !!business,
+    username: profile?.username,
+    businessName: business?.business_name,
+    profileKeys: profile ? Object.keys(profile).slice(0, 10) : [],
+    businessKeys: business ? Object.keys(business) : [],
+    requestId: this.requestId
+  });
+
+  if (!profile) {
+    throw new Error('❌ X-Ray failed: Profile is null/undefined');
+  }
+
+  if (!business) {
+    throw new Error('❌ X-Ray failed: Business is null/undefined');
+  }
+
+  if (!profile.username) {
+    throw new Error('❌ X-Ray failed: Profile missing username');
+  }
+
+  if (!business.business_name) {
+    throw new Error('❌ X-Ray failed: Business missing business_name');
+  }
+
+  logger('info', '✅ X-Ray validation passed, starting analysis', { 
+    username: profile.username,
+    businessName: business.business_name,
+    requestId: this.requestId 
+  });
+
+  try {
+    // PHASE 1: Psychographic + Commercial Intelligence (Parallel)
+    logger('info', '📊 Phase 1: Starting psychographic + commercial analysis', {
+      username: profile.username,
+      requestId: this.requestId
+    });
+
+    const [psychProfileAnalysis, commercialAnalysis] = await Promise.all([
+      this.executePsychographicProfiling(profile, business),
+      this.executeCommercialIntelligence(profile, business)
+    ]);
+
+    logger('info', '✅ Phase 1 complete', {
+      psychScore: psychProfileAnalysis.score,
+      psychNicheFit: psychProfileAnalysis.niche_fit,
+      commercialBudget: commercialAnalysis.budget_tier,
+      commercialRole: commercialAnalysis.decision_role,
+      psychCost: psychProfileAnalysis.cost,
+      commercialCost: commercialAnalysis.cost,
+      requestId: this.requestId
+    });
+
+    // PHASE 2: Outreach + Personality (Parallel)
+    logger('info', '📝 Phase 2: Starting outreach + personality analysis', {
+      score: psychProfileAnalysis.score,
+      nicheFit: psychProfileAnalysis.niche_fit,
+      psychographics: psychProfileAnalysis.psychographics?.substring(0, 50),
+      budgetTier: commercialAnalysis.budget_tier,
+      requestId: this.requestId
+    });
+
+    const [outreachAnalysis, personalityAnalysis] = await Promise.all([
+      this.executeOutreachGeneration(profile, business, {
         score: psychProfileAnalysis.score || 0,
         niche_fit: psychProfileAnalysis.niche_fit || 0,
         audience_type: 'Creator-focused',
         key_insights: `${psychProfileAnalysis.psychographics || 'Unknown psychographics'}. Budget: ${commercialAnalysis.budget_tier || 'unknown'}`
-      });
+      }),
+      this.executePersonalityAnalysis(profile)
+    ]);
 
-      logger('info', '✅ Phase 2 complete', {
-        messageLength: outreachAnalysis.outreach_message?.length,
-        outreachCost: outreachAnalysis.cost,
-        requestId: this.requestId
-      });
+    logger('info', '✅ Phase 2 complete', {
+      messageLength: outreachAnalysis.outreach_message?.length,
+      discProfile: personalityAnalysis.disc_profile,
+      outreachCost: outreachAnalysis.cost,
+      personalityCost: personalityAnalysis.cost,
+      requestId: this.requestId
+    });
 
-      // BUILD FINAL X-RAY STRUCTURE
-      const painPointsStr = psychProfileAnalysis.pain_points?.join('; ') || 'Not determined';
-      const dreamsStr = psychProfileAnalysis.dreams_desires?.join('; ') || 'Not determined';
+    // BUILD FINAL X-RAY STRUCTURE
+    const painPointsStr = psychProfileAnalysis.pain_points?.join('; ') || 'Not determined';
+    const dreamsStr = psychProfileAnalysis.dreams_desires?.join('; ') || 'Not determined';
 
-      const deepSummary = `Demographics: ${psychProfileAnalysis.demographics || 'Unknown'}. Psychographics: ${psychProfileAnalysis.psychographics || 'Unknown'}. Pain Points: ${painPointsStr}. Dreams: ${dreamsStr}. Commercial Profile: ${commercialAnalysis.budget_tier || 'unknown'} budget tier, ${commercialAnalysis.decision_role || 'unknown'} decision role, ${commercialAnalysis.buying_stage || 'unknown'} buying stage. Persuasion Strategy: Use ${commercialAnalysis.primary_angle || 'unknown'} angle with ${commercialAnalysis.hook_style || 'unknown'} hook style. Communication: ${commercialAnalysis.communication_style || 'unknown'} tone.`;
+    const deepSummary = `Demographics: ${psychProfileAnalysis.demographics || 'Unknown'}. Psychographics: ${psychProfileAnalysis.psychographics || 'Unknown'}. Pain Points: ${painPointsStr}. Dreams: ${dreamsStr}. Commercial Profile: ${commercialAnalysis.budget_tier || 'unknown'} budget tier, ${commercialAnalysis.decision_role || 'unknown'} decision role, ${commercialAnalysis.buying_stage || 'unknown'} buying stage. Persuasion Strategy: Use ${commercialAnalysis.primary_angle || 'unknown'} angle with ${commercialAnalysis.hook_style || 'unknown'} hook style. Communication: ${commercialAnalysis.communication_style || 'unknown'} tone.`;
 
-const preProcessedMetrics = (profile as any).preProcessed ? {
-  engagement: (profile as any).preProcessed.engagement || null,
-  content: (profile as any).preProcessed.content || null,
-  posting: (profile as any).preProcessed.posting || null,
-  summary: (profile as any).preProcessed.summary || null
-} : null;
+    const preProcessedMetrics = (profile as any).preProcessed ? {
+      engagement: (profile as any).preProcessed.engagement || null,
+      content: (profile as any).preProcessed.content || null,
+      posting: (profile as any).preProcessed.posting || null,
+      summary: (profile as any).preProcessed.summary || null
+    } : null;
 
-const analysisData = {
-  score: psychProfileAnalysis.score,
-  engagement_score: psychProfileAnalysis.engagement_score,
-  niche_fit: psychProfileAnalysis.niche_fit,
-  quick_summary: psychProfileAnalysis.quick_summary,
-  confidence_level: psychProfileAnalysis.confidence_level,
-  pre_processed_metrics: preProcessedMetrics,
-  
-  xray_payload: {
-    deep_summary: deepSummary,
-    copywriter_profile: {
-      demographics: psychProfileAnalysis.demographics || 'Unknown',
-      psychographics: psychProfileAnalysis.psychographics || 'Unknown',
-      pain_points: psychProfileAnalysis.pain_points || ['Not determined'],
-      dreams_desires: psychProfileAnalysis.dreams_desires || ['Not determined']
-    },
-    commercial_intelligence: {
-      budget_tier: commercialAnalysis.budget_tier || 'unknown',
-      decision_role: commercialAnalysis.decision_role || 'unknown',
-      buying_stage: commercialAnalysis.buying_stage || 'unknown',
-      objections: commercialAnalysis.objections || ['Not determined']
-    },
-    persuasion_strategy: {
-      primary_angle: commercialAnalysis.primary_angle || 'unknown',
-      hook_style: commercialAnalysis.hook_style || 'unknown',
-      proof_elements: commercialAnalysis.proof_elements || ['Not determined'],
-      communication_style: commercialAnalysis.communication_style || 'unknown'
-    },
-    outreach_message: outreachAnalysis.outreach_message || 'Outreach generation failed',
-    pre_processed_metrics: preProcessedMetrics
+    const analysisData = {
+      score: psychProfileAnalysis.score,
+      engagement_score: psychProfileAnalysis.engagement_score,
+      niche_fit: psychProfileAnalysis.niche_fit,
+      quick_summary: psychProfileAnalysis.quick_summary,
+      confidence_level: psychProfileAnalysis.confidence_level,
+      pre_processed_metrics: preProcessedMetrics,
+      
+      xray_payload: {
+        deep_summary: deepSummary,
+        copywriter_profile: {
+          demographics: psychProfileAnalysis.demographics || 'Unknown',
+          psychographics: psychProfileAnalysis.psychographics || 'Unknown',
+          pain_points: psychProfileAnalysis.pain_points || ['Not determined'],
+          dreams_desires: psychProfileAnalysis.dreams_desires || ['Not determined']
+        },
+        commercial_intelligence: {
+          budget_tier: commercialAnalysis.budget_tier || 'unknown',
+          decision_role: commercialAnalysis.decision_role || 'unknown',
+          buying_stage: commercialAnalysis.buying_stage || 'unknown',
+          objections: commercialAnalysis.objections || ['Not determined']
+        },
+        persuasion_strategy: {
+          primary_angle: commercialAnalysis.primary_angle || 'unknown',
+          hook_style: commercialAnalysis.hook_style || 'unknown',
+          proof_elements: commercialAnalysis.proof_elements || ['Not determined'],
+          communication_style: commercialAnalysis.communication_style || 'unknown'
+        },
+        outreach_message: outreachAnalysis.outreach_message || 'Outreach generation failed',
+        pre_processed_metrics: preProcessedMetrics,
+        personality_profile: personalityAnalysis  // NEW
+      }
+    };
+
+    const processingTime = Date.now() - startTime;
+    const totalCost = psychProfileAnalysis.cost + commercialAnalysis.cost + outreachAnalysis.cost + personalityAnalysis.cost;
+    const totalTokensIn = psychProfileAnalysis.tokens_in + commercialAnalysis.tokens_in + outreachAnalysis.tokens_in + personalityAnalysis.tokens_in;
+    const totalTokensOut = psychProfileAnalysis.tokens_out + commercialAnalysis.tokens_out + outreachAnalysis.tokens_out + personalityAnalysis.tokens_out;
+
+    logger('info', '✅ X-Ray analysis complete', {
+      username: profile.username,
+      score: analysisData.score,
+      discProfile: personalityAnalysis.disc_profile,
+      processingTime,
+      totalCost,
+      phasesExecuted: 2,
+      requestId: this.requestId
+    });
+
+    return {
+      analysisData,
+      costDetails: {
+        actual_cost: totalCost,
+        tokens_in: totalTokensIn,
+        tokens_out: totalTokensOut,
+        model_used: 'gpt-5-mini',
+        block_type: 'optimized_xray',
+        processing_duration_ms: processingTime
+      }
+    };
+
+  } catch (error: any) {
+    logger('error', '❌ X-Ray analysis failed', {
+      error: error.message,
+      stack: error.stack,
+      username: profile?.username,
+      requestId: this.requestId
+    });
+    throw error;
   }
-};
-
-      const processingTime = Date.now() - startTime;
-      const totalCost = psychProfileAnalysis.cost + commercialAnalysis.cost + outreachAnalysis.cost;
-      const totalTokensIn = psychProfileAnalysis.tokens_in + commercialAnalysis.tokens_in + outreachAnalysis.tokens_in;
-      const totalTokensOut = psychProfileAnalysis.tokens_out + commercialAnalysis.tokens_out + outreachAnalysis.tokens_out;
-
-      logger('info', '✅ X-Ray analysis complete', {
-        username: profile.username,
-        score: analysisData.score,
-        processingTime,
-        totalCost,
-        phasesExecuted: 2,
-        requestId: this.requestId
-      });
-
-      return {
-        analysisData,
-        costDetails: {
-          actual_cost: totalCost,
-          tokens_in: totalTokensIn,
-          tokens_out: totalTokensOut,
-          model_used: 'gpt-5-mini',
-          block_type: 'optimized_xray',
-          processing_duration_ms: processingTime
-        }
-      };
-
-    } catch (error: any) {
-      logger('error', '❌ X-Ray analysis failed', {
-        error: error.message,
-        stack: error.stack,
-        username: profile?.username,
-        requestId: this.requestId
-      });
-      throw error;
-    }
-  }
+}
 
   // ============================================================================
   // PRIVATE ANALYSIS METHODS
@@ -595,6 +618,91 @@ Return JSON with: budget_tier, decision_role, buying_stage, objections, primary_
       throw error;
     }
   }
+
+  private async executePersonalityAnalysis(profile: ProfileData): Promise<any> {
+  const startTime = Date.now();
+  
+  // Pre-flight check
+  const hasContent = profile.latestPosts && profile.latestPosts.length >= 5;
+  const hasBio = profile.bio && profile.bio.length > 20;
+  const hasPreProcessed = !!(profile as any).preProcessed;
+  
+  if (!hasContent && !hasBio) {
+    logger('warn', '⚠️ Insufficient data for personality', {
+      username: profile.username,
+      postsCount: profile.latestPosts?.length || 0,
+      bioLength: profile.bio?.length || 0
+    });
+    
+    return {
+      disc_profile: 'Insufficient data',
+      behavior_patterns: ['Not enough content to analyze'],
+      communication_style: 'Unknown - insufficient data',
+      motivation_drivers: ['Unable to determine'],
+      content_authenticity: 'insufficient_data',
+      data_confidence: 'low',
+      cost: 0,
+      tokens_in: 0,
+      tokens_out: 0
+    };
+  }
+  
+  logger('info', '🧠 Personality analysis starting', {
+    username: profile.username,
+    hasPreProcessed,
+    postsCount: profile.latestPosts?.length || 0,
+    requestId: this.requestId
+  });
+  
+  try {
+    const response = await this.aiAdapter.executeRequest({
+      model_name: 'gpt-5-nano',
+      system_prompt: 'DISC personality expert analyzing social media. Base analysis ONLY on observable behavior. NO business context. Be honest about AI vs human content.',
+      user_prompt: buildPersonalityAnalysisPrompt(profile),
+      max_tokens: 600,
+      json_schema: getPersonalityAnalysisJsonSchema(),
+      response_format: 'json',
+      temperature: 0.3,
+      analysis_type: 'personality'
+    });
+    
+    logger('info', '✅ Personality complete', {
+      username: profile.username,
+      disc: response.content?.disc_profile,
+      authenticity: response.content?.content_authenticity,
+      cost: response.usage.total_cost,
+      requestId: this.requestId
+    });
+    
+    const result = this.parseJsonResponse(response.content, 'personality');
+    
+    return {
+      ...result,
+      cost: response.usage.total_cost,
+      tokens_in: response.usage.input_tokens,
+      tokens_out: response.usage.output_tokens
+    };
+    
+  } catch (error: any) {
+    logger('error', '❌ Personality failed', {
+      error: error.message,
+      username: profile.username,
+      requestId: this.requestId
+    });
+    
+    return {
+      disc_profile: 'Analysis failed',
+      behavior_patterns: ['Unable to analyze'],
+      communication_style: 'Unknown',
+      motivation_drivers: ['Unable to determine'],
+      content_authenticity: 'insufficient_data',
+      data_confidence: 'low',
+      cost: 0,
+      tokens_in: 0,
+      tokens_out: 0
+    };
+  }
+}
 
   // ============================================================================
   // JSON PARSING UTILITY
