@@ -14,15 +14,38 @@ export function validateAnalysisResult(result: any): any {
 }
 
 export function extractUsername(input: string): string {
+  if (!input || typeof input !== 'string') {
+    return '';
+  }
+  
   try {
-    const cleaned = input.trim().replace(/^@/, '').toLowerCase();
+    let cleaned = input.trim().replace(/^@/, '');
+    
+    // If it contains instagram.com, extract username from URL
     if (cleaned.includes('instagram.com')) {
+      // Ensure URL has protocol
+      if (!cleaned.startsWith('http')) {
+        cleaned = 'https://' + cleaned;
+      }
+      
       const url = new URL(cleaned);
       const pathSegments = url.pathname.split('/').filter(Boolean);
-      return pathSegments[0] || '';
+      
+      if (pathSegments.length > 0) {
+        // Clean the username from the URL
+        return pathSegments[0].toLowerCase().replace(/[^a-z0-9._]/g, '');
+      }
     }
-    return cleaned.replace(/[^a-z0-9._]/g, '');
-  } catch {
+    
+    // Plain username - clean it
+    return cleaned.toLowerCase().replace(/[^a-z0-9._]/g, '');
+    
+  } catch (error) {
+    // Last resort: regex extraction
+    const match = input.match(/(?:instagram\.com\/)?([a-zA-Z0-9._]+)/);
+    if (match && match[1]) {
+      return match[1].toLowerCase();
+    }
     return '';
   }
 }
@@ -63,13 +86,25 @@ export function normalizeRequest(body: any) {
     throw new Error(errors.join(', '));
   }
 
-  return {
-    profile_url: profile_url!,
-    username: extractUsername(profile_url!),
-    analysis_type: analysis_type as AnalysisType,
-    business_id,
-    user_id
-  };
+const extractedUsername = extractUsername(profile_url!);
+
+// CRITICAL: Validate username extraction
+if (!extractedUsername || extractedUsername === 'undefined') {
+  logger('error', 'Username extraction failed', { 
+    profile_url,
+    extractedUsername,
+    bodyUsername: body.username 
+  });
+  throw new Error('Could not extract valid username from input');
+}
+
+return {
+  profile_url: profile_url!,
+  username: extractedUsername,
+  analysis_type: analysis_type as AnalysisType,
+  business_id,
+  user_id
+};
 }
 
 export function validateProfileData(responseData: any, analysisType?: string): any {
