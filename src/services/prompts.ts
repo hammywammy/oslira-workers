@@ -226,6 +226,52 @@ export function getXRayAnalysisJsonSchema() {
   };
 }
 
+export function getPersonalityAnalysisJsonSchema() {
+  return {
+    name: 'PersonalityAnalysis',
+    strict: true,
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        disc_profile: { 
+          type: 'string',
+          description: 'Primary DISC type (D, I, S, C) or hybrid (DI, SC, etc.)'
+        },
+        behavior_patterns: { 
+          type: 'array', 
+          items: { type: 'string' },
+          minItems: 3,
+          maxItems: 5,
+          description: 'Observable behavioral tendencies'
+        },
+        communication_style: { 
+          type: 'string',
+          description: 'How they communicate - tone, formality, directness'
+        },
+        motivation_drivers: { 
+          type: 'array', 
+          items: { type: 'string' },
+          minItems: 2,
+          maxItems: 4,
+          description: 'What appears to motivate them'
+        },
+        content_authenticity: {
+          type: 'string',
+          enum: ['ai_generated', 'ai_assisted', 'human_authentic', 'insufficient_data'],
+          description: 'Assessment of whether captions are AI-written or human'
+        },
+        data_confidence: {
+          type: 'string',
+          enum: ['high', 'medium', 'low'],
+          description: 'Confidence in personality assessment based on data quality'
+        }
+      },
+      required: ['disc_profile', 'behavior_patterns', 'communication_style', 'motivation_drivers', 'content_authenticity', 'data_confidence']
+    }
+  };
+}
+
 export function buildDeepAnalysisPrompt(
   profile: ProfileData, 
   business: BusinessProfile,
@@ -578,6 +624,44 @@ Business: ${profile.isBusinessAccount ? 'Yes' : 'No'}`;
   prompt += `\n\nReturn JSON: {"score": 0-100, "summary": "one sentence why", "confidence": 0.8}`;
 
   return prompt;
+}
+
+export function buildPersonalityAnalysisPrompt(profile: ProfileData): string {
+  // Use preprocessed summary if available (cheap), else sample captions
+  const hasPreProcessed = !!(profile as any).preProcessed;
+  
+  let contentSample = '';
+  if (hasPreProcessed) {
+    contentSample = (profile as any).preProcessed.summary;
+  } else if (profile.latestPosts && profile.latestPosts.length > 0) {
+    contentSample = profile.latestPosts.slice(0, 6).map((p, i) => 
+      `${i+1}. "${p.caption?.slice(0, 100)}..." (${p.likesCount}♡)`
+    ).join('\n');
+  }
+
+  return `PERSONALITY ANALYSIS: @${profile.username}
+
+Bio: "${profile.bio || 'No bio'}"
+Type: ${profile.isVerified ? '✓' : ''}${profile.isBusinessAccount ? 'Business' : 'Personal'}
+Followers: ${profile.followersCount.toLocaleString()}
+
+Content:
+${contentSample || 'No content available'}
+
+CRITICAL RULES:
+- Base analysis ONLY on observable behavior
+- NO business or collaboration context
+- Be honest about AI-written vs human captions
+- If data is limited, reflect this in data_confidence
+
+Assess:
+1. DISC Profile (D/I/S/C or hybrid)
+2. Behavior Patterns (3-5 observable tendencies)
+3. Communication Style (tone, formality, directness)
+4. Motivation Drivers (2-4 key motivators)
+5. Content Authenticity (are captions AI-generated, AI-assisted, or human authentic?)
+
+JSON only.`;
 }
 
 export function getSpeedLightAnalysisJsonSchema() {
