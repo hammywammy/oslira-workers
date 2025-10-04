@@ -552,19 +552,20 @@ export function buildSpeedLightAnalysisPrompt(
   profile: ProfileData, 
   business: BusinessProfile
 ): string {
-  // Check for pre-processed data
-  const preProcessed = (profile as any).preProcessed;
-  
   let prompt = `Score @${profile.username} (${profile.followersCount} followers) for: ${business.business_one_liner || business.target_audience || business.business_name}
 
 Bio: "${profile.bio || 'No bio'}"
 Business: ${profile.isBusinessAccount ? 'Yes' : 'No'}`;
 
-  // Add pre-computed metrics if available
-  if (preProcessed?.summary) {
-    prompt += `\n\nPRE-COMPUTED METRICS:\n${preProcessed.summary}`;
-  } else if (profile.engagement) {
-    prompt += `\nEngagement: ${profile.engagement.engagementRate}% (${profile.engagement.postsAnalyzed} posts)`;
+  // Only add basic engagement if available (no AI cost, just helps accuracy)
+  if (profile.engagement) {
+    const eng = profile.engagement;
+    prompt += `\nEngagement: ${eng.engagementRate}% ER (${eng.avgLikes} likes, ${eng.avgComments} comments from ${eng.postsAnalyzed} posts)`;
+    
+    // Add format info if available (free pre-processing)
+    if (eng.formatDistribution) {
+      prompt += ` | Primary format: ${eng.formatDistribution.primaryFormat}`;
+    }
   }
 
   prompt += `\n\nReturn JSON: {"score": 0-100, "summary": "one sentence why", "confidence": 0.8}`;
