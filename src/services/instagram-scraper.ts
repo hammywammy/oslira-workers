@@ -48,6 +48,8 @@ try {
             
             // Attach to cached profile
             (cachedProfile as any).preProcessed = preProcessed;
+
+            await cacheProfileData(cacheKey, cachedProfile, analysisType, env);
             
             logger('info', '✅ POST-CACHE PRE-PROCESSING COMPLETE', {
               username: cachedProfile.username,
