@@ -293,8 +293,11 @@ user_prompt: buildDeepAnalysisPrompt(profile, business),
   ]);
 
 
-// Generate comprehensive deep summary for X-Ray
-const deepSummary = `Demographics: ${psychProfileAnalysis.demographics}. Psychographics: ${psychProfileAnalysis.psychographics}. Pain Points: ${psychProfileAnalysis.pain_points.join('; ')}. Dreams: ${psychProfileAnalysis.dreams_desires.join('; ')}. Commercial Profile: ${commercialAnalysis.budget_tier} budget tier, ${commercialAnalysis.decision_role} decision role, ${commercialAnalysis.buying_stage} buying stage. Persuasion Strategy: Use ${commercialAnalysis.primary_angle} angle with ${commercialAnalysis.hook_style} hook style. Communication: ${commercialAnalysis.communication_style} tone.`;
+// Generate comprehensive deep summary for X-Ray with null-safety
+const painPointsStr = psychProfileAnalysis.pain_points?.join('; ') || 'Not determined';
+const dreamsStr = psychProfileAnalysis.dreams_desires?.join('; ') || 'Not determined';
+
+const deepSummary = `Demographics: ${psychProfileAnalysis.demographics || 'Unknown'}. Psychographics: ${psychProfileAnalysis.psychographics || 'Unknown'}. Pain Points: ${painPointsStr}. Dreams: ${dreamsStr}. Commercial Profile: ${commercialAnalysis.budget_tier || 'unknown'} budget tier, ${commercialAnalysis.decision_role || 'unknown'} decision role, ${commercialAnalysis.buying_stage || 'unknown'} buying stage. Persuasion Strategy: Use ${commercialAnalysis.primary_angle || 'unknown'} angle with ${commercialAnalysis.hook_style || 'unknown'} hook style. Communication: ${commercialAnalysis.communication_style || 'unknown'} tone.`;
 
 // Merge results into X-Ray structure
 const analysisData = {
@@ -304,28 +307,28 @@ const analysisData = {
   quick_summary: psychProfileAnalysis.quick_summary,
   confidence_level: psychProfileAnalysis.confidence_level,
   
-  xray_payload: {
-    deep_summary: psychProfileAnalysis.deep_summary,  // Use AI-generated deep_summary
-    copywriter_profile: {
-      demographics: psychProfileAnalysis.demographics,
-      psychographics: psychProfileAnalysis.psychographics,
-      pain_points: psychProfileAnalysis.pain_points,
-      dreams_desires: psychProfileAnalysis.dreams_desires
-    },
-    commercial_intelligence: {
-      budget_tier: commercialAnalysis.budget_tier,
-      decision_role: commercialAnalysis.decision_role,
-      buying_stage: commercialAnalysis.buying_stage,
-      objections: commercialAnalysis.objections
-    },
-    persuasion_strategy: {
-      primary_angle: commercialAnalysis.primary_angle,
-      hook_style: commercialAnalysis.hook_style,
-      proof_elements: commercialAnalysis.proof_elements,
-      communication_style: commercialAnalysis.communication_style
-    },
-    pre_processed_metrics: (profile as any).preProcessed || null
-  }
+xray_payload: {
+  deep_summary: psychProfileAnalysis.deep_summary || 'Analysis incomplete',
+  copywriter_profile: {
+    demographics: psychProfileAnalysis.demographics || 'Unknown',
+    psychographics: psychProfileAnalysis.psychographics || 'Unknown',
+    pain_points: psychProfileAnalysis.pain_points || ['Not determined'],
+    dreams_desires: psychProfileAnalysis.dreams_desires || ['Not determined']
+  },
+  commercial_intelligence: {
+    budget_tier: commercialAnalysis.budget_tier || 'unknown',
+    decision_role: commercialAnalysis.decision_role || 'unknown',
+    buying_stage: commercialAnalysis.buying_stage || 'unknown',
+    objections: commercialAnalysis.objections || ['Not determined']
+  },
+  persuasion_strategy: {
+    primary_angle: commercialAnalysis.primary_angle || 'unknown',
+    hook_style: commercialAnalysis.hook_style || 'unknown',
+    proof_elements: commercialAnalysis.proof_elements || ['Not determined'],
+    communication_style: commercialAnalysis.communication_style || 'unknown'
+  },
+  pre_processed_metrics: (profile as any).preProcessed || null
+}
 };
 
   const processingTime = Date.now() - startTime;
