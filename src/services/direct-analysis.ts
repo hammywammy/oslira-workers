@@ -619,7 +619,7 @@ Return JSON with: budget_tier, decision_role, buying_stage, objections, primary_
     }
   }
 
-  private async executePersonalityAnalysis(profile: ProfileData): Promise<any> {
+private async executePersonalityAnalysis(profile: ProfileData): Promise<any> {
   const startTime = Date.now();
   
   // Pre-flight check
@@ -631,7 +631,8 @@ Return JSON with: budget_tier, decision_role, buying_stage, objections, primary_
     logger('warn', '⚠️ Insufficient data for personality', {
       username: profile.username,
       postsCount: profile.latestPosts?.length || 0,
-      bioLength: profile.bio?.length || 0
+      bioLength: profile.bio?.length || 0,
+      requestId: this.requestId
     });
     
     return {
@@ -656,7 +657,7 @@ Return JSON with: budget_tier, decision_role, buying_stage, objections, primary_
   
   try {
     const response = await this.aiAdapter.executeRequest({
-      model_name: 'gpt-5-nano',
+      model_name: 'gpt-5-mini',
       system_prompt: 'DISC personality expert analyzing social media. Base analysis ONLY on observable behavior. NO business context. Be honest about AI vs human content.',
       user_prompt: buildPersonalityAnalysisPrompt(profile),
       max_tokens: 600,
