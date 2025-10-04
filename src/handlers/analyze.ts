@@ -146,85 +146,84 @@ export async function handleAnalyze(c: Context<{ Bindings: Env }>): Promise<Resp
     }
     
 // DIRECT ANALYSIS - Single optimized system
-    let analysisResult;
-    let costDetails;
-    let processingTime;
-    
-    try {
-      logger('info', 'Executing direct analysis', { analysis_type, requestId });
+let analysisResult;
+let costDetails;
+let processingTime;
 
-      const { DirectAnalysisExecutor } = await import('../services/direct-analysis.js');
-      const directExecutor = new DirectAnalysisExecutor(c.env, requestId);
-      
-      let directResult;
-      switch (analysis_type) {
-        case 'light':
-          directResult = await directExecutor.executeLight(profileData, business);
-          break;
-        case 'deep':
-          directResult = await directExecutor.executeDeep(profileData, business);
-          break;
-        case 'xray':
-          directResult = await directExecutor.executeXRay(profileData, business);
-          break;
-        default:
-          throw new Error(`Unsupported analysis type: ${analysis_type}`);
-      }
+try {
+  logger('info', 'Executing direct analysis', { analysis_type, requestId });
 
-      analysisResult = directResult.analysisData;
-      costDetails = directResult.costDetails;
-      processingTime = directResult.costDetails.processing_duration_ms;
+  const { DirectAnalysisExecutor } = await import('../services/direct-analysis.js');
+  const directExecutor = new DirectAnalysisExecutor(c.env, requestId);
+  
+  let directResult;
+  switch (analysis_type) {
+    case 'light':
+      directResult = await directExecutor.executeLight(profileData, business);
+      break;
+    case 'deep':
+      directResult = await directExecutor.executeDeep(profileData, business);
+      break;
+    case 'xray':
+      directResult = await directExecutor.executeXRay(profileData, business);
+      break;
+    default:
+      throw new Error(`Unsupported analysis type: ${analysis_type}`);
+  }
 
-    } catch (analysisError: any) {
-      logger('error', 'Direct analysis failed', { 
-        error: analysisError.message,
-        analysis_type,
-        requestId
-      });
-      return c.json(createStandardResponse(
-        false, 
-        undefined, 
-        `Analysis failed: ${analysisError.message}`, 
-        requestId
-      ), 500);
-    }
+  analysisResult = directResult.analysisData;
+  costDetails = directResult.costDetails;
+  processingTime = directResult.costDetails.processing_duration_ms;
 
-    // PREPARE DATA FOR DATABASE (3-TABLE STRUCTURE)
-    const leadData = {
-      user_id,
-      business_id,
-      username: profileData.username,
-      full_name: profileData.displayName,
-      profile_pic_url: profileData.profilePicUrl,
-      bio: profileData.bio,
-      external_url: profileData.externalUrl,
-      followersCount: profileData.followersCount,
-      followsCount: profileData.followingCount,
-      postsCount: profileData.postsCount,
-      is_verified: profileData.isVerified,
-      is_private: profileData.isPrivate,
-      is_business_account: profileData.isBusinessAccount || false,
-      profile_url
-    };
+} catch (analysisError: any) {
+  logger('error', 'Direct analysis failed', { 
+    error: analysisError.message,
+    analysis_type,
+    requestId
+  });
+  return c.json(createStandardResponse(
+    false, 
+    undefined, 
+    `Analysis failed: ${analysisError.message}`, 
+    requestId
+  ), 500);
+}
+
+// PREPARE DATA FOR DATABASE
+const leadData = {
+  user_id,
+  business_id,
+  username: profileData.username,
+  full_name: profileData.displayName,
+  profile_pic_url: profileData.profilePicUrl,
+  bio: profileData.bio,
+  external_url: profileData.externalUrl,
+  followersCount: profileData.followersCount,
+  followsCount: profileData.followingCount,
+  postsCount: profileData.postsCount,
+  is_verified: profileData.isVerified,
+  is_private: profileData.isPrivate,
+  is_business_account: profileData.isBusinessAccount || false,
+  profile_url
+};
+
+// ✅ DEFINE enhancedCostDetails BEFORE the try block
+const enhancedCostDetails = {
+  actual_cost: costDetails.actual_cost,
+  tokens_in: costDetails.tokens_in,
+  tokens_out: costDetails.tokens_out,
+  model_used: costDetails.model_used,
+  block_type: costDetails.block_type,
+  processing_duration_ms: processingTime,
+  blocks_used: [costDetails.block_type]
+};
 
 // SAVE TO DATABASE AND UPDATE CREDITS
-    let run_id: string;
-    let lead_id: string;
+let run_id: string;
+let lead_id: string;
 try {
   // Step 1: Save analysis to database
-  logger('info', 'Attempting database save', { 
-    username: leadData.username,
-    analysisType: analysis_type,
-    hasAnalysisData: !!analysisResult,
-    leadDataKeys: Object.keys(leadData)
-  });
-
   const saveResult = await saveCompleteAnalysis(leadData, analysisResult, analysis_type, c.env);
-  
-  if (!saveResult?.run_id || !saveResult?.lead_id) {
-    throw new Error('Database save returned invalid result: missing run_id or lead_id');
-  }
-  
   run_id = saveResult.run_id;
   lead_id = saveResult.lead_id;
   
@@ -235,18 +234,12 @@ try {
   });
 
   // Step 2: Update user credits
-  logger('info', 'Attempting credit update', { 
-    user_id, 
-    creditCost, 
-    run_id 
-  });
-
   await updateCreditsAndTransaction(
     user_id, 
     creditCost, 
     analysis_type, 
     run_id,
-    enhancedCostDetails,
+    enhancedCostDetails,  // ✅ NOW DEFINED AND ACCESSIBLE
     c.env
   );
 
@@ -258,16 +251,12 @@ try {
   });
 
 } catch (saveError: any) {
-  logger('error', 'Database save or credit update FAILED', { 
+  logger('error', 'Database save or credit update failed', { 
     error: saveError.message,
     errorStack: saveError.stack,
     username: profileData.username,
-    analysisType: analysis_type,
-    leadData: leadData,
     requestId
   });
-  
-  // CRITICAL: Return error to frontend
   return c.json(createStandardResponse(
     false, 
     undefined, 
