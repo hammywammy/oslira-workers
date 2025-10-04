@@ -56,28 +56,38 @@ export async function upsertLead(
       }
     });
 
-    const cleanLeadData = {
-      user_id: leadData.user_id,
-      business_id: leadData.business_id,
-      username: leadData.username,
-      display_name: leadData.full_name || leadData.displayName || null,
-      profile_picture_url: leadData.profile_pic_url || leadData.profilePicUrl || null,
-      bio_text: leadData.bio || null,
-      external_website_url: leadData.external_url || leadData.externalUrl || null,
-      
-      follower_count: parseInt(leadData.followersCount || leadData.follower_count || '0'),
-      following_count: parseInt(leadData.followsCount || leadData.followingCount || leadData.following_count || '0'),
-      post_count: parseInt(leadData.postsCount || leadData.post_count || '0'),
-      
-      is_verified_account: leadData.is_verified || leadData.isVerified || false,
-      is_private_account: leadData.is_private || leadData.isPrivate || false,
-      is_business_account: leadData.is_business_account || leadData.isBusinessAccount || false,
-      
-      platform_type: 'instagram',
-      profile_url: leadData.profile_url || `https://instagram.com/${leadData.username}`,
-      
-      last_updated_at: new Date().toISOString()
-    };
+const cleanLeadData = {
+  user_id: leadData.user_id,
+  business_id: leadData.business_id,
+  username: leadData.username,
+  display_name: leadData.full_name || leadData.displayName || null,
+  profile_picture_url: leadData.profile_pic_url || leadData.profilePicUrl || null,
+  bio_text: leadData.bio || null,
+  external_website_url: leadData.external_url || leadData.externalUrl || null,
+  
+  follower_count: parseInt(leadData.followersCount || leadData.follower_count || '0'),
+  following_count: parseInt(leadData.followsCount || leadData.followingCount || leadData.following_count || '0'),
+  post_count: parseInt(leadData.postsCount || leadData.post_count || '0'),
+  
+  is_verified_account: leadData.is_verified || leadData.isVerified || false,
+  is_private_account: leadData.is_private || leadData.isPrivate || false,
+  is_business_account: leadData.is_business_account || leadData.isBusinessAccount || false,
+  
+  platform_type: 'instagram',
+  profile_url: leadData.profile_url || `https://instagram.com/${leadData.username}`,
+  
+  // NEW: Pre-computed metrics
+  computed_engagement_rate: leadData.computed_engagement_rate || null,
+  computed_avg_likes: leadData.computed_avg_likes || null,
+  computed_avg_comments: leadData.computed_avg_comments || null,
+  computed_posts_analyzed: leadData.computed_posts_analyzed || null,
+  computed_content_themes: leadData.computed_content_themes || null,
+  computed_posting_frequency: leadData.computed_posting_frequency || null,
+  computed_last_post_days_ago: leadData.computed_last_post_days_ago || null,
+  computed_primary_format: leadData.computed_primary_format || null,
+  
+  last_updated_at: new Date().toISOString()
+};
 
     logger('info', 'Clean lead data before upsert', {
       username: cleanLeadData.username,
