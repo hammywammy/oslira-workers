@@ -2,6 +2,7 @@ import { UniversalAIAdapter } from './universal-ai-adapter.js';
 import { buildSpeedLightAnalysisPrompt, buildDeepAnalysisPrompt, buildXRayAnalysisPrompt, getLightAnalysisJsonSchema, getDeepAnalysisJsonSchema, getXRayAnalysisJsonSchema } from './prompts.js';
 import { logger } from '../utils/logger.js';
 import type { ProfileData } from '../types/interfaces.js';
+import { OutreachGenerator } from './outreach-generator.js';
 
 export interface DirectAnalysisResult {
   analysisData: any;
@@ -133,11 +134,12 @@ async executeDeep(profile: ProfileData, business: any): Promise<DirectAnalysisRe
     requestId: this.requestId 
   });
 
-// Execute 3 parallel calls: psychological profiling + commercial intelligence + outreach
-const [psychProfileAnalysis, commercialAnalysis, outreachAnalysis] = await Promise.all([
-  this.executePsychographicProfiling(profile, business),
-  this.executeCommercialIntelligence(profile, business),
-  this.executeOutreachGeneration(profile, business)
+// Execute 2 parallel calls: core strategy + outreach
+const [coreStrategyAnalysis, outreachAnalysis] = await Promise.all([
+  this.executeCoreStrategyMerged(profile, business),
+  this.executeOutreachGeneration(profile, business, {
+    key_insights: 'Deep partnership analysis'
+  })
 ]);
 
 const analysisData = {
@@ -156,14 +158,13 @@ const analysisData = {
     engagement_breakdown: coreStrategyAnalysis.engagement_breakdown
   },
   
-  // NEW: Store raw pre-processed data
   pre_processed_metrics: (profile as any).preProcessed || null
 };
 
-  const processingTime = Date.now() - startTime;
-  const totalCost = coreStrategyAnalysis.cost + outreachAnalysis.cost;
-  const totalTokensIn = coreStrategyAnalysis.tokens_in + outreachAnalysis.tokens_in;
-  const totalTokensOut = coreStrategyAnalysis.tokens_out + outreachAnalysis.tokens_out;
+const processingTime = Date.now() - startTime;
+const totalCost = coreStrategyAnalysis.cost + outreachAnalysis.cost;
+const totalTokensIn = coreStrategyAnalysis.tokens_in + outreachAnalysis.tokens_in;
+const totalTokensOut = coreStrategyAnalysis.tokens_out + outreachAnalysis.tokens_out;
 
   logger('info', 'Optimized deep analysis completed', {
     username: profile.username,
@@ -247,36 +248,9 @@ user_prompt: buildDeepAnalysisPrompt(profile, business),
   };
 }
 
-  private async executeOutreachGeneration(profile: ProfileData, business: any): Promise<any> {
-  const response = await this.aiAdapter.executeRequest({
-    model_name: 'gpt-5-mini',
-    system_prompt: 'Write personalized outreach message for influencer partnership. Be specific and compelling.',
-    user_prompt: `Outreach to @${profile.username}: ${profile.followersCount} followers, "${profile.bio}". ${business.business_name} offers ${business.business_one_liner}. Write personalized message.`,
-    max_tokens: 1500,
-    json_schema: {
-      name: 'OutreachMessage',
-      strict: true,
-      schema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          outreach_message: { type: 'string', maxLength: 1000 }
-        },
-        required: ['outreach_message']
-      }
-    },
-    response_format: 'json',
-    temperature: 0.6,
-    analysis_type: 'deep_outreach'
-  });
-
-  const result = this.parseJsonResponse(response.content, 'light analysis');
-  return {
-    ...result,
-    cost: response.usage.total_cost,
-    tokens_in: response.usage.input_tokens,
-    tokens_out: response.usage.output_tokens
-  };
+private async executeOutreachGeneration(profile: ProfileData, business: any, context?: any): Promise<any> {
+  const outreachGen = new OutreachGenerator(this.env, this.requestId);
+  return await outreachGen.generate(profile, business, context);
 }
 
   async executeXRay(profile: ProfileData, business: any): Promise<DirectAnalysisResult> {
@@ -288,10 +262,15 @@ user_prompt: buildDeepAnalysisPrompt(profile, business),
   });
 
   // Execute 2 parallel calls: psychological profiling + commercial intelligence
-  const [psychProfileAnalysis, commercialAnalysis] = await Promise.all([
-    this.executePsychographicProfiling(profile, business),
-    this.executeCommercialIntelligence(profile, business)
-  ]);
+const [psychProfileAnalysis, commercialAnalysis, outreachAnalysis] = await Promise.all([
+  this.executePsychographicProfiling(profile, business),
+  this.executeCommercialIntelligence(profile, business),
+  this.executeOutreachGeneration(profile, business, {
+    score: undefined,  // Will be set after analysis completes
+    audience_type: 'Creator-focused',
+    key_insights: 'Psychographic + commercial intelligence'
+  })
+]);
 
 
 // Generate comprehensive deep summary for X-Ray with null-safety
