@@ -24,12 +24,16 @@ export class OutreachGenerator {
     this.aiAdapter = new UniversalAIAdapter(env, requestId);
     this.requestId = requestId;
   }
-
 async generate(
   profile: ProfileData, 
   business: BusinessProfile,
-  analysisContext?: { ... }
-): Promise<OutreachResult>
+  analysisContext?: {
+    score?: number;
+    niche_fit?: number;
+    key_insights?: string;
+    audience_type?: string;
+  }
+): Promise<OutreachResult> {
   
   // Validate required inputs
   const validationErrors: string[] = [];
