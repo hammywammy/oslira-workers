@@ -261,16 +261,19 @@ private async executeOutreachGeneration(profile: ProfileData, business: any, con
     requestId: this.requestId 
   });
 
-  // Execute 2 parallel calls: psychological profiling + commercial intelligence
-const [psychProfileAnalysis, commercialAnalysis, outreachAnalysis] = await Promise.all([
+// Execute psychological profiling + commercial intelligence FIRST
+const [psychProfileAnalysis, commercialAnalysis] = await Promise.all([
   this.executePsychographicProfiling(profile, business),
-  this.executeCommercialIntelligence(profile, business),
-  this.executeOutreachGeneration(profile, business, {
-    score: undefined,  // Will be set after analysis completes
-    audience_type: 'Creator-focused',
-    key_insights: 'Psychographic + commercial intelligence'
-  })
+  this.executeCommercialIntelligence(profile, business)
 ]);
+
+// THEN execute outreach generation with completed analysis data
+const outreachAnalysis = await this.executeOutreachGeneration(profile, business, {
+  score: psychProfileAnalysis.score || 0,
+  niche_fit: psychProfileAnalysis.niche_fit || 0,
+  audience_type: 'Creator-focused',
+  key_insights: `${psychProfileAnalysis.psychographics || 'Unknown psychographics'}. Budget: ${commercialAnalysis.budget_tier || 'unknown'}`
+});
 
 
 // Generate comprehensive deep summary for X-Ray with null-safety
