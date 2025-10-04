@@ -189,7 +189,6 @@ try {
   ), 500);
 }
 
-// PREPARE DATA FOR DATABASE
 const preProcessed = (profileData as any).preProcessed;
 
 const leadData = {
@@ -206,17 +205,8 @@ const leadData = {
   is_verified: profileData.isVerified,
   is_private: profileData.isPrivate,
   is_business_account: profileData.isBusinessAccount || false,
-  profile_url,
-  
-  // NEW: Add pre-computed metrics for database
-  computed_engagement_rate: profileData.engagement?.engagementRate || null,
-  computed_avg_likes: profileData.engagement?.avgLikes || null,
-  computed_avg_comments: profileData.engagement?.avgComments || null,
-  computed_posts_analyzed: profileData.engagement?.postsAnalyzed || null,
-  computed_content_themes: preProcessed?.content?.contentThemes || null,
-  computed_posting_frequency: preProcessed?.posting?.postsPerWeek || null,
-  computed_last_post_days_ago: preProcessed?.posting?.daysSinceLastPost || null,
-  computed_primary_format: profileData.engagement?.formatDistribution?.primaryFormat || null
+  profile_url
+  // REMOVED: All computed_* fields
 };
 
 // ✅ DEFINE enhancedCostDetails BEFORE the try block
@@ -234,16 +224,25 @@ const enhancedCostDetails = {
 let run_id: string;
 let lead_id: string;
 try {
-  // Step 1: Save analysis to database
-  const saveResult = await saveCompleteAnalysis(leadData, analysisResult, analysis_type, c.env);
-  run_id = saveResult.run_id;
-  lead_id = saveResult.lead_id;
-  
-  logger('info', 'Database save successful', { 
-    run_id,
-    lead_id,
-    username: profileData.username 
-  });
+// Add pre-processed metrics to analysisResult for payload storage
+if (preProcessed) {
+  analysisResult.pre_processed_metrics = {
+    engagement: preProcessed.engagement,
+    content: preProcessed.content,
+    posting: preProcessed.posting,
+    summary: preProcessed.summary
+  };
+}
+
+const saveResult = await saveCompleteAnalysis(leadData, analysisResult, analysis_type, c.env);
+run_id = saveResult.run_id;
+lead_id = saveResult.lead_id;
+
+logger('info', 'Database save successful', { 
+  run_id,
+  lead_id,
+  username: profileData.username 
+});
 
   // Step 2: Update user credits
   await updateCreditsAndTransaction(
