@@ -116,29 +116,31 @@ If profile audience does not match business target, reflect this in low score an
         requestId: this.requestId
       });
 
-      const analysisData = {
-        score: coreStrategyAnalysis.score,
-        engagement_score: coreStrategyAnalysis.engagement_score,
-        niche_fit: coreStrategyAnalysis.niche_fit,
-        quick_summary: coreStrategyAnalysis.quick_summary,
-        confidence_level: coreStrategyAnalysis.confidence_level,
-        
-        deep_payload: {
-          deep_summary: coreStrategyAnalysis.deep_summary,
-          selling_points: coreStrategyAnalysis.selling_points,
-          reasons: coreStrategyAnalysis.reasons,
-          audience_insights: coreStrategyAnalysis.audience_insights,
-          outreach_message: outreachAnalysis.outreach_message,
-          engagement_breakdown: coreStrategyAnalysis.engagement_breakdown,
-  pre_processed_metrics: (profile as any).preProcessed ? {
-    engagement: (profile as any).preProcessed.engagement || null,
-    content: (profile as any).preProcessed.content || null,
-    posting: (profile as any).preProcessed.posting || null,
-    summary: (profile as any).preProcessed.summary || null
-  } : null
-        },
-        
-      };
+  const preProcessedMetrics = (profile as any).preProcessed ? {
+  engagement: (profile as any).preProcessed.engagement || null,
+  content: (profile as any).preProcessed.content || null,
+  posting: (profile as any).preProcessed.posting || null,
+  summary: (profile as any).preProcessed.summary || null
+} : null;
+
+const analysisData = {
+  score: coreStrategyAnalysis.score,
+  engagement_score: coreStrategyAnalysis.engagement_score,
+  niche_fit: coreStrategyAnalysis.niche_fit,
+  quick_summary: coreStrategyAnalysis.quick_summary,
+  confidence_level: coreStrategyAnalysis.confidence_level,
+  pre_processed_metrics: preProcessedMetrics,
+  
+  deep_payload: {
+    deep_summary: coreStrategyAnalysis.deep_summary,
+    selling_points: coreStrategyAnalysis.selling_points,
+    reasons: coreStrategyAnalysis.reasons,
+    audience_insights: coreStrategyAnalysis.audience_insights,
+    outreach_message: outreachAnalysis.outreach_message,
+    engagement_breakdown: coreStrategyAnalysis.engagement_breakdown,
+    pre_processed_metrics: preProcessedMetrics
+  }
+};
 
       const processingTime = Date.now() - startTime;
       const totalCost = coreStrategyAnalysis.cost + outreachAnalysis.cost;
@@ -264,42 +266,45 @@ If profile audience does not match business target, reflect this in low score an
 
       const deepSummary = `Demographics: ${psychProfileAnalysis.demographics || 'Unknown'}. Psychographics: ${psychProfileAnalysis.psychographics || 'Unknown'}. Pain Points: ${painPointsStr}. Dreams: ${dreamsStr}. Commercial Profile: ${commercialAnalysis.budget_tier || 'unknown'} budget tier, ${commercialAnalysis.decision_role || 'unknown'} decision role, ${commercialAnalysis.buying_stage || 'unknown'} buying stage. Persuasion Strategy: Use ${commercialAnalysis.primary_angle || 'unknown'} angle with ${commercialAnalysis.hook_style || 'unknown'} hook style. Communication: ${commercialAnalysis.communication_style || 'unknown'} tone.`;
 
-      const analysisData = {
-        score: psychProfileAnalysis.score,
-        engagement_score: psychProfileAnalysis.engagement_score,
-        niche_fit: psychProfileAnalysis.niche_fit,
-        quick_summary: psychProfileAnalysis.quick_summary,
-        confidence_level: psychProfileAnalysis.confidence_level,
-        
-        xray_payload: {
-          deep_summary: deepSummary,
-          copywriter_profile: {
-            demographics: psychProfileAnalysis.demographics || 'Unknown',
-            psychographics: psychProfileAnalysis.psychographics || 'Unknown',
-            pain_points: psychProfileAnalysis.pain_points || ['Not determined'],
-            dreams_desires: psychProfileAnalysis.dreams_desires || ['Not determined']
-          },
-          commercial_intelligence: {
-            budget_tier: commercialAnalysis.budget_tier || 'unknown',
-            decision_role: commercialAnalysis.decision_role || 'unknown',
-            buying_stage: commercialAnalysis.buying_stage || 'unknown',
-            objections: commercialAnalysis.objections || ['Not determined']
-          },
-          persuasion_strategy: {
-            primary_angle: commercialAnalysis.primary_angle || 'unknown',
-            hook_style: commercialAnalysis.hook_style || 'unknown',
-            proof_elements: commercialAnalysis.proof_elements || ['Not determined'],
-            communication_style: commercialAnalysis.communication_style || 'unknown'
-          },
-          outreach_message: outreachAnalysis.outreach_message || 'Outreach generation failed',
-            pre_processed_metrics: (profile as any).preProcessed ? {
-    engagement: (profile as any).preProcessed.engagement || null,
-    content: (profile as any).preProcessed.content || null,
-    posting: (profile as any).preProcessed.posting || null,
-    summary: (profile as any).preProcessed.summary || null
-  } : null
-        }
-      };
+const preProcessedMetrics = (profile as any).preProcessed ? {
+  engagement: (profile as any).preProcessed.engagement || null,
+  content: (profile as any).preProcessed.content || null,
+  posting: (profile as any).preProcessed.posting || null,
+  summary: (profile as any).preProcessed.summary || null
+} : null;
+
+const analysisData = {
+  score: psychProfileAnalysis.score,
+  engagement_score: psychProfileAnalysis.engagement_score,
+  niche_fit: psychProfileAnalysis.niche_fit,
+  quick_summary: psychProfileAnalysis.quick_summary,
+  confidence_level: psychProfileAnalysis.confidence_level,
+  pre_processed_metrics: preProcessedMetrics,
+  
+  xray_payload: {
+    deep_summary: deepSummary,
+    copywriter_profile: {
+      demographics: psychProfileAnalysis.demographics || 'Unknown',
+      psychographics: psychProfileAnalysis.psychographics || 'Unknown',
+      pain_points: psychProfileAnalysis.pain_points || ['Not determined'],
+      dreams_desires: psychProfileAnalysis.dreams_desires || ['Not determined']
+    },
+    commercial_intelligence: {
+      budget_tier: commercialAnalysis.budget_tier || 'unknown',
+      decision_role: commercialAnalysis.decision_role || 'unknown',
+      buying_stage: commercialAnalysis.buying_stage || 'unknown',
+      objections: commercialAnalysis.objections || ['Not determined']
+    },
+    persuasion_strategy: {
+      primary_angle: commercialAnalysis.primary_angle || 'unknown',
+      hook_style: commercialAnalysis.hook_style || 'unknown',
+      proof_elements: commercialAnalysis.proof_elements || ['Not determined'],
+      communication_style: commercialAnalysis.communication_style || 'unknown'
+    },
+    outreach_message: outreachAnalysis.outreach_message || 'Outreach generation failed',
+    pre_processed_metrics: preProcessedMetrics
+  }
+};
 
       const processingTime = Date.now() - startTime;
       const totalCost = psychProfileAnalysis.cost + commercialAnalysis.cost + outreachAnalysis.cost;
