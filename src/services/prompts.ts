@@ -259,10 +259,17 @@ Contact: ${profile.externalUrl ? 'Has link' : 'No link'}`;
   
   prompt += `\nRecent Content: ${recentContent}`;
 
-  prompt += `\n\nBusiness: ${business.name} targeting ${business.target_audience}
+prompt += `\n\nBusiness Context: ${business.business_name} - ${business.business_one_liner || business.target_audience}
 
-Score collaboration potential (0-100) and generate outreach strategy.
-Return JSON with deep_summary, selling_points, outreach_message, engagement_breakdown, audience_insights, reasons.`;
+CRITICAL: Assess REAL collaboration fit. If this profile's audience is:
+- Not the business target (e.g., platform users vs B2B buyers)
+- Not solution-aware for this offering
+- Not decision-makers in this category
+
+Then score accordingly (0-40 range) and explain the mismatch clearly. Do not manufacture fit.
+
+Score collaboration potential (0-100) honestly and provide strategy ONLY if fit exists.
+Return JSON with deep_summary (explain fit reality), selling_points, outreach_message, engagement_breakdown, audience_insights, reasons.`;
 
   return prompt;
 }
