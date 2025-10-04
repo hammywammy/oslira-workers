@@ -222,6 +222,24 @@ function buildLightProfile(data: any, posts: any[], scraperUsed: string): Profil
       postsAttached: profile.latestPosts.length,
       originalPostsCount: posts.length
     });
+    
+    // CALCULATE ENGAGEMENT: So cache has it ready for deep/xray
+    if (profile.latestPosts.length > 0) {
+      logger('info', '🧮 CALCULATING ENGAGEMENT FOR LIGHT CACHE', {
+        username: profile.username,
+        postsToAnalyze: profile.latestPosts.length,
+        followers: profile.followersCount
+      });
+      
+      profile.engagement = calculateRealEngagement(profile.latestPosts, profile.followersCount);
+      
+      logger('info', '✅ LIGHT ENGAGEMENT CALCULATED', {
+        username: profile.username,
+        hasEngagement: !!profile.engagement,
+        avgLikes: profile.engagement?.avgLikes,
+        engagementRate: profile.engagement?.engagementRate
+      });
+    }
   } else {
     logger('warn', '⚠️ NO POSTS TO ATTACH TO LIGHT PROFILE', {
       username: profile.username,
