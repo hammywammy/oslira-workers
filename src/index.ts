@@ -67,10 +67,15 @@ app.get('/api/public-config', async (c) => {
   return handlePublicConfig(c);
 });
 
-// Main analysis endpoints
 app.post('/v1/analyze', async (c) => {
   const { handleAnalyze } = await import('./handlers/analyze.js');
   return handleAnalyze(c);
+});
+
+// NEW: Scraper data test endpoint
+app.post('/debug/scraper-data-test', async (c) => {
+  const { handleScraperDataTest } = await import('./handlers/scraper-test.js');
+  return handleScraperDataTest(c);
 });
 
 app.post('/v1/analyze-anonymous', async (c) => {
