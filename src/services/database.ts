@@ -171,9 +171,8 @@ summary_text: (() => {
              `Light analysis completed - Score: ${Math.round(parseFloat(analysisResult.score) || 0)}/100`;
     
     case 'deep':
-      return analysisResult.deep_payload?.deep_summary || 
-             analysisResult.deep_summary || 
-             analysisResult.quick_summary || 
+      return analysisResult.quick_summary ||  // ✅ Store SHORT version in runs
+             analysisResult.deep_payload?.deep_summary || 
              `Deep analysis completed - Score: ${Math.round(parseFloat(analysisResult.score) || 0)}/100`;
     
     case 'xray':
