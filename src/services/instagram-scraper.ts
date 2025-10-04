@@ -10,20 +10,34 @@ export async function scrapeInstagramProfile(username: string, analysisType: Ana
   // Check R2 cache first for profile data
   const cacheKey = `profile:${username}`;
   
-  try {
-    if (env.R2_CACHE_BUCKET) {
-      const cached = await env.R2_CACHE_BUCKET.get(cacheKey);
-      if (cached) {
-        const cacheData = await cached.json();
-        if (cacheData.expires > Date.now()) {
-          logger('info', 'Profile cache hit', { username, analysisType });
-          return cacheData.profile;
-        }
+try {
+  if (env.R2_CACHE_BUCKET) {
+    const cached = await env.R2_CACHE_BUCKET.get(cacheKey);
+    if (cached) {
+      const cacheData = await cached.json();
+      
+      // ✅ VALIDATE CACHE DATA BEFORE USING
+      if (cacheData.expires > Date.now() && 
+          cacheData.profile?.username && 
+          cacheData.profile.username !== 'undefined') {
+        
+        logger('info', 'Profile cache hit (validated)', { 
+          username: cacheData.profile.username, 
+          analysisType 
+        });
+        return cacheData.profile;
+      } else {
+        logger('warn', 'Cache data invalid or expired, re-scraping', { 
+          cached_username: cacheData.profile?.username,
+          requested_username: username,
+          expired: cacheData.expires <= Date.now()
+        });
       }
     }
-  } catch (error: any) {
-    logger('warn', 'Cache read failed, continuing with scraping', { error: error.message });
   }
+} catch (error: any) {
+  logger('warn', 'Cache read failed, continuing with scraping', { error: error.message });
+}
 
 const apifyToken = await getApiKey('APIFY_API_TOKEN', env, env.APP_ENV);
 if (!apifyToken) {
