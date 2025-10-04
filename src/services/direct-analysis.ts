@@ -3,6 +3,7 @@ import { buildSpeedLightAnalysisPrompt, buildDeepAnalysisPrompt, buildXRayAnalys
 import { logger } from '../utils/logger.js';
 import type { ProfileData } from '../types/interfaces.js';
 import { OutreachGenerator } from './outreach-generator.js';
+import { buildPersonalityAnalysisPrompt, getPersonalityAnalysisJsonSchema } from './prompts.js';
 
 export interface DirectAnalysisResult {
   analysisData: any;
