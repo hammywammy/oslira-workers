@@ -102,7 +102,7 @@ const response = await this.aiAdapter.executeRequest({
   model_name: 'gpt-5-mini',
 system_prompt: 'Rate lead fit honestly. If profile audience does not match business target, reflect this in low score and clear explanation. Return JSON only.',
   user_prompt: buildSpeedLightAnalysisPrompt(profile, business),
-  max_tokens: 1500,
+  max_tokens: 1000,
   json_schema: getLightAnalysisJsonSchema(),
   response_format: 'json',
   temperature: 0.0,
@@ -357,12 +357,7 @@ private async executePsychographicProfiling(profile: ProfileData, business: any)
   const response = await this.aiAdapter.executeRequest({
     model_name: 'gpt-5-mini', // Downgrade from GPT-5 for cost efficiency
     system_prompt: 'Extract psychological profile from Instagram data. Focus on demographics, psychographics, pain points, and aspirations. Be precise and evidence-based.',
-user_prompt: `Psychographic Analysis: @${profile.username} (${profile.followersCount})
-
-Bio: "${profile.bio}"
-Content Sample: ${profile.latestPosts?.slice(0, 3).map(p => `"${p.caption?.slice(0, 60)}..."`).join(' | ') || 'No posts'}
-
-Extract observable demographics, psychographics, pain points, and dreams/desires for ${business.target_audience} business context. Also provide a comprehensive deep_summary synthesizing the psychological profile into a cohesive narrative.`,
+user_prompt: buildXRayAnalysisPrompt(profile, business),
     max_tokens: 2000,
     json_schema: {
       name: 'PsychographicProfile',
@@ -435,7 +430,7 @@ Determine:
 - Buying stage (are they ACTUALLY aware of solutions like this, or still at problem-unaware?)
 - Real objections (not SaaS objections if they're not SaaS buyers)
 - Communication approach (based on where they ACTUALLY are)`,
-    max_tokens: 1500,
+    max_tokens: 2000,
     json_schema: {
       name: 'CommercialIntelligence',
       strict: true,
