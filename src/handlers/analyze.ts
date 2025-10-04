@@ -189,8 +189,6 @@ try {
   ), 500);
 }
 
-const preProcessed = (profileData as any).preProcessed;
-
 const leadData = {
   user_id,
   business_id,
@@ -224,16 +222,6 @@ const enhancedCostDetails = {
 let run_id: string;
 let lead_id: string;
 try {
-// Add pre-processed metrics to analysisResult for payload storage
-if (preProcessed) {
-  analysisResult.pre_processed_metrics = {
-    engagement: preProcessed.engagement,
-    content: preProcessed.content,
-    posting: preProcessed.posting,
-    summary: preProcessed.summary
-  };
-}
-
 const saveResult = await saveCompleteAnalysis(leadData, analysisResult, analysis_type, c.env);
 run_id = saveResult.run_id;
 lead_id = saveResult.lead_id;
