@@ -100,7 +100,7 @@ export class DirectAnalysisExecutor {
 
 const response = await this.aiAdapter.executeRequest({
   model_name: 'gpt-5-mini',
-  system_prompt: 'Rate leads fast. Return JSON only.',
+system_prompt: 'Rate lead fit honestly. If profile audience does not match business target, reflect this in low score and clear explanation. Return JSON only.',
   user_prompt: buildSpeedLightAnalysisPrompt(profile, business),
   max_tokens: 1500,
   json_schema: getLightAnalysisJsonSchema(),
@@ -414,14 +414,27 @@ Extract observable demographics, psychographics, pain points, and dreams/desires
 private async executeCommercialIntelligence(profile: ProfileData, business: any): Promise<any> {
   const response = await this.aiAdapter.executeRequest({
     model_name: 'gpt-5-mini',
-    system_prompt: 'Analyze commercial behavior and persuasion strategy from Instagram profile. Focus on buying patterns, objections, and optimal persuasion approaches.',
-    user_prompt: `Commercial Intelligence: @${profile.username} (${profile.followersCount})
+    system_prompt: 'Analyze audience-business alignment realistically. If the audience is NOT solution-aware for the business offering, explicitly state this. Do not force fit. Assess actual buying readiness, budget capacity, and commercial viability.',
+    user_prompt: `Reality Check: Does @${profile.username}'s audience align with ${business.business_name}?
 
-Bio: "${profile.bio}"
-Follower Tier: ${profile.followersCount > 100000 ? 'macro' : profile.followersCount > 10000 ? 'mid' : 'micro'}
-Business Context: ${business.business_one_liner || business.target_audience}
+Profile Bio: "${profile.bio}"
+Audience Size: ${profile.followersCount}
+Your Business: ${business.business_one_liner || business.target_audience}
 
-Determine budget tier, decision role, buying stage, objections, and optimal persuasion strategy.`,
+CRITICAL: Be honest about commercial viability. If this audience is:
+- Platform users (not buyers of external products)
+- Creators (not B2B buyers)
+- Consumers (not decision-makers)
+- Awareness stage (not solution-aware)
+
+Then reflect that in your assessment. Don't force-fit them into a buyer journey if they're not buyers.
+
+Determine:
+- Budget tier (be realistic about their actual spending capacity)
+- Decision role (are they even decision-makers for this category?)
+- Buying stage (are they ACTUALLY aware of solutions like this, or still at problem-unaware?)
+- Real objections (not SaaS objections if they're not SaaS buyers)
+- Communication approach (based on where they ACTUALLY are)`,
     max_tokens: 1500,
     json_schema: {
       name: 'CommercialIntelligence',
@@ -430,18 +443,18 @@ Determine budget tier, decision role, buying stage, objections, and optimal pers
         type: 'object',
         additionalProperties: false,
         properties: {
-          budget_tier: { 
-            type: 'string',
-            enum: ['low-budget', 'mid-market', 'premium', 'luxury']
-          },
-          decision_role: { 
-            type: 'string',
-            enum: ['primary', 'influencer', 'gatekeeper', 'researcher']
-          },
-          buying_stage: { 
-            type: 'string',
-            enum: ['unaware', 'problem-aware', 'solution-aware', 'product-aware', 'ready-to-buy']
-          },
+budget_tier: { 
+  type: 'string',
+  enum: ['no-budget-prosumer', 'low-budget', 'mid-market', 'premium', 'luxury', 'not-applicable']
+},
+buying_stage: { 
+  type: 'string',
+  enum: ['completely-unaware', 'problem-unaware', 'problem-aware', 'solution-aware', 'product-aware', 'ready-to-buy', 'not-in-market']
+},
+decision_role: { 
+  type: 'string',
+  enum: ['not-a-buyer', 'end-user', 'influencer', 'gatekeeper', 'decision-maker', 'economic-buyer']
+},
           objections: { 
             type: 'array',
             items: { type: 'string' },
