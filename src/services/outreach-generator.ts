@@ -16,6 +16,13 @@ interface BusinessProfile {
   target_audience?: string;
 }
 
+interface AnalysisContext {
+  score?: number;
+  niche_fit?: number;
+  key_insights?: string;
+  audience_type?: string;
+}
+
 export class OutreachGenerator {
   private aiAdapter: UniversalAIAdapter;
   private requestId: string;
@@ -24,84 +31,149 @@ export class OutreachGenerator {
     this.aiAdapter = new UniversalAIAdapter(env, requestId);
     this.requestId = requestId;
   }
-async generate(
-  profile: ProfileData, 
-  business: BusinessProfile,
-  analysisContext?: {
-    score?: number;
-    niche_fit?: number;
-    key_insights?: string;
-    audience_type?: string;
-  }
-): Promise<OutreachResult> {
-  
-// Validate required inputs with detailed logging
-const validationErrors: string[] = [];
 
-if (!profile) {
-  validationErrors.push('Profile is null/undefined');
-} else if (!profile.username) {
-  validationErrors.push('Profile missing username');
-}
-
-if (!business) {
-  validationErrors.push('Business is null/undefined');
-} else {
-  // Log business object structure for debugging
-  logger('info', 'Business object structure', {
-    hasBusinessName: !!business.business_name,
-    hasOneLiner: !!business.business_one_liner,
-    hasTargetAudience: !!business.target_audience,
-    businessKeys: Object.keys(business),
-    requestId: this.requestId
-  });
-  
-  if (!business.business_name) {
-    validationErrors.push('Business missing business_name');
-  }
-}
-  
-  if (validationErrors.length > 0) {
-    logger('error', 'Outreach generation validation failed', {
-      errors: validationErrors,
-      hasProfile: !!profile,
-      hasBusiness: !!business,
+  async generate(
+    profile: ProfileData, 
+    business: BusinessProfile,
+    analysisContext?: AnalysisContext
+  ): Promise<OutreachResult> {
+    
+    logger('info', '📧 Outreach generation initiated', {
+      username: profile?.username,
+      businessName: business?.business_name,
+      hasContext: !!analysisContext,
       requestId: this.requestId
     });
+
+    // VALIDATION PHASE
+    const validation = this.validateInputs(profile, business);
+    if (!validation.isValid) {
+      logger('error', '❌ Outreach validation failed', {
+        errors: validation.errors,
+        requestId: this.requestId
+      });
+      
+      return this.createErrorResponse(validation.errors.join(', '));
+    }
+
+    // SAFE DATA EXTRACTION
+    const safeData = this.extractSafeData(profile, business, analysisContext);
     
+    logger('info', '✅ Outreach data extracted', {
+      username: safeData.username,
+      followerCount: safeData.followerCount,
+      businessOffering: safeData.businessOffering,
+      hasContextPrompt: !!safeData.contextPrompt,
+      requestId: this.requestId
+    });
+
+    // AI GENERATION
+    try {
+      return await this.executeAIGeneration(safeData);
+    } catch (error: any) {
+      logger('error', '❌ Outreach AI generation failed', {
+        error: error.message,
+        stack: error.stack,
+        username: safeData.username,
+        requestId: this.requestId
+      });
+      
+      return this.createErrorResponse(error.message);
+    }
+  }
+
+  private validateInputs(profile: ProfileData, business: BusinessProfile): { 
+    isValid: boolean; 
+    errors: string[] 
+  } {
+    const errors: string[] = [];
+
+    // Profile validation
+    if (!profile) {
+      errors.push('Profile is null/undefined');
+    } else {
+      logger('info', '🔍 Profile validation', {
+        hasUsername: !!profile.username,
+        username: profile.username,
+        hasFollowerCount: profile.followersCount !== undefined,
+        hasBio: !!profile.bio,
+        requestId: this.requestId
+      });
+
+      if (!profile.username) {
+        errors.push('Profile missing username');
+      }
+    }
+
+    // Business validation
+    if (!business) {
+      errors.push('Business is null/undefined');
+    } else {
+      logger('info', '🔍 Business validation', {
+        hasBusinessName: !!business.business_name,
+        businessName: business.business_name,
+        hasOneLiner: !!business.business_one_liner,
+        hasTargetAudience: !!business.target_audience,
+        businessKeys: Object.keys(business),
+        requestId: this.requestId
+      });
+
+      if (!business.business_name) {
+        errors.push('Business missing business_name');
+      }
+    }
+
     return {
-      outreach_message: `Outreach generation failed: ${validationErrors.join(', ')}`,
-      cost: 0,
-      tokens_in: 0,
-      tokens_out: 0,
-      model_used: 'validation-failed'
+      isValid: errors.length === 0,
+      errors
     };
   }
 
-  // Safe extraction with defaults
-  const followerCount = profile.followersCount ?? 0;
-  const bio = profile.bio ?? 'No bio available';
-  const isVerified = profile.isVerified ?? false;
-  const isBusinessAccount = profile.isBusinessAccount ?? false;
-  const businessOffering = business.business_one_liner ?? business.target_audience ?? 'Creator services';
-  
-  // Build context string
-  let contextPrompt = '';
-  if (analysisContext) {
-    const score = analysisContext.score ?? 'N/A';
-    const nicheFit = analysisContext.niche_fit ?? 'N/A';
-    const insights = analysisContext.key_insights ?? 'Standard outreach';
-    const audienceType = analysisContext.audience_type ?? 'General';
+  private extractSafeData(
+    profile: ProfileData, 
+    business: BusinessProfile, 
+    analysisContext?: AnalysisContext
+  ) {
+    const username = profile.username || 'Unknown';
+    const followerCount = profile.followersCount ?? 0;
+    const bio = profile.bio ?? 'No bio available';
+    const isVerified = profile.isVerified ?? false;
+    const isBusinessAccount = profile.isBusinessAccount ?? false;
+    const businessOffering = business.business_one_liner ?? business.target_audience ?? 'Creator services';
     
-    contextPrompt = `
+    let contextPrompt = '';
+    if (analysisContext) {
+      const score = analysisContext.score ?? 'N/A';
+      const nicheFit = analysisContext.niche_fit ?? 'N/A';
+      const insights = analysisContext.key_insights ?? 'Standard outreach';
+      const audienceType = analysisContext.audience_type ?? 'General';
+      
+      contextPrompt = `
 Context from analysis:
 - Partnership Score: ${score}/100
 - Niche Fit: ${nicheFit}/100
 - Key Insight: ${insights}
 - Audience Type: ${audienceType}`;
+    }
+
+    return {
+      username,
+      followerCount,
+      bio,
+      isVerified,
+      isBusinessAccount,
+      businessName: business.business_name,
+      businessOffering,
+      contextPrompt
+    };
   }
 
-  try {
+  private async executeAIGeneration(safeData: any): Promise<OutreachResult> {
+    logger('info', '🤖 AI generation starting', {
+      username: safeData.username,
+      requestId: this.requestId
+    });
+
     const response = await this.aiAdapter.executeRequest({
       model_name: 'gpt-5-mini',
       system_prompt: `You are an expert at writing personalized influencer outreach messages. 
@@ -120,15 +192,15 @@ Rules:
 Focus on mutual benefit and be specific about the opportunity.`,
       user_prompt: `Write outreach message for partnership:
 
-Profile: @${profile.username}
-Followers: ${followerCount.toLocaleString()}
-Bio: "${bio}"
-Verified: ${isVerified ? 'Yes' : 'No'}
-Business Account: ${isBusinessAccount ? 'Yes' : 'No'}
+Profile: @${safeData.username}
+Followers: ${safeData.followerCount.toLocaleString()}
+Bio: "${safeData.bio}"
+Verified: ${safeData.isVerified ? 'Yes' : 'No'}
+Business Account: ${safeData.isBusinessAccount ? 'Yes' : 'No'}
 
-Your Business: ${business.business_name}
-Offering: ${businessOffering}
-${contextPrompt}
+Your Business: ${safeData.businessName}
+Offering: ${safeData.businessOffering}
+${safeData.contextPrompt}
 
 Write a compelling, personalized outreach message.`,
       max_tokens: 1500,
@@ -149,11 +221,20 @@ Write a compelling, personalized outreach message.`,
       analysis_type: 'outreach'
     });
 
+    logger('info', '✅ AI response received', {
+      hasContent: !!response.content,
+      contentLength: response.content?.length,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+      cost: response.usage.total_cost,
+      requestId: this.requestId
+    });
+
     const parsed = JSON.parse(response.content);
     
-    logger('info', 'Outreach generated', {
-      username: profile.username,
-      message_length: parsed.outreach_message?.length ?? 0,
+    logger('info', '✅ Outreach generated successfully', {
+      username: safeData.username,
+      messageLength: parsed.outreach_message?.length ?? 0,
       cost: response.usage.total_cost,
       requestId: this.requestId
     });
@@ -165,21 +246,15 @@ Write a compelling, personalized outreach message.`,
       tokens_out: response.usage.output_tokens,
       model_used: response.model_used
     };
-    
-  } catch (error: any) {
-    logger('error', 'Outreach generation API call failed', {
-      error: error.message,
-      username: profile.username,
-      requestId: this.requestId
-    });
-    
+  }
+
+  private createErrorResponse(errorMessage: string): OutreachResult {
     return {
-      outreach_message: `Outreach generation failed: ${error.message}`,
+      outreach_message: `Outreach generation failed: ${errorMessage}`,
       cost: 0,
       tokens_in: 0,
       tokens_out: 0,
       model_used: 'error'
     };
   }
-}
 }
