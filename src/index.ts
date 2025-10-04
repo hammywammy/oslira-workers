@@ -8,12 +8,11 @@ import { handlePublicConfig } from './handlers/public-config.js';
 const app = new Hono<{ Bindings: Env }>();
 
 app.use('*', cors({
-  origin: '*',  // Allow all origins temporarily for debugging
+  origin: '*',
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  credentials: false  // Set to false when using wildcard origin
+  allowHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'apikey'],
+  credentials: false
 }));
-
 
 // ===============================================================================
 // BASIC ENDPOINTS
