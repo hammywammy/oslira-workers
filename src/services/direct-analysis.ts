@@ -139,23 +139,25 @@ async executeDeep(profile: ProfileData, business: any): Promise<DirectAnalysisRe
     this.executeOutreachGeneration(profile, business)
   ]);
 
-  // Merge results
-  const analysisData = {
-    score: coreStrategyAnalysis.score,
-    engagement_score: coreStrategyAnalysis.engagement_score,
-    niche_fit: coreStrategyAnalysis.niche_fit,
-    quick_summary: coreStrategyAnalysis.quick_summary,
-    confidence_level: coreStrategyAnalysis.confidence_level,
-    
-    deep_payload: {
-      deep_summary: coreStrategyAnalysis.deep_summary,
-      selling_points: coreStrategyAnalysis.selling_points,
-      reasons: coreStrategyAnalysis.reasons,
-      audience_insights: coreStrategyAnalysis.audience_insights,
-      outreach_message: outreachAnalysis.outreach_message,
-      engagement_breakdown: coreStrategyAnalysis.engagement_breakdown
-    }
-  };
+const analysisData = {
+  score: coreStrategyAnalysis.score,
+  engagement_score: coreStrategyAnalysis.engagement_score,
+  niche_fit: coreStrategyAnalysis.niche_fit,
+  quick_summary: coreStrategyAnalysis.quick_summary,
+  confidence_level: coreStrategyAnalysis.confidence_level,
+  
+  deep_payload: {
+    deep_summary: coreStrategyAnalysis.deep_summary,
+    selling_points: coreStrategyAnalysis.selling_points,
+    reasons: coreStrategyAnalysis.reasons,
+    audience_insights: coreStrategyAnalysis.audience_insights,
+    outreach_message: outreachAnalysis.outreach_message,
+    engagement_breakdown: coreStrategyAnalysis.engagement_breakdown
+  },
+  
+  // NEW: Store raw pre-processed data
+  pre_processed_metrics: (profile as any).preProcessed || null
+};
 
   const processingTime = Date.now() - startTime;
   const totalCost = coreStrategyAnalysis.cost + outreachAnalysis.cost;
@@ -326,7 +328,8 @@ const analysisData = {
       hook_style: commercialAnalysis.hook_style,
       proof_elements: commercialAnalysis.proof_elements,
       communication_style: commercialAnalysis.communication_style
-    }
+    },
+    pre_processed_metrics: (profile as any).preProcessed || null
   }
 };
 
