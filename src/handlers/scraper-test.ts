@@ -105,7 +105,7 @@ function analyzeScraperResponse(response: any[]): any {
   Object.entries(userFieldCategories).forEach(([category, fields]) => {
     fields.forEach(field => {
       if (firstItem[field] !== undefined) {
-        analysis.user_fields[category].push(field);
+        analysis.user_fields[category as keyof typeof analysis.user_fields].push(field);
       }
     });
   });
