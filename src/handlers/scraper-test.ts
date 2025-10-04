@@ -20,26 +20,32 @@ export async function handleScraperDataTest(c: Context<{ Bindings: Env }>): Prom
     logger('info', 'Testing scraper data extraction', { username, requestId });
 
     // Test shu_deep scraper with 12 posts
-    const scraperInput = {
-      addParentData: false,
-      directUrls: [`https://instagram.com/${username}/`],
-      enhanceUserSearchWithFacebookPage: false,
-      isUserReelFeedURL: false,
-      isUserTaggedFeedURL: false,
-      resultsLimit: 12,
-      resultsType: "details",
-      searchType: "hashtag"
-    };
+// Test dS_basic scraper (dSCLg0C3YEZ83HzYX)
+const scraperInput = {
+  usernames: [username]
+};
 
-    const rawResponse = await callWithRetry(
-      `https://api.apify.com/v2/acts/shu8hvrXbJbY3Eb9W/run-sync-get-dataset-items?token=${apifyToken}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(scraperInput)
-      },
-      1, 1000, 60000
-    );
+logger('info', 'Calling dS_basic scraper', { 
+  username, 
+  endpoint: 'dSCLg0C3YEZ83HzYX',
+  requestId 
+});
+
+const rawResponse = await callWithRetry(
+  `https://api.apify.com/v2/acts/dSCLg0C3YEZ83HzYX/run-sync-get-dataset-items?token=${apifyToken}`,
+  {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(scraperInput)
+  },
+  1, 1000, 30000
+);
+
+logger('info', 'dS_basic scraper response received', { 
+  username,
+  itemsReturned: rawResponse?.length || 0,
+  requestId 
+});
 
     if (!rawResponse || !Array.isArray(rawResponse)) {
       return c.json(createStandardResponse(false, undefined, 'Invalid scraper response', requestId), 500);
