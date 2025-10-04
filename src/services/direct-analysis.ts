@@ -188,12 +188,7 @@ private async executeCoreStrategyMerged(profile: ProfileData, business: any): Pr
   const response = await this.aiAdapter.executeRequest({
     model_name: 'gpt-5-mini',
     system_prompt: 'Score influencer partnership potential AND generate comprehensive strategy in single response. Combine scoring with strategic analysis efficiently.',
-    user_prompt: `Partnership Analysis: @${profile.username} (${profile.followersCount}) + ${business.business_name}
-    
-Bio: "${profile.bio}"
-Business: ${business.business_one_liner || business.target_audience}
-
-Score 0-100 for niche fit, engagement, overall match. Generate partnership strategy, selling points, audience insights, and reasons for collaboration.`,
+user_prompt: buildDeepAnalysisPrompt(profile, business),
     max_tokens: 3500,
     json_schema: {
       name: 'MergedCoreStrategy',
