@@ -190,6 +190,8 @@ try {
 }
 
 // PREPARE DATA FOR DATABASE
+const preProcessed = (profileData as any).preProcessed;
+
 const leadData = {
   user_id,
   business_id,
@@ -204,7 +206,17 @@ const leadData = {
   is_verified: profileData.isVerified,
   is_private: profileData.isPrivate,
   is_business_account: profileData.isBusinessAccount || false,
-  profile_url
+  profile_url,
+  
+  // NEW: Add pre-computed metrics for database
+  computed_engagement_rate: profileData.engagement?.engagementRate || null,
+  computed_avg_likes: profileData.engagement?.avgLikes || null,
+  computed_avg_comments: profileData.engagement?.avgComments || null,
+  computed_posts_analyzed: profileData.engagement?.postsAnalyzed || null,
+  computed_content_themes: preProcessed?.content?.contentThemes || null,
+  computed_posting_frequency: preProcessed?.posting?.postsPerWeek || null,
+  computed_last_post_days_ago: preProcessed?.posting?.daysSinceLastPost || null,
+  computed_primary_format: profileData.engagement?.formatDistribution?.primaryFormat || null
 };
 
 // ✅ DEFINE enhancedCostDetails BEFORE the try block
