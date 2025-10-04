@@ -146,8 +146,10 @@ if (!firstItem.username && !firstItem.handle) {
         profileData = buildLightProfile(transformedData, config.name);
       } else {
         // For deep/xray, process posts if available
-        const posts = extractPostsFromResponse(response, analysisType);
-        profileData = buildEnhancedProfile(transformedData, posts, config.name, analysisType);
+// For deep/xray, process posts if available
+const posts = extractPostsFromResponse(response, analysisType);
+// CRITICAL: Pass rawData (which has latestPosts), not transformedData
+profileData = buildEnhancedProfile(transformedData, posts, rawData, config.name, analysisType);
       }
       
       return profileData;
@@ -167,22 +169,31 @@ function buildLightProfile(data: any, scraperUsed: string): ProfileData {
 
 function buildEnhancedProfile(
   data: any, 
-  posts: any[], 
+  posts: any[],
+  rawData: any,  // ADD THIS
   scraperUsed: string, 
   analysisType: AnalysisType
 ): ProfileData {
   // Build base profile
-  const profile = validateProfileData(data, analysisType);
+// Build base profile
+const profile = validateProfileData(data, analysisType);
+
+// CRITICAL FIX: Extract posts from rawData.latestPosts if posts array is empty
+let finalPosts = posts;
+if ((!finalPosts || finalPosts.length === 0) && rawData.latestPosts && Array.isArray(rawData.latestPosts)) {
+  finalPosts = rawData.latestPosts;
+  logger('info', 'Posts extracted from rawData.latestPosts', { count: finalPosts.length });
+}
+
+// Add posts if available
+if (finalPosts && finalPosts.length > 0) {
+  profile.latestPosts = finalPosts.slice(0, analysisType === 'xray' ? 50 : 12);
   
-  // Add posts if available
-  if (posts && posts.length > 0) {
-    profile.latestPosts = posts.slice(0, analysisType === 'xray' ? 50 : 12);
-    
-    // Calculate real engagement if we have posts
-    if (profile.latestPosts.length > 0) {
-      profile.engagement = calculateRealEngagement(profile.latestPosts, profile.followersCount);
-    }
+  // Calculate real engagement if we have posts
+  if (profile.latestPosts.length > 0) {
+    profile.engagement = calculateRealEngagement(profile.latestPosts, profile.followersCount);
   }
+}
   
   profile.scraperUsed = scraperUsed;
   profile.dataQuality = determineDataQuality(profile, analysisType);
