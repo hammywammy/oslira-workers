@@ -129,10 +129,15 @@ If profile audience does not match business target, reflect this in low score an
           reasons: coreStrategyAnalysis.reasons,
           audience_insights: coreStrategyAnalysis.audience_insights,
           outreach_message: outreachAnalysis.outreach_message,
-          engagement_breakdown: coreStrategyAnalysis.engagement_breakdown
+          engagement_breakdown: coreStrategyAnalysis.engagement_breakdown,
+  pre_processed_metrics: (profile as any).preProcessed ? {
+    engagement: (profile as any).preProcessed.engagement || null,
+    content: (profile as any).preProcessed.content || null,
+    posting: (profile as any).preProcessed.posting || null,
+    summary: (profile as any).preProcessed.summary || null
+  } : null
         },
         
-        pre_processed_metrics: (profile as any).preProcessed || null
       };
 
       const processingTime = Date.now() - startTime;
@@ -287,7 +292,12 @@ If profile audience does not match business target, reflect this in low score an
             communication_style: commercialAnalysis.communication_style || 'unknown'
           },
           outreach_message: outreachAnalysis.outreach_message || 'Outreach generation failed',
-          pre_processed_metrics: (profile as any).preProcessed || null
+            pre_processed_metrics: (profile as any).preProcessed ? {
+    engagement: (profile as any).preProcessed.engagement || null,
+    content: (profile as any).preProcessed.content || null,
+    posting: (profile as any).preProcessed.posting || null,
+    summary: (profile as any).preProcessed.summary || null
+  } : null
         }
       };
 
