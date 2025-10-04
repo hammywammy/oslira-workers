@@ -359,9 +359,9 @@ xray_payload: {
 private async executePsychographicProfiling(profile: ProfileData, business: any): Promise<any> {
   const response = await this.aiAdapter.executeRequest({
     model_name: 'gpt-5-mini', // Downgrade from GPT-5 for cost efficiency
-    system_prompt: 'Extract psychological profile from Instagram data. Focus on demographics, psychographics, pain points, and aspirations. Be precise and evidence-based.',
+    system_prompt: 'Extract audience psychological profile efficiently. Focus on demographics, psychographics, pain points, and desires. Be concise and evidence-based. Prioritize analysis over reasoning.',
 user_prompt: buildXRayAnalysisPrompt(profile, business),
-    max_tokens: 2000,
+    max_tokens: 3000,
     json_schema: {
       name: 'PsychographicProfile',
       strict: true,
