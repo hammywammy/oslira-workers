@@ -133,11 +133,12 @@ async executeDeep(profile: ProfileData, business: any): Promise<DirectAnalysisRe
     requestId: this.requestId 
   });
 
-  // Execute 2 parallel calls instead of 3 (merged core+strategy)
-  const [coreStrategyAnalysis, outreachAnalysis] = await Promise.all([
-    this.executeCoreStrategyMerged(profile, business),
-    this.executeOutreachGeneration(profile, business)
-  ]);
+// Execute 3 parallel calls: psychological profiling + commercial intelligence + outreach
+const [psychProfileAnalysis, commercialAnalysis, outreachAnalysis] = await Promise.all([
+  this.executePsychographicProfiling(profile, business),
+  this.executeCommercialIntelligence(profile, business),
+  this.executeOutreachGeneration(profile, business)
+]);
 
 const analysisData = {
   score: coreStrategyAnalysis.score,
@@ -327,14 +328,15 @@ xray_payload: {
     proof_elements: commercialAnalysis.proof_elements || ['Not determined'],
     communication_style: commercialAnalysis.communication_style || 'unknown'
   },
+  outreach_message: outreachAnalysis.outreach_message || 'Outreach generation failed',
   pre_processed_metrics: (profile as any).preProcessed || null
 }
 };
 
   const processingTime = Date.now() - startTime;
-  const totalCost = psychProfileAnalysis.cost + commercialAnalysis.cost;
-  const totalTokensIn = psychProfileAnalysis.tokens_in + commercialAnalysis.tokens_in;
-  const totalTokensOut = psychProfileAnalysis.tokens_out + commercialAnalysis.tokens_out;
+const totalCost = psychProfileAnalysis.cost + commercialAnalysis.cost + outreachAnalysis.cost;
+const totalTokensIn = psychProfileAnalysis.tokens_in + commercialAnalysis.tokens_in + outreachAnalysis.tokens_in;
+const totalTokensOut = psychProfileAnalysis.tokens_out + commercialAnalysis.tokens_out + outreachAnalysis.tokens_out;
 
   logger('info', 'Optimized X-Ray analysis completed', {
     username: profile.username,
