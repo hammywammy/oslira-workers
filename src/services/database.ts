@@ -286,6 +286,7 @@ case 'xray':
     copywriter_profile: xrayData.copywriter_profile || {},
     commercial_intelligence: xrayData.commercial_intelligence || {},
     persuasion_strategy: xrayData.persuasion_strategy || {},
+    outreach_message: xrayData.outreach_message || null,
     
     // NEW: Store all pre-processed metrics in payload
     pre_processed_metrics: analysisData.pre_processed_metrics || null
