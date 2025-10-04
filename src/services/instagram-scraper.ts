@@ -178,10 +178,13 @@ let profileData: ProfileData;
 if (analysisType === 'light') {
   logger('info', '🏃 BUILDING LIGHT PROFILE', {
     username: transformedData.username,
-    analysisType
+    analysisType,
+    postsAvailable: posts.length,
+    willAttachPosts: posts.length > 0
   });
-  profileData = buildLightProfile(transformedData, config.name);
-} else {
+  // CRITICAL: Pass posts to light profile for caching
+  profileData = buildLightProfile(transformedData, posts, config.name);
+}else {
   logger('info', '🔬 BUILDING ENHANCED PROFILE', {
     username: transformedData.username,
     analysisType,
@@ -207,8 +210,25 @@ logger('info', '✅ PROFILE BUILD COMPLETE', {
   return await withScraperRetry(scraperAttempts, username);
 }
 
-function buildLightProfile(data: any, scraperUsed: string): ProfileData {
+function buildLightProfile(data: any, posts: any[], scraperUsed: string): ProfileData {
   const profile = validateProfileData(data, 'light');
+  
+  // CRITICAL: Attach posts even for light analysis (for caching)
+  if (posts && posts.length > 0) {
+    profile.latestPosts = posts.slice(0, 12);
+    
+    logger('info', '📎 POSTS ATTACHED TO LIGHT PROFILE', {
+      username: profile.username,
+      postsAttached: profile.latestPosts.length,
+      originalPostsCount: posts.length
+    });
+  } else {
+    logger('warn', '⚠️ NO POSTS TO ATTACH TO LIGHT PROFILE', {
+      username: profile.username,
+      postsProvided: posts?.length || 0
+    });
+  }
+  
   profile.scraperUsed = scraperUsed;
   profile.dataQuality = 'medium';
   
