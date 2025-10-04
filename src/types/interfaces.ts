@@ -61,6 +61,25 @@ export interface EngagementData {
   totalEngagement: number;
   postsAnalyzed: number;
   qualityScore?: number;
+  
+  // NEW: Video metrics
+  videoPerformance?: {
+    avgViews: number;
+    avgEngagement: number;
+    videoCount: number;
+    viewToEngagementRatio: number;
+  } | null;
+  
+  // NEW: Format distribution
+  formatDistribution?: {
+    imageCount: number;
+    videoCount: number;
+    sidecarCount: number;
+    primaryFormat: 'images' | 'videos' | 'carousels' | 'mixed';
+    usesVideo: boolean;
+    usesCarousel: boolean;
+    formatDiversity: number;
+  };
 }
 
 export interface BusinessProfile {
