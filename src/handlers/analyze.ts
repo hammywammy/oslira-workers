@@ -210,61 +210,71 @@ export async function handleAnalyze(c: Context<{ Bindings: Env }>): Promise<Resp
 // SAVE TO DATABASE AND UPDATE CREDITS
     let run_id: string;
     let lead_id: string;
-    try {
-      // Step 1: Save analysis to database
-      const saveResult = await saveCompleteAnalysis(leadData, analysisResult, analysis_type, c.env);
-      run_id = saveResult.run_id;
-      lead_id = saveResult.lead_id;
-      
-      logger('info', 'Database save successful', { 
-        run_id,
-        lead_id,
-        username: profileData.username 
-      });
+try {
+  // Step 1: Save analysis to database
+  logger('info', 'Attempting database save', { 
+    username: leadData.username,
+    analysisType: analysis_type,
+    hasAnalysisData: !!analysisResult,
+    leadDataKeys: Object.keys(leadData)
+  });
 
-      // Step 3: Update user credits with enhanced cost tracking
-      const enhancedCostDetails = {
-        actual_cost: costDetails.actual_cost,
-        tokens_in: costDetails.tokens_in,
-        tokens_out: costDetails.tokens_out,
-        model_used: costDetails.model_used,
-        block_type: costDetails.block_type,
-        processing_duration_ms: processingTime,
-        blocks_used: [costDetails.block_type]
-      };
+  const saveResult = await saveCompleteAnalysis(leadData, analysisResult, analysis_type, c.env);
+  
+  if (!saveResult?.run_id || !saveResult?.lead_id) {
+    throw new Error('Database save returned invalid result: missing run_id or lead_id');
+  }
+  
+  run_id = saveResult.run_id;
+  lead_id = saveResult.lead_id;
+  
+  logger('info', 'Database save successful', { 
+    run_id,
+    lead_id,
+    username: profileData.username 
+  });
 
-await updateCreditsAndTransaction(
-  user_id, 
-  creditCost, 
-  analysis_type, 
-  run_id,
-  enhancedCostDetails,
-  c.env
-);
+  // Step 2: Update user credits
+  logger('info', 'Attempting credit update', { 
+    user_id, 
+    creditCost, 
+    run_id 
+  });
 
-      logger('info', 'Credits updated successfully', { 
-        user_id, 
-        creditCost, 
-        run_id,
-        lead_id,
-        actual_cost: costDetails.actual_cost,
-        margin: creditCost - costDetails.actual_cost
-      });
+  await updateCreditsAndTransaction(
+    user_id, 
+    creditCost, 
+    analysis_type, 
+    run_id,
+    enhancedCostDetails,
+    c.env
+  );
 
-    } catch (saveError: any) {
-      logger('error', 'Database save or credit update failed', { 
-        error: saveError.message,
-        username: profileData.username,
-        requestId
-      });
-      return c.json(createStandardResponse(
-        false, 
-        undefined, 
-        `Database operation failed: ${saveError.message}`,
-        requestId
-      ), 500);
-    }
+  logger('info', 'Credits updated successfully', { 
+    user_id, 
+    creditCost, 
+    run_id,
+    lead_id
+  });
 
+} catch (saveError: any) {
+  logger('error', 'Database save or credit update FAILED', { 
+    error: saveError.message,
+    errorStack: saveError.stack,
+    username: profileData.username,
+    analysisType: analysis_type,
+    leadData: leadData,
+    requestId
+  });
+  
+  // CRITICAL: Return error to frontend
+  return c.json(createStandardResponse(
+    false, 
+    undefined, 
+    `Database operation failed: ${saveError.message}`,
+    requestId
+  ), 500);
+}
     // BUILD RESPONSE
     const responseData: AnalysisResponse = {
       run_id: run_id,
