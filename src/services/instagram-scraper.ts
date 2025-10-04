@@ -213,6 +213,7 @@ function calculateRealEngagement(posts: any[], followersCount: number): any {
   
   if (validPosts.length === 0) return undefined;
   
+  // Standard engagement metrics
   const totalLikes = validPosts.reduce((sum, post) => 
     sum + (post.likesCount || post.likes || 0), 0
   );
@@ -229,13 +230,63 @@ function calculateRealEngagement(posts: any[], followersCount: number): any {
     ? parseFloat(((totalEngagement / validPosts.length) / followersCount * 100).toFixed(2))
     : 0;
 
+  // NEW: Video performance metrics
+  const videoPosts = validPosts.filter(post => 
+    post.type === 'Video' && post.videoViewCount && post.videoViewCount > 0
+  );
+  
+  let videoMetrics = null;
+  if (videoPosts.length > 0) {
+    const totalVideoViews = videoPosts.reduce((sum, post) => sum + post.videoViewCount, 0);
+    const avgVideoViews = Math.round(totalVideoViews / videoPosts.length);
+    const avgVideoEngagement = Math.round(
+      videoPosts.reduce((sum, post) => 
+        sum + (post.likesCount || 0) + (post.commentsCount || 0), 0
+      ) / videoPosts.length
+    );
+    
+    videoMetrics = {
+      avgViews: avgVideoViews,
+      avgEngagement: avgVideoEngagement,
+      videoCount: videoPosts.length,
+      viewToEngagementRatio: avgVideoViews > 0 ? parseFloat((avgVideoEngagement / avgVideoViews * 100).toFixed(2)) : 0
+    };
+  }
+
+  // NEW: Content format distribution
+  const formatDistribution = {
+    imageCount: validPosts.filter(p => p.type === 'Image').length,
+    videoCount: validPosts.filter(p => p.type === 'Video').length,
+    sidecarCount: validPosts.filter(p => p.type === 'Sidecar').length
+  };
+  
+  const totalFormats = formatDistribution.imageCount + formatDistribution.videoCount + formatDistribution.sidecarCount;
+  const primaryFormat = 
+    formatDistribution.sidecarCount / totalFormats > 0.4 ? 'carousels' :
+    formatDistribution.videoCount / totalFormats > 0.4 ? 'videos' :
+    formatDistribution.imageCount / totalFormats > 0.4 ? 'images' : 'mixed';
+
   return {
     avgLikes,
     avgComments,
     engagementRate,
     totalEngagement,
     postsAnalyzed: validPosts.length,
-    qualityScore: calculateEngagementQuality(engagementRate, followersCount)
+    qualityScore: calculateEngagementQuality(engagementRate, followersCount),
+    
+    // NEW FIELDS
+    videoPerformance: videoMetrics,
+    formatDistribution: {
+      ...formatDistribution,
+      primaryFormat,
+      usesVideo: formatDistribution.videoCount > 0,
+      usesCarousel: formatDistribution.sidecarCount > 0,
+      formatDiversity: [
+        formatDistribution.imageCount > 0,
+        formatDistribution.videoCount > 0,
+        formatDistribution.sidecarCount > 0
+      ].filter(Boolean).length
+    }
   };
 }
 
