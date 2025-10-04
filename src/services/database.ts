@@ -266,16 +266,15 @@ case 'deep':
     selling_points: deepData.selling_points || [],
     outreach_message: deepData.outreach_message || null,
     engagement_breakdown: {
-      avg_likes: parseInt(engagementData.avg_likes) || parseInt(analysisData.avg_likes) || 0,
-      avg_comments: parseInt(engagementData.avg_comments) || parseInt(analysisData.avg_comments) || 0,
-      engagement_rate: parseFloat(engagementData.engagement_rate) || parseFloat(analysisData.engagement_rate) || 0
+      avg_likes: parseInt(engagementData.avg_likes) || 0,
+      avg_comments: parseInt(engagementData.avg_comments) || 0,
+      engagement_rate: parseFloat(engagementData.engagement_rate) || 0
     },
     latest_posts: deepData.latest_posts || null,
-    audience_insights: deepData.audience_insights || analysisData.engagement_insights || null,
+    audience_insights: deepData.audience_insights || null,
     reasons: deepData.reasons || [],
-    
-    // NEW: Store all pre-processed metrics in payload
-    pre_processed_metrics: analysisData.pre_processed_metrics || null
+    pre_processed_metrics: analysisData.pre_processed_metrics || null,
+    personality_profile: deepData.personality_profile || null  // NEW
   };
   break;
         
@@ -287,9 +286,8 @@ case 'xray':
     commercial_intelligence: xrayData.commercial_intelligence || {},
     persuasion_strategy: xrayData.persuasion_strategy || {},
     outreach_message: xrayData.outreach_message || null,
-    
-    // NEW: Store all pre-processed metrics in payload
-    pre_processed_metrics: analysisData.pre_processed_metrics || null
+    pre_processed_metrics: analysisData.pre_processed_metrics || null,
+    personality_profile: xrayData.personality_profile || null  // NEW
   };
   break;
         
