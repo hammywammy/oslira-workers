@@ -343,11 +343,20 @@ export async function saveCompleteAnalysis(
   try {
     logger('info', 'Starting complete analysis save', { 
       username: leadData.username,
-      analysisType
+      analysisType,
+      hasAnalysisData: !!analysisData,
+      leadDataKeys: Object.keys(leadData),
+      analysisDataKeys: analysisData ? Object.keys(analysisData) : []
     });
 
+    // Step 1: Upsert lead
     const lead_id = await upsertLead(leadData, env);
+    if (!lead_id) {
+      throw new Error('upsertLead returned null/undefined lead_id');
+    }
+    logger('info', 'Lead upserted successfully', { lead_id });
 
+    // Step 2: Insert analysis run
     const run_id = await insertAnalysisRun(
       lead_id,
       leadData.user_id,
@@ -356,9 +365,14 @@ export async function saveCompleteAnalysis(
       analysisData,
       env
     );
+    if (!run_id) {
+      throw new Error('insertAnalysisRun returned null/undefined run_id');
+    }
+    logger('info', 'Analysis run inserted successfully', { run_id });
 
+    // Step 3: Insert payload for deep/xray
     if (analysisData && (analysisType === 'deep' || analysisType === 'xray')) {
-      await insertAnalysisPayload(
+      const payload_id = await insertAnalysisPayload(
         run_id,
         lead_id,
         leadData.user_id,
@@ -367,6 +381,7 @@ export async function saveCompleteAnalysis(
         analysisData,
         env
       );
+      logger('info', 'Analysis payload inserted successfully', { payload_id });
     }
 
     logger('info', 'Complete analysis save successful', { 
@@ -378,7 +393,12 @@ export async function saveCompleteAnalysis(
     return { run_id, lead_id };
 
   } catch (error: any) {
-    logger('error', 'saveCompleteAnalysis failed', { error: error.message });
+    logger('error', 'saveCompleteAnalysis failed', { 
+      error: error.message,
+      errorStack: error.stack,
+      username: leadData?.username,
+      analysisType
+    });
     throw new Error(`Complete analysis save failed: ${error.message}`);
   }
 }
