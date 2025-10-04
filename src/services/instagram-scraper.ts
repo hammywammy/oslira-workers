@@ -21,12 +21,56 @@ try {
           cacheData.profile?.username && 
           cacheData.profile.username !== 'undefined') {
         
+        const cachedProfile = cacheData.profile;
+        
+        // CRITICAL: Check if deep/xray analysis needs pre-processing
+        if ((analysisType === 'deep' || analysisType === 'xray')) {
+          const hasPreProcessed = !!(cachedProfile as any).preProcessed;
+          const hasPosts = !!(cachedProfile.latestPosts && cachedProfile.latestPosts.length > 0);
+          
+          logger('info', '🔍 CACHE PRE-PROCESSING CHECK', {
+            username: cachedProfile.username,
+            analysisType,
+            hasPreProcessed,
+            hasPosts,
+            postsCount: cachedProfile.latestPosts?.length || 0
+          });
+          
+          // If no pre-processing but has posts, run it now
+          if (!hasPreProcessed && hasPosts) {
+            logger('info', '⚙️ RUNNING POST-CACHE PRE-PROCESSING', {
+              username: cachedProfile.username,
+              postsCount: cachedProfile.latestPosts.length
+            });
+            
+            const { runPreProcessing } = await import('./pre-processor.js');
+            const preProcessed = runPreProcessing(cachedProfile);
+            
+            // Attach to cached profile
+            (cachedProfile as any).preProcessed = preProcessed;
+            
+            logger('info', '✅ POST-CACHE PRE-PROCESSING COMPLETE', {
+              username: cachedProfile.username,
+              hasSummary: !!preProcessed.summary,
+              summaryLength: preProcessed.summary?.length || 0
+            });
+            
+            // Update cache with pre-processed version
+            const updatedCacheData = {
+              ...cacheData,
+              profile: cachedProfile
+            };
+            await env.R2_CACHE_BUCKET.put(cacheKey, JSON.stringify(updatedCacheData));
+          }
+        }
+        
         logger('info', 'Profile cache hit (validated)', { 
-          username: cacheData.profile.username, 
-          analysisType 
+          username: cachedProfile.username, 
+          analysisType,
+          hasPreProcessing: !!(cachedProfile as any).preProcessed
         });
-        return cacheData.profile;
-      } else {
+        return cachedProfile;
+      }else {
         logger('warn', 'Cache data invalid or expired, re-scraping', { 
           cached_username: cacheData.profile?.username,
           requested_username: username,
