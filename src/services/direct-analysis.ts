@@ -340,8 +340,7 @@ const totalTokensOut = psychProfileAnalysis.tokens_out + commercialAnalysis.toke
 private async executePsychographicProfiling(profile: ProfileData, business: any): Promise<any> {
   const response = await this.aiAdapter.executeRequest({
     model_name: 'gpt-5-mini', // Downgrade from GPT-5 for cost efficiency
-    system_prompt: 'Extract audience psychological profile efficiently. Focus on demographics, psychographics, pain points, and desires. Be concise and evidence-based. Prioritize analysis over reasoning.',
-user_prompt: buildXRayAnalysisPrompt(profile, business),
+   system_prompt: 'Extract audience psychological profile. Return ONLY the required JSON fields: score, engagement_score, niche_fit, quick_summary, confidence_level, deep_summary (text summary, NOT nested JSON), demographics, psychographics, pain_points, dreams_desires. Follow the schema exactly. Do not nest additional JSON structures.',
     max_tokens: 3000,
     json_schema: {
       name: 'PsychographicProfile',
