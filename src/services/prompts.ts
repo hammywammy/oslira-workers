@@ -305,7 +305,7 @@ Contact: ${profile.externalUrl ? 'Has link' : 'No link'}`;
   
   prompt += `\nRecent Content: ${recentContent}`;
 
-prompt += `\n\nBusiness Context: ${business.business_name} - ${business.business_one_liner || business.target_audience}
+  prompt += `\n\nBusiness Context: ${business.business_name} - ${business.business_one_liner || business.target_audience}
 
 CRITICAL: Assess REAL collaboration fit. If this profile's audience is:
 - Not the business target (e.g., platform users vs B2B buyers)
@@ -336,14 +336,12 @@ export function buildXRayAnalysisPrompt(
 Bio: "${profile.bio || 'None'}"
 Type: ${profile.isVerified ? '✓' : ''}${profile.isBusinessAccount ? 'Biz' : 'Personal'}`;
 
-  // Add pre-processed intelligence if available
   if (preProcessed?.summary) {
     prompt += `\n\nDATA INTELLIGENCE:\n${preProcessed.summary}`;
   } else if (profile.engagement) {
     prompt += `\nEngagement: ${profile.engagement.engagementRate}% ER (${profile.engagement.postsAnalyzed} posts)`;
   }
 
-  // Add content sample
   const contentSample = profile.latestPosts?.slice(0, 3).map(p => 
     `"${p.caption?.slice(0, 50)}..." (${p.likesCount}♡ ${p.commentsCount}💬)`
   ).join(' | ') || 'No posts';
@@ -351,7 +349,7 @@ Type: ${profile.isVerified ? '✓' : ''}${profile.isBusinessAccount ? 'Biz' : 'P
   prompt += `\nContent Sample: ${contentSample}`;
 
   prompt += `\n\nExtract observable demographics, psychographics, pain_points, dreams_desires from visible data only.
-Score partnership viability for ${business.target_audience} business.
+Score partnership viability for ${business.business_name} (${business.business_one_liner || business.target_audience}).
 Return JSON with xray_payload structure including deep_summary, copywriter_profile, commercial_intelligence, persuasion_strategy.`;
 
   return prompt;
@@ -421,9 +419,9 @@ export function buildOutreachMessagePrompt(
 - **Business Account**: ${profile.isBusinessAccount ? 'Yes' : 'No'}
 
 ## BUSINESS CONTEXT
-- **Company**: ${business.name}
-- **Industry**: ${business.industry}
-- **Value Proposition**: ${business.value_proposition}
+- **Company**: ${business.business_name}
+- **Industry**: ${business.business_niche}
+- **Business Summary**: ${business.business_one_liner || business.target_audience}
 - **Target Audience**: ${business.target_audience}
 
 ## ANALYSIS INSIGHTS
@@ -482,8 +480,9 @@ export function buildDeepSummaryPrompt(
 - **Bio**: "${profile.bio || 'No bio available'}"
 
 ## BUSINESS CONTEXT
-- **Company**: ${business.name}
-- **Industry**: ${business.industry}
+- **Company**: ${business.business_name}
+- **Industry**: ${business.business_niche}
+- **Business Summary**: ${business.business_one_liner || business.target_audience}
 - **Target Market**: ${business.target_audience}
 
 ## ANALYSIS RESULTS
