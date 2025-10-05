@@ -29,6 +29,7 @@ async function getSupabaseServiceRole(env: Env): Promise<string> {
   _cachedServiceRole = await getApiKey('SUPABASE_SERVICE_ROLE', env, env.APP_ENV);
   return _cachedServiceRole;
 }
+
 // ===============================================================================
 // INTERFACES
 // ===============================================================================
@@ -42,11 +43,9 @@ interface BusinessProfileData {
   // New onboarding fields
   company_size?: string;
   website?: string;
-  budget?: string;
   monthly_lead_goal?: number;
   challenges?: string[];
   target_company_sizes?: string[];
-  integrations?: string[];
   team_size?: string;
   campaign_manager?: string;
   primary_objective?: string;
@@ -263,7 +262,10 @@ async function handleCreateProfile(
         business_niche: newProfile.business_niche,
         has_ai_context: !!newProfile.business_context_pack,
         monthly_lead_goal: newProfile.monthly_lead_goal,
-        budget_tier: newProfile.budget
+        team_size: newProfile.team_size,
+        campaign_manager: newProfile.campaign_manager,
+        has_target_company_sizes: !!(newProfile.target_company_sizes?.length),
+        challenges_count: newProfile.challenges?.length || 0
       }
     }, c.env, requestId);
     
@@ -459,10 +461,6 @@ function validateBusinessProfileData(data: BusinessProfileData) {
     return { isValid: false, error: 'target_company_sizes must be an array' };
   }
   
-  if (data.integrations && !Array.isArray(data.integrations)) {
-    return { isValid: false, error: 'integrations must be an array' };
-  }
-  
   return { isValid: true };
 }
 
@@ -489,11 +487,9 @@ function sanitizeBusinessProfileData(data: BusinessProfileData, userId: string) 
     // New onboarding fields
     company_size: data.company_size?.trim() || null,
     website: data.website?.trim() || null,
-    budget: data.budget?.trim() || null,
     monthly_lead_goal: data.monthly_lead_goal || null,
     challenges: data.challenges || null,
     target_company_sizes: data.target_company_sizes || null,
-    integrations: data.integrations || null,
     team_size: data.team_size?.trim() || null,
     campaign_manager: data.campaign_manager?.trim() || null,
     primary_objective: data.primary_objective?.trim() || null,
