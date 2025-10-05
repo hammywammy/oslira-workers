@@ -10,20 +10,80 @@ export async function scrapeInstagramProfile(username: string, analysisType: Ana
   // Check R2 cache first for profile data
   const cacheKey = `profile:${username}`;
   
-  try {
-    if (env.R2_CACHE_BUCKET) {
-      const cached = await env.R2_CACHE_BUCKET.get(cacheKey);
-      if (cached) {
-        const cacheData = await cached.json();
-        if (cacheData.expires > Date.now()) {
-          logger('info', 'Profile cache hit', { username, analysisType });
-          return cacheData.profile;
+try {
+  if (env.R2_CACHE_BUCKET) {
+    const cached = await env.R2_CACHE_BUCKET.get(cacheKey);
+    if (cached) {
+      const cacheData = await cached.json();
+      
+      // ✅ VALIDATE CACHE DATA BEFORE USING
+      if (cacheData.expires > Date.now() && 
+          cacheData.profile?.username && 
+          cacheData.profile.username !== 'undefined') {
+        
+        const cachedProfile = cacheData.profile;
+        
+        // CRITICAL: Check if deep/xray analysis needs pre-processing
+        if ((analysisType === 'deep' || analysisType === 'xray')) {
+          const hasPreProcessed = !!(cachedProfile as any).preProcessed;
+          const hasPosts = !!(cachedProfile.latestPosts && cachedProfile.latestPosts.length > 0);
+          
+          logger('info', '🔍 CACHE PRE-PROCESSING CHECK', {
+            username: cachedProfile.username,
+            analysisType,
+            hasPreProcessed,
+            hasPosts,
+            postsCount: cachedProfile.latestPosts?.length || 0
+          });
+          
+          // If no pre-processing but has posts, run it now
+          if (!hasPreProcessed && hasPosts) {
+            logger('info', '⚙️ RUNNING POST-CACHE PRE-PROCESSING', {
+              username: cachedProfile.username,
+              postsCount: cachedProfile.latestPosts.length
+            });
+            
+            const { runPreProcessing } = await import('./pre-processor.js');
+            const preProcessed = runPreProcessing(cachedProfile);
+            
+            // Attach to cached profile
+            (cachedProfile as any).preProcessed = preProcessed;
+
+            await cacheProfileData(cacheKey, cachedProfile, analysisType, env);
+            
+            logger('info', '✅ POST-CACHE PRE-PROCESSING COMPLETE', {
+              username: cachedProfile.username,
+              hasSummary: !!preProcessed.summary,
+              summaryLength: preProcessed.summary?.length || 0
+            });
+            
+            // Update cache with pre-processed version
+            const updatedCacheData = {
+              ...cacheData,
+              profile: cachedProfile
+            };
+            await env.R2_CACHE_BUCKET.put(cacheKey, JSON.stringify(updatedCacheData));
+          }
         }
+        
+        logger('info', 'Profile cache hit (validated)', { 
+          username: cachedProfile.username, 
+          analysisType,
+          hasPreProcessing: !!(cachedProfile as any).preProcessed
+        });
+        return cachedProfile;
+      }else {
+        logger('warn', 'Cache data invalid or expired, re-scraping', { 
+          cached_username: cacheData.profile?.username,
+          requested_username: username,
+          expired: cacheData.expires <= Date.now()
+        });
       }
     }
-  } catch (error: any) {
-    logger('warn', 'Cache read failed, continuing with scraping', { error: error.message });
   }
+} catch (error: any) {
+  logger('warn', 'Cache read failed, continuing with scraping', { error: error.message });
+}
 
 const apifyToken = await getApiKey('APIFY_API_TOKEN', env, env.APP_ENV);
 if (!apifyToken) {
@@ -73,42 +133,121 @@ async function scrapeWithConfigs(
       });
 
       const url = buildScraperUrl(config.endpoint, token);
-      const response = await callWithRetry(url, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'User-Agent': 'InstagramAnalyzer/3.0'
-        },
-        body: JSON.stringify(config.input(username))
-      }, config.maxRetries, config.retryDelay, config.timeout);
+const response = await callWithRetry(url, {
+  method: 'POST',
+  headers: { 
+    'Content-Type': 'application/json',
+    'User-Agent': 'InstagramAnalyzer/3.0'
+  },
+  body: JSON.stringify(config.input(username))
+}, config.maxRetries, config.retryDelay, config.timeout);
 
-      if (!response || !Array.isArray(response) || response.length === 0) {
-        throw new Error(`${config.name} returned no usable data`);
-      }
+// EXTENSIVE LOGGING: Raw response structure
+logger('info', '📦 RAW SCRAPER RESPONSE RECEIVED', {
+  scraper: config.name,
+  username,
+  analysisType,
+  responseType: Array.isArray(response) ? 'array' : typeof response,
+  responseLength: Array.isArray(response) ? response.length : 'N/A',
+  firstItemKeys: response && response[0] ? Object.keys(response[0]).slice(0, 20) : [],
+  hasLatestPosts: response && response[0] && response[0].latestPosts ? true : false,
+  latestPostsCount: response && response[0] && response[0].latestPosts ? response[0].latestPosts.length : 0,
+  postsCount: response && response[0] && response[0].postsCount ? response[0].postsCount : 0
+});
 
-      // Transform using scraper-specific field mapping
-      const rawData = response[0];
-      const transformedData = validateAndTransformScraperData(rawData, config);
-      
-      logger('info', 'Scraper data transformation', {
-        scraper: config.name,
-        username: transformedData.username,
-        followers: transformedData.followersCount,
-        following: transformedData.followingCount,
-        originalFollowing: rawData.followsCount || rawData.followingCount,
-        transformedFollowing: transformedData.followingCount
-      });
+// Check for error response from Apify
+if (!response || !Array.isArray(response) || response.length === 0) {
+  throw new Error(`${config.name} returned no usable data`);
+}
 
-      // Enhanced profile building for deep/xray analysis
-      let profileData: ProfileData;
-      
-      if (analysisType === 'light') {
-        profileData = buildLightProfile(transformedData, config.name);
-      } else {
-        // For deep/xray, process posts if available
-        const posts = extractPostsFromResponse(response, analysisType);
-        profileData = buildEnhancedProfile(transformedData, posts, config.name, analysisType);
-      }
+const firstItem = response[0];
+
+// Detect Apify error responses
+if (firstItem.error || firstItem.errorDescription) {
+  const errorType = firstItem.error || 'unknown_error';
+  const errorDesc = firstItem.errorDescription || 'An error occurred';
+  
+  logger('warn', 'Apify returned error response', { 
+    username, 
+    error: errorType, 
+    description: errorDesc 
+  });
+  
+  if (errorType === 'not_found' || errorDesc.toLowerCase().includes('does not exist') || errorDesc.toLowerCase().includes('not found')) {
+    throw new Error('Instagram profile not found');
+  }
+  
+  throw new Error(`Scraper error: ${errorDesc}`);
+}
+
+// Validate username exists
+if (!firstItem.username && !firstItem.handle) {
+  throw new Error('No valid profile data returned');
+}
+
+// CRITICAL: Extract posts BEFORE transformation
+const rawData = response[0];
+const posts = extractPostsFromResponse(response, analysisType);
+
+logger('info', '🔍 POST EXTRACTION CHECKPOINT', {
+  scraper: config.name,
+  username,
+  analysisType,
+  postsExtractedCount: posts.length,
+  rawDataHasLatestPosts: !!rawData.latestPosts,
+  rawDataLatestPostsCount: rawData.latestPosts ? rawData.latestPosts.length : 0,
+  extractedPostsSample: posts.length > 0 ? {
+    firstPostId: posts[0].id || posts[0].shortCode,
+    firstPostType: posts[0].type,
+    firstPostHasEngagement: !!(posts[0].likesCount || posts[0].commentsCount)
+  } : null
+});
+
+// Transform using scraper-specific field mapping
+const transformedData = validateAndTransformScraperData(rawData, config);
+
+logger('info', '🔄 SCRAPER DATA TRANSFORMATION COMPLETE', {
+  scraper: config.name,
+  username: transformedData.username,
+  followers: transformedData.followersCount,
+  following: transformedData.followingCount,
+  postsCount: transformedData.postsCount,
+  originalFollowing: rawData.followsCount || rawData.followingCount,
+  transformedFollowing: transformedData.followingCount,
+  transformedDataHasLatestPosts: !!(transformedData as any).latestPosts,
+  transformedDataKeys: Object.keys(transformedData)
+});
+
+// Enhanced profile building for deep/xray analysis
+let profileData: ProfileData;
+
+if (analysisType === 'light') {
+  logger('info', '🏃 BUILDING LIGHT PROFILE', {
+    username: transformedData.username,
+    analysisType,
+    postsAvailable: posts.length,
+    willAttachPosts: posts.length > 0
+  });
+  // CRITICAL: Pass posts to light profile for caching
+  profileData = buildLightProfile(transformedData, posts, config.name);
+}else {
+  logger('info', '🔬 BUILDING ENHANCED PROFILE', {
+    username: transformedData.username,
+    analysisType,
+    postsToProcess: posts.length,
+    hasRawData: !!rawData
+  });
+  profileData = buildEnhancedProfile(transformedData, posts, rawData, config.name, analysisType);
+}
+
+logger('info', '✅ PROFILE BUILD COMPLETE', {
+  username: profileData.username,
+  analysisType,
+  hasLatestPosts: !!(profileData.latestPosts && profileData.latestPosts.length > 0),
+  latestPostsCount: profileData.latestPosts?.length || 0,
+  hasEngagement: !!profileData.engagement,
+  dataQuality: profileData.dataQuality
+});
       
       return profileData;
     }
@@ -117,8 +256,43 @@ async function scrapeWithConfigs(
   return await withScraperRetry(scraperAttempts, username);
 }
 
-function buildLightProfile(data: any, scraperUsed: string): ProfileData {
+function buildLightProfile(data: any, posts: any[], scraperUsed: string): ProfileData {
   const profile = validateProfileData(data, 'light');
+  
+  // CRITICAL: Attach posts even for light analysis (for caching)
+  if (posts && posts.length > 0) {
+    profile.latestPosts = posts.slice(0, 12);
+    
+    logger('info', '📎 POSTS ATTACHED TO LIGHT PROFILE', {
+      username: profile.username,
+      postsAttached: profile.latestPosts.length,
+      originalPostsCount: posts.length
+    });
+    
+    // CALCULATE ENGAGEMENT: So cache has it ready for deep/xray
+    if (profile.latestPosts.length > 0) {
+      logger('info', '🧮 CALCULATING ENGAGEMENT FOR LIGHT CACHE', {
+        username: profile.username,
+        postsToAnalyze: profile.latestPosts.length,
+        followers: profile.followersCount
+      });
+      
+      profile.engagement = calculateRealEngagement(profile.latestPosts, profile.followersCount);
+      
+      logger('info', '✅ LIGHT ENGAGEMENT CALCULATED', {
+        username: profile.username,
+        hasEngagement: !!profile.engagement,
+        avgLikes: profile.engagement?.avgLikes,
+        engagementRate: profile.engagement?.engagementRate
+      });
+    }
+  } else {
+    logger('warn', '⚠️ NO POSTS TO ATTACH TO LIGHT PROFILE', {
+      username: profile.username,
+      postsProvided: posts?.length || 0
+    });
+  }
+  
   profile.scraperUsed = scraperUsed;
   profile.dataQuality = 'medium';
   
@@ -127,40 +301,150 @@ function buildLightProfile(data: any, scraperUsed: string): ProfileData {
 
 function buildEnhancedProfile(
   data: any, 
-  posts: any[], 
+  posts: any[],
+  rawData: any,  // ADD THIS PARAMETER
   scraperUsed: string, 
   analysisType: AnalysisType
 ): ProfileData {
+  logger('info', '🏗️ BUILD ENHANCED PROFILE START', {
+    username: data.username,
+    analysisType,
+    postsProvided: posts.length,
+    rawDataHasLatestPosts: !!rawData.latestPosts,
+    rawDataLatestPostsCount: rawData.latestPosts?.length || 0
+  });
+  
   // Build base profile
   const profile = validateProfileData(data, analysisType);
   
+  // CRITICAL FIX: Fallback to rawData.latestPosts if posts array is empty
+  let finalPosts = posts;
+  if ((!finalPosts || finalPosts.length === 0) && rawData.latestPosts && Array.isArray(rawData.latestPosts)) {
+    logger('info', '🔄 USING RAWDATA.LATESTPOSTS FALLBACK', { 
+      rawLatestPostsCount: rawData.latestPosts.length,
+      username: data.username 
+    });
+    finalPosts = rawData.latestPosts;
+  }
+  
+  logger('info', '📊 POSTS PROCESSING DECISION', {
+    username: data.username,
+    postsProvidedCount: posts.length,
+    finalPostsCount: finalPosts.length,
+    usedFallback: finalPosts !== posts,
+    willProcessPosts: finalPosts && finalPosts.length > 0
+  });
+  
   // Add posts if available
-  if (posts && posts.length > 0) {
-    profile.latestPosts = posts.slice(0, analysisType === 'xray' ? 50 : 12);
+  if (finalPosts && finalPosts.length > 0) {
+    const sliceLimit = analysisType === 'xray' ? 50 : 12;
+    profile.latestPosts = finalPosts.slice(0, sliceLimit);
+    
+    logger('info', '✂️ POSTS SLICED FOR PROFILE', {
+      username: data.username,
+      originalCount: finalPosts.length,
+      slicedCount: profile.latestPosts.length,
+      sliceLimit,
+      analysisType
+    });
     
     // Calculate real engagement if we have posts
     if (profile.latestPosts.length > 0) {
+      logger('info', '🧮 CALCULATING ENGAGEMENT', {
+        username: data.username,
+        postsToAnalyze: profile.latestPosts.length,
+        followers: profile.followersCount
+      });
       profile.engagement = calculateRealEngagement(profile.latestPosts, profile.followersCount);
+      
+      logger('info', '✅ ENGAGEMENT CALCULATED', {
+        username: data.username,
+        hasEngagement: !!profile.engagement,
+        avgLikes: profile.engagement?.avgLikes,
+        avgComments: profile.engagement?.avgComments,
+        engagementRate: profile.engagement?.engagementRate
+      });
     }
+  } else {
+    logger('warn', '⚠️ NO POSTS AVAILABLE FOR ENHANCED PROFILE', {
+      username: data.username,
+      postsProvidedCount: posts.length,
+      rawDataHasLatestPosts: !!rawData.latestPosts,
+      analysisType
+    });
   }
   
   profile.scraperUsed = scraperUsed;
   profile.dataQuality = determineDataQuality(profile, analysisType);
   
+  // NEW: Run pre-processing for deep/xray analysis
+  if ((analysisType === 'deep' || analysisType === 'xray') && profile.latestPosts.length > 0) {
+    const { runPreProcessing } = require('./pre-processor.js');
+    const preProcessed = runPreProcessing(profile);
+    
+    // Attach pre-processed data to profile
+    (profile as any).preProcessed = preProcessed;
+    
+    logger('info', 'Pre-processing attached to profile', {
+      username: profile.username,
+      hasSummary: !!preProcessed.summary
+    });
+  }
+  
   return profile;
 }
 
 function extractPostsFromResponse(response: any[], analysisType: AnalysisType): any[] {
-  // For shu scraper, posts might be in the response array after profile data
-  if (response.length > 1) {
-    return response.slice(1); // Skip first item (profile), rest are posts
+  logger('info', '🎯 EXTRACT POSTS FROM RESPONSE START', {
+    analysisType,
+    responseLength: response.length,
+    responseIsArray: Array.isArray(response)
+  });
+  
+  const rawProfile = response[0];
+  
+  logger('info', '🔍 CHECKING RAW PROFILE FOR POSTS', {
+    analysisType,
+    hasLatestPosts: !!rawProfile.latestPosts,
+    latestPostsIsArray: Array.isArray(rawProfile.latestPosts),
+    latestPostsCount: rawProfile.latestPosts?.length || 0,
+    rawProfileKeys: Object.keys(rawProfile).slice(0, 30)
+  });
+  
+  // CRITICAL: Check for latestPosts in raw response FIRST
+  if (rawProfile.latestPosts && Array.isArray(rawProfile.latestPosts)) {
+    logger('info', '✅ POSTS EXTRACTED FROM LATESTPOSTS', { 
+      count: rawProfile.latestPosts.length,
+      analysisType,
+      firstPostSample: rawProfile.latestPosts[0] ? {
+        id: rawProfile.latestPosts[0].id,
+        type: rawProfile.latestPosts[0].type,
+        hasLikes: !!rawProfile.latestPosts[0].likesCount
+      } : null
+    });
+    return rawProfile.latestPosts;
   }
   
-  // For dS scraper or if posts are embedded in profile
-  const profile = response[0];
-  if (profile.latestPosts && Array.isArray(profile.latestPosts)) {
-    return profile.latestPosts;
+  // For shu scraper, posts might be in array after profile
+  if (response.length > 1) {
+    logger('info', '✅ POSTS EXTRACTED FROM RESPONSE ARRAY', { 
+      count: response.length - 1,
+      analysisType,
+      secondItemSample: response[1] ? {
+        id: response[1].id,
+        type: response[1].type
+      } : null
+    });
+    return response.slice(1);
   }
+  
+  logger('warn', '❌ NO POSTS FOUND IN SCRAPER RESPONSE', { 
+    responseLength: response.length,
+    hasLatestPosts: !!rawProfile.latestPosts,
+    latestPostsType: rawProfile.latestPosts ? typeof rawProfile.latestPosts : 'undefined',
+    analysisType,
+    availableFields: Object.keys(rawProfile).filter(k => k.toLowerCase().includes('post'))
+  });
   
   return [];
 }
@@ -173,6 +457,7 @@ function calculateRealEngagement(posts: any[], followersCount: number): any {
   
   if (validPosts.length === 0) return undefined;
   
+  // Standard engagement metrics
   const totalLikes = validPosts.reduce((sum, post) => 
     sum + (post.likesCount || post.likes || 0), 0
   );
@@ -189,13 +474,63 @@ function calculateRealEngagement(posts: any[], followersCount: number): any {
     ? parseFloat(((totalEngagement / validPosts.length) / followersCount * 100).toFixed(2))
     : 0;
 
+  // NEW: Video performance metrics
+  const videoPosts = validPosts.filter(post => 
+    post.type === 'Video' && post.videoViewCount && post.videoViewCount > 0
+  );
+  
+  let videoMetrics = null;
+  if (videoPosts.length > 0) {
+    const totalVideoViews = videoPosts.reduce((sum, post) => sum + post.videoViewCount, 0);
+    const avgVideoViews = Math.round(totalVideoViews / videoPosts.length);
+    const avgVideoEngagement = Math.round(
+      videoPosts.reduce((sum, post) => 
+        sum + (post.likesCount || 0) + (post.commentsCount || 0), 0
+      ) / videoPosts.length
+    );
+    
+    videoMetrics = {
+      avgViews: avgVideoViews,
+      avgEngagement: avgVideoEngagement,
+      videoCount: videoPosts.length,
+      viewToEngagementRatio: avgVideoViews > 0 ? parseFloat((avgVideoEngagement / avgVideoViews * 100).toFixed(2)) : 0
+    };
+  }
+
+  // NEW: Content format distribution
+  const formatDistribution = {
+    imageCount: validPosts.filter(p => p.type === 'Image').length,
+    videoCount: validPosts.filter(p => p.type === 'Video').length,
+    sidecarCount: validPosts.filter(p => p.type === 'Sidecar').length
+  };
+  
+  const totalFormats = formatDistribution.imageCount + formatDistribution.videoCount + formatDistribution.sidecarCount;
+  const primaryFormat = 
+    formatDistribution.sidecarCount / totalFormats > 0.4 ? 'carousels' :
+    formatDistribution.videoCount / totalFormats > 0.4 ? 'videos' :
+    formatDistribution.imageCount / totalFormats > 0.4 ? 'images' : 'mixed';
+
   return {
     avgLikes,
     avgComments,
     engagementRate,
     totalEngagement,
     postsAnalyzed: validPosts.length,
-    qualityScore: calculateEngagementQuality(engagementRate, followersCount)
+    qualityScore: calculateEngagementQuality(engagementRate, followersCount),
+    
+    // NEW FIELDS
+    videoPerformance: videoMetrics,
+    formatDistribution: {
+      ...formatDistribution,
+      primaryFormat,
+      usesVideo: formatDistribution.videoCount > 0,
+      usesCarousel: formatDistribution.sidecarCount > 0,
+      formatDiversity: [
+        formatDistribution.imageCount > 0,
+        formatDistribution.videoCount > 0,
+        formatDistribution.sidecarCount > 0
+      ].filter(Boolean).length
+    }
   };
 }
 

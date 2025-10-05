@@ -8,12 +8,11 @@ import { handlePublicConfig } from './handlers/public-config.js';
 const app = new Hono<{ Bindings: Env }>();
 
 app.use('*', cors({
-  origin: '*',  // Allow all origins temporarily for debugging
+  origin: '*',
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  credentials: false  // Set to false when using wildcard origin
+  allowHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'apikey'],
+  credentials: false
 }));
-
 
 // ===============================================================================
 // BASIC ENDPOINTS
@@ -35,7 +34,14 @@ app.get('/', (c) => {
   });
 });
 
-app.get('/health', (c) => c.json({ status: 'healthy', timestamp: new Date().toISOString() }));
+app.get('/health', (c) => c.json({ 
+  status: 'healthy', 
+  timestamp: new Date().toISOString(),
+  environment: c.env.APP_ENV || 'NOT_SET',
+  hasAWSKey: !!c.env.AWS_ACCESS_KEY_ID,
+  hasAWSSecret: !!c.env.AWS_SECRET_ACCESS_KEY,
+  region: c.env.AWS_REGION || 'NOT_SET'
+}));
 
 
 // ===============================================================================
@@ -60,10 +66,15 @@ app.get('/api/public-config', async (c) => {
   return handlePublicConfig(c);
 });
 
-// Main analysis endpoints
 app.post('/v1/analyze', async (c) => {
   const { handleAnalyze } = await import('./handlers/analyze.js');
   return handleAnalyze(c);
+});
+
+// NEW: Scraper data test endpoint
+app.post('/debug/scraper-data-test', async (c) => {
+  const { handleScraperDataTest } = await import('./handlers/scraper-test.js');
+  return handleScraperDataTest(c);
 });
 
 app.post('/v1/analyze-anonymous', async (c) => {

@@ -14,7 +14,7 @@ export function getLightAnalysisJsonSchema() {
       additionalProperties: false,
       properties: {
         score: { type: 'integer', minimum: 0, maximum: 100 },
-        summary: { type: 'string', maxLength: 100 },
+        summary: { type: 'string', maxLength: 400 },
         confidence: { type: 'number', minimum: 0.0, maximum: 1.0 }
       },
       required: ['score', 'summary', 'confidence']
@@ -36,7 +36,7 @@ export function getDeepAnalysisJsonSchema() {
         niche_fit: { type: 'integer', minimum: 0, maximum: 100 },
         quick_summary: { 
           type: 'string', 
-          maxLength: 200,
+          maxLength: 600,
           description: 'Short 1-2 sentence summary for dashboard lists'
         },
         confidence_level: { 
@@ -111,7 +111,7 @@ export function getXRayAnalysisJsonSchema() {
         niche_fit: { type: 'integer', minimum: 0, maximum: 100 },
         quick_summary: { 
           type: 'string', 
-          maxLength: 200,
+          maxLength: 800,
           description: 'Short 1-2 sentence summary for dashboard lists'
         },
         confidence_level: { 
@@ -130,6 +130,10 @@ export function getXRayAnalysisJsonSchema() {
               type: 'object',
               additionalProperties: false,
               properties: {
+                    deep_summary: { 
+      type: 'string',
+      description: 'Comprehensive X-Ray analysis explaining psychological profile, commercial intelligence, and persuasion strategy'
+    },
                 demographics: { 
                   type: 'string',
                   description: 'Age, gender, location, lifestyle demographics'
@@ -153,7 +157,7 @@ export function getXRayAnalysisJsonSchema() {
                   description: 'Goals, aspirations, and desired outcomes'
                 }
               },
-              required: ['demographics', 'psychographics', 'pain_points', 'dreams_desires']
+              required: ['deep_summary', 'copywriter_profile', 'commercial_intelligence', 'persuasion_strategy']
             },
             commercial_intelligence: {
               type: 'object',
@@ -222,6 +226,52 @@ export function getXRayAnalysisJsonSchema() {
   };
 }
 
+export function getPersonalityAnalysisJsonSchema() {
+  return {
+    name: 'PersonalityAnalysis',
+    strict: true,
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        disc_profile: { 
+          type: 'string',
+          description: 'Primary DISC type (D, I, S, C) or hybrid (DI, SC, etc.)'
+        },
+        behavior_patterns: { 
+          type: 'array', 
+          items: { type: 'string' },
+          minItems: 3,
+          maxItems: 5,
+          description: 'Observable behavioral tendencies'
+        },
+        communication_style: { 
+          type: 'string',
+          description: 'How they communicate - tone, formality, directness'
+        },
+        motivation_drivers: { 
+          type: 'array', 
+          items: { type: 'string' },
+          minItems: 2,
+          maxItems: 4,
+          description: 'What appears to motivate them'
+        },
+        content_authenticity: {
+          type: 'string',
+          enum: ['ai_generated', 'ai_assisted', 'human_authentic', 'insufficient_data'],
+          description: 'Assessment of whether captions are AI-written or human'
+        },
+        data_confidence: {
+          type: 'string',
+          enum: ['high', 'medium', 'low'],
+          description: 'Confidence in personality assessment based on data quality'
+        }
+      },
+      required: ['disc_profile', 'behavior_patterns', 'communication_style', 'motivation_drivers', 'content_authenticity', 'data_confidence']
+    }
+  };
+}
+
 export function buildDeepAnalysisPrompt(
   profile: ProfileData, 
   business: BusinessProfile,
@@ -230,29 +280,44 @@ export function buildDeepAnalysisPrompt(
     preprocessor?: any;
   }
 ): string {
-  const hasEngagement = profile.engagement?.postsAnalyzed > 0;
-  const engagementData = hasEngagement 
-    ? `${profile.engagement.engagementRate}% ER (${profile.engagement.avgLikes} likes, ${profile.engagement.avgComments} comments, ${profile.engagement.postsAnalyzed} posts)`
-    : `No engagement data (${profile.followersCount} followers)`;
-
-  const recentContent = profile.latestPosts?.slice(0, 2).map(p => 
-    `"${p.caption?.slice(0, 40)}..." (${p.likesCount} likes)`
-  ).join(' | ') || 'No recent posts';
-
-  return `PARTNERSHIP ANALYSIS
+  const preProcessed = (profile as any).preProcessed;
+  
+  let prompt = `PARTNERSHIP ANALYSIS
 
 Profile: @${profile.username}
 Followers: ${profile.followersCount.toLocaleString()} | Posts: ${profile.postsCount}
 Bio: "${profile.bio || 'None'}"
 Status: ${profile.isVerified ? 'Verified' : 'Unverified'} ${profile.isBusinessAccount ? 'Business' : 'Personal'}
-Contact: ${profile.externalUrl ? 'Has link' : 'No link'}
-Engagement: ${engagementData}
-Recent: ${recentContent}
+Contact: ${profile.externalUrl ? 'Has link' : 'No link'}`;
 
-Business: ${business.name} targeting ${business.target_audience}
+  // Use pre-processed summary if available
+  if (preProcessed?.summary) {
+    prompt += `\n\nDATA INTELLIGENCE:\n${preProcessed.summary}`;
+  } else if (profile.engagement) {
+    const eng = profile.engagement;
+    prompt += `\nEngagement: ${eng.engagementRate}% ER (${eng.avgLikes} likes, ${eng.avgComments} comments, ${eng.postsAnalyzed} posts)`;
+  }
 
-Score collaboration potential (0-100) and generate outreach strategy.
-Return JSON with deep_summary, selling_points, outreach_message, engagement_breakdown, audience_insights, reasons.`;
+  // Add sample content
+  const recentContent = profile.latestPosts?.slice(0, 2).map(p => 
+    `"${p.caption?.slice(0, 40)}..." (${p.likesCount} likes)`
+  ).join(' | ') || 'No recent posts';
+  
+  prompt += `\nRecent Content: ${recentContent}`;
+
+prompt += `\n\nBusiness Context: ${business.business_name} - ${business.business_one_liner || business.target_audience}
+
+CRITICAL: Assess REAL collaboration fit. If this profile's audience is:
+- Not the business target (e.g., platform users vs B2B buyers)
+- Not solution-aware for this offering
+- Not decision-makers in this category
+
+Then score accordingly (0-40 range) and explain the mismatch clearly. Do not manufacture fit.
+
+Score collaboration potential (0-100) honestly and provide strategy ONLY if fit exists.
+Return JSON with deep_summary (explain fit reality), selling_points, outreach_message, engagement_breakdown, audience_insights, reasons.`;
+
+  return prompt;
 }
 
 export function buildXRayAnalysisPrompt(
@@ -263,20 +328,33 @@ export function buildXRayAnalysisPrompt(
     preprocessor?: any;
   }
 ): string {
-  const contentSample = profile.latestPosts?.slice(0, 3).map(p => 
-    `"${p.caption?.slice(0, 50)}..." (${p.likesCount}♡ ${p.commentsCount}💬)`
-  ).join(' | ') || 'No posts';
-
-  return `X-RAY PROFILE ANALYSIS
+  const preProcessed = (profile as any).preProcessed;
+  
+  let prompt = `X-RAY PROFILE ANALYSIS
 
 @${profile.username} (${profile.followersCount} followers)
 Bio: "${profile.bio || 'None'}"
-Type: ${profile.isVerified ? '✓' : ''}${profile.isBusinessAccount ? 'Biz' : 'Personal'}
-Content: ${contentSample}
+Type: ${profile.isVerified ? '✓' : ''}${profile.isBusinessAccount ? 'Biz' : 'Personal'}`;
 
-Extract observable demographics, psychographics, pain_points, dreams_desires from visible data only.
+  // Add pre-processed intelligence if available
+  if (preProcessed?.summary) {
+    prompt += `\n\nDATA INTELLIGENCE:\n${preProcessed.summary}`;
+  } else if (profile.engagement) {
+    prompt += `\nEngagement: ${profile.engagement.engagementRate}% ER (${profile.engagement.postsAnalyzed} posts)`;
+  }
+
+  // Add content sample
+  const contentSample = profile.latestPosts?.slice(0, 3).map(p => 
+    `"${p.caption?.slice(0, 50)}..." (${p.likesCount}♡ ${p.commentsCount}💬)`
+  ).join(' | ') || 'No posts';
+  
+  prompt += `\nContent Sample: ${contentSample}`;
+
+  prompt += `\n\nExtract observable demographics, psychographics, pain_points, dreams_desires from visible data only.
 Score partnership viability for ${business.target_audience} business.
-Return JSON with xray_payload structure.`;
+Return JSON with xray_payload structure including deep_summary, copywriter_profile, commercial_intelligence, persuasion_strategy.`;
+
+  return prompt;
 }
 
 export function buildMarketCompletionPrompt(
@@ -526,22 +604,64 @@ JSON only.`;
 export function buildSpeedLightAnalysisPrompt(
   profile: ProfileData, 
   business: BusinessProfile
-): string {    
-  const prompt = `Score @${profile.username} (${profile.followersCount} followers) for: ${business.business_one_liner || business.target_audience || business.business_name}
+): string {
+  let prompt = `Score @${profile.username} (${profile.followersCount} followers) for: ${business.business_one_liner || business.target_audience || business.business_name}
 
 Bio: "${profile.bio || 'No bio'}"
-Business: ${profile.isBusinessAccount ? 'Yes' : 'No'}
+Business: ${profile.isBusinessAccount ? 'Yes' : 'No'}`;
 
-Return JSON: {"score": 0-100, "summary": "one sentence why", "confidence": 0.8}`;
+  // Only add basic engagement if available (no AI cost, just helps accuracy)
+  if (profile.engagement) {
+    const eng = profile.engagement;
+    prompt += `\nEngagement: ${eng.engagementRate}% ER (${eng.avgLikes} likes, ${eng.avgComments} comments from ${eng.postsAnalyzed} posts)`;
+    
+    // Add format info if available (free pre-processing)
+    if (eng.formatDistribution) {
+      prompt += ` | Primary format: ${eng.formatDistribution.primaryFormat}`;
+    }
+  }
 
-  logger('info', 'Speed light analysis prompt', { 
-    prompt, 
-    business_one_liner: business.business_one_liner,
-    target_audience: business.target_audience,
-    business_name: business.business_name
-  });
+  prompt += `\n\nReturn JSON: {"score": 0-100, "summary": "one sentence why", "confidence": 0.8}`;
 
   return prompt;
+}
+
+export function buildPersonalityAnalysisPrompt(profile: ProfileData): string {
+  // Use preprocessed summary if available (cheap), else sample captions
+  const hasPreProcessed = !!(profile as any).preProcessed;
+  
+  let contentSample = '';
+  if (hasPreProcessed) {
+    contentSample = (profile as any).preProcessed.summary;
+  } else if (profile.latestPosts && profile.latestPosts.length > 0) {
+    contentSample = profile.latestPosts.slice(0, 6).map((p, i) => 
+      `${i+1}. "${p.caption?.slice(0, 100)}..." (${p.likesCount}♡)`
+    ).join('\n');
+  }
+
+  return `PERSONALITY ANALYSIS: @${profile.username}
+
+Bio: "${profile.bio || 'No bio'}"
+Type: ${profile.isVerified ? '✓' : ''}${profile.isBusinessAccount ? 'Business' : 'Personal'}
+Followers: ${profile.followersCount.toLocaleString()}
+
+Content:
+${contentSample || 'No content available'}
+
+CRITICAL RULES:
+- Base analysis ONLY on observable behavior
+- NO business or collaboration context
+- Be honest about AI-written vs human captions
+- If data is limited, reflect this in data_confidence
+
+Assess:
+1. DISC Profile (D/I/S/C or hybrid)
+2. Behavior Patterns (3-5 observable tendencies)
+3. Communication Style (tone, formality, directness)
+4. Motivation Drivers (2-4 key motivators)
+5. Content Authenticity (are captions AI-generated, AI-assisted, or human authentic?)
+
+JSON only.`;
 }
 
 export function getSpeedLightAnalysisJsonSchema() {

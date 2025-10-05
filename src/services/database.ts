@@ -56,28 +56,28 @@ export async function upsertLead(
       }
     });
 
-    const cleanLeadData = {
-      user_id: leadData.user_id,
-      business_id: leadData.business_id,
-      username: leadData.username,
-      display_name: leadData.full_name || leadData.displayName || null,
-      profile_picture_url: leadData.profile_pic_url || leadData.profilePicUrl || null,
-      bio_text: leadData.bio || null,
-      external_website_url: leadData.external_url || leadData.externalUrl || null,
-      
-      follower_count: parseInt(leadData.followersCount || leadData.follower_count || '0'),
-      following_count: parseInt(leadData.followsCount || leadData.followingCount || leadData.following_count || '0'),
-      post_count: parseInt(leadData.postsCount || leadData.post_count || '0'),
-      
-      is_verified_account: leadData.is_verified || leadData.isVerified || false,
-      is_private_account: leadData.is_private || leadData.isPrivate || false,
-      is_business_account: leadData.is_business_account || leadData.isBusinessAccount || false,
-      
-      platform_type: 'instagram',
-      profile_url: leadData.profile_url || `https://instagram.com/${leadData.username}`,
-      
-      last_updated_at: new Date().toISOString()
-    };
+const cleanLeadData = {
+  user_id: leadData.user_id,
+  business_id: leadData.business_id,
+  username: leadData.username,
+  display_name: leadData.full_name || leadData.displayName || null,
+  profile_picture_url: leadData.profile_pic_url || leadData.profilePicUrl || null,
+  bio_text: leadData.bio || null,
+  external_website_url: leadData.external_url || leadData.externalUrl || null,
+  
+  follower_count: parseInt(leadData.followersCount || leadData.follower_count || '0'),
+  following_count: parseInt(leadData.followsCount || leadData.followingCount || leadData.following_count || '0'),
+  post_count: parseInt(leadData.postsCount || leadData.post_count || '0'),
+  
+  is_verified_account: leadData.is_verified || leadData.isVerified || false,
+  is_private_account: leadData.is_private || leadData.isPrivate || false,
+  is_business_account: leadData.is_business_account || leadData.isBusinessAccount || false,
+  
+  platform_type: 'instagram',
+  profile_url: leadData.profile_url || `https://instagram.com/${leadData.username}`,
+  
+  last_updated_at: new Date().toISOString()
+};
 
     logger('info', 'Clean lead data before upsert', {
       username: cleanLeadData.username,
@@ -112,10 +112,19 @@ export async function upsertLead(
       throw new Error('Failed to create/update lead record - no data returned');
     }
 
-    const lead_id = leadResult[0].lead_id;
-    logger('info', 'Lead upserted successfully', { lead_id, username: leadData.username });
-    
-    return lead_id;
+const lead_id = leadResult[0].lead_id;
+
+// Ensure last_updated_at is refreshed on every analysis
+const updateQuery = `${supabaseUrl}/rest/v1/leads?lead_id=eq.${lead_id}`;
+await fetch(updateQuery, {
+  method: 'PATCH',
+  headers,
+  body: JSON.stringify({ last_updated_at: new Date().toISOString() })
+});
+
+logger('info', 'Lead upserted successfully', { lead_id, username: leadData.username });
+
+return lead_id;
 
   } catch (error: any) {
     logger('error', 'upsertLead failed', { error: error.message });
@@ -153,10 +162,29 @@ export async function insertAnalysisRun(
       niche_fit_score: Math.round(parseFloat(analysisResult.niche_fit) || 0),
       engagement_score: Math.round(parseFloat(analysisResult.engagement_score) || 0),
       
-      summary_text: analysisResult.summary || 
-                   analysisResult.quick_summary || 
-                   analysisResult.summary_text ||
-                   `${analysisType} analysis completed - Score: ${Math.round(parseFloat(analysisResult.score) || 0)}/100`,
+
+summary_text: (() => {
+  switch(analysisType) {
+    case 'light':
+      return analysisResult.summary || 
+             analysisResult.quick_summary || 
+             `Light analysis completed - Score: ${Math.round(parseFloat(analysisResult.score) || 0)}/100`;
+    
+    case 'deep':
+      return analysisResult.quick_summary ||  // ✅ Store SHORT version in runs
+             analysisResult.deep_payload?.deep_summary || 
+             `Deep analysis completed - Score: ${Math.round(parseFloat(analysisResult.score) || 0)}/100`;
+    
+    case 'xray':
+      return analysisResult.xray_payload?.deep_summary || 
+             analysisResult.deep_summary || 
+             analysisResult.quick_summary || 
+             `X-Ray analysis completed - Score: ${Math.round(parseFloat(analysisResult.score) || 0)}/100`;
+    
+    default:
+      return `Analysis completed - Score: ${Math.round(parseFloat(analysisResult.score) || 0)}/100`;
+  }
+})(),
       confidence_level: parseFloat(analysisResult.confidence_level) || 
                        parseFloat(analysisResult.confidence) || 
                        (analysisType === 'light' ? 0.6 : analysisType === 'deep' ? 0.75 : 0.85),
@@ -228,33 +256,39 @@ export async function insertAnalysisPayload(
     let structuredPayload;
     
     switch (analysisType) {        
-      case 'deep':
-        const deepData = analysisData.deep_payload || analysisData;
-        const engagementData = deepData.engagement_breakdown || {};
+case 'deep':
+  const deepData = analysisData.deep_payload || analysisData;
+  const engagementData = deepData.engagement_breakdown || {};
+  
+  structuredPayload = {
+    deep_summary: deepData.deep_summary || null,
+    selling_points: deepData.selling_points || [],
+    outreach_message: deepData.outreach_message || null,
+    engagement_breakdown: {
+      avg_likes: parseInt(engagementData.avg_likes) || 0,
+      avg_comments: parseInt(engagementData.avg_comments) || 0,
+      engagement_rate: parseFloat(engagementData.engagement_rate) || 0
+    },
+    latest_posts: deepData.latest_posts || null,
+    audience_insights: deepData.audience_insights || null,
+    reasons: deepData.reasons || [],
+    pre_processed_metrics: analysisData.pre_processed_metrics || null,
+    personality_profile: deepData.personality_profile || null  // NEW
+  };
+  break;
         
-        structuredPayload = {
-          deep_summary: deepData.deep_summary || null,
-          selling_points: deepData.selling_points || [],
-          outreach_message: deepData.outreach_message || null,
-          engagement_breakdown: {
-            avg_likes: parseInt(engagementData.avg_likes) || parseInt(analysisData.avg_likes) || 0,
-            avg_comments: parseInt(engagementData.avg_comments) || parseInt(analysisData.avg_comments) || 0,
-            engagement_rate: parseFloat(engagementData.engagement_rate) || parseFloat(analysisData.engagement_rate) || 0
-          },
-          latest_posts: deepData.latest_posts || null,
-          audience_insights: deepData.audience_insights || analysisData.engagement_insights || null,
-          reasons: deepData.reasons || []
-        };
-        break;
-        
-      case 'xray':
-        const xrayData = analysisData.xray_payload || analysisData;
-        structuredPayload = {
-          copywriter_profile: xrayData.copywriter_profile || {},
-          commercial_intelligence: xrayData.commercial_intelligence || {},
-          persuasion_strategy: xrayData.persuasion_strategy || {}
-        };
-        break;
+case 'xray':
+  const xrayData = analysisData.xray_payload || analysisData;
+  structuredPayload = {
+    deep_summary: xrayData.deep_summary || null,
+    copywriter_profile: xrayData.copywriter_profile || {},
+    commercial_intelligence: xrayData.commercial_intelligence || {},
+    persuasion_strategy: xrayData.persuasion_strategy || {},
+    outreach_message: xrayData.outreach_message || null,
+    pre_processed_metrics: analysisData.pre_processed_metrics || null,
+    personality_profile: xrayData.personality_profile || null  // NEW
+  };
+  break;
         
       default:
         structuredPayload = analysisData;
@@ -313,11 +347,20 @@ export async function saveCompleteAnalysis(
   try {
     logger('info', 'Starting complete analysis save', { 
       username: leadData.username,
-      analysisType
+      analysisType,
+      hasAnalysisData: !!analysisData,
+      leadDataKeys: Object.keys(leadData),
+      analysisDataKeys: analysisData ? Object.keys(analysisData) : []
     });
 
+    // Step 1: Upsert lead
     const lead_id = await upsertLead(leadData, env);
+    if (!lead_id) {
+      throw new Error('upsertLead returned null/undefined lead_id');
+    }
+    logger('info', 'Lead upserted successfully', { lead_id });
 
+    // Step 2: Insert analysis run
     const run_id = await insertAnalysisRun(
       lead_id,
       leadData.user_id,
@@ -326,9 +369,14 @@ export async function saveCompleteAnalysis(
       analysisData,
       env
     );
+    if (!run_id) {
+      throw new Error('insertAnalysisRun returned null/undefined run_id');
+    }
+    logger('info', 'Analysis run inserted successfully', { run_id });
 
+    // Step 3: Insert payload for deep/xray
     if (analysisData && (analysisType === 'deep' || analysisType === 'xray')) {
-      await insertAnalysisPayload(
+      const payload_id = await insertAnalysisPayload(
         run_id,
         lead_id,
         leadData.user_id,
@@ -337,6 +385,7 @@ export async function saveCompleteAnalysis(
         analysisData,
         env
       );
+      logger('info', 'Analysis payload inserted successfully', { payload_id });
     }
 
     logger('info', 'Complete analysis save successful', { 
@@ -348,7 +397,12 @@ export async function saveCompleteAnalysis(
     return { run_id, lead_id };
 
   } catch (error: any) {
-    logger('error', 'saveCompleteAnalysis failed', { error: error.message });
+    logger('error', 'saveCompleteAnalysis failed', { 
+      error: error.message,
+      errorStack: error.stack,
+      username: leadData?.username,
+      analysisType
+    });
     throw new Error(`Complete analysis save failed: ${error.message}`);
   }
 }
