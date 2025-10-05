@@ -516,7 +516,7 @@ Return ONLY the required JSON fields: score, engagement_score, niche_fit, quick_
     });
 
     try {
-      const response = await this.aiAdapter.executeRequest({
+ const response = await this.aiAdapter.executeRequest({
         model_name: 'gpt-5-mini',
         system_prompt: 'Analyze audience-business alignment realistically. If the audience is NOT solution-aware for the business offering, explicitly state this. Do not force fit. Assess actual buying readiness, budget capacity, and commercial viability.',
         user_prompt: `Reality Check: Does @${profile.username}'s audience align with ${business.business_name}?
@@ -524,6 +524,7 @@ Return ONLY the required JSON fields: score, engagement_score, niche_fit, quick_
 Profile Bio: "${profile.bio}"
 Audience Size: ${profile.followersCount}
 Your Business: ${business.business_one_liner || business.target_audience}
+Business Industry: ${business.business_niche || 'Not specified'}
 
 CRITICAL: Be honest about commercial viability. If this audience is:
 - Platform users (not buyers of external products)
@@ -534,6 +535,7 @@ CRITICAL: Be honest about commercial viability. If this audience is:
 Then reflect that in your assessment. Don't force-fit them into a buyer journey if they're not buyers.
 
 Return JSON with: budget_tier, decision_role, buying_stage, objections, primary_angle, hook_style, proof_elements, communication_style.`,
+
         max_tokens: 2000,
         json_schema: {
           name: 'CommercialIntelligence',
