@@ -396,14 +396,15 @@ const headers = await createHeaders(env);
 await fetch(`${supabaseUrl}/rest/v1/rpc/increment_usage_tracking`, {
   method: 'POST',
   headers,
-  body: JSON.stringify({
-    p_user_id: leadData.user_id,
-    p_business_id: leadData.business_id,
-    p_month: currentMonth,
-    p_analysis_type: analysisType,
-    p_credit_cost: creditCost,
-    p_lead_score: overallScore
-  })
+body: JSON.stringify({
+  p_user_id: leadData.user_id,
+  p_business_id: leadData.business_id,
+  p_month: currentMonth,
+  p_analysis_type: analysisType,
+  p_credit_cost: creditCost,
+  p_lead_score: overallScore,
+  p_analysis_method: 'single'  // NEW
+})
 });
 
 logger('info', 'Usage tracking incremented', { 
