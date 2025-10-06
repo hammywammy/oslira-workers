@@ -4,6 +4,7 @@ import { generateRequestId, logger } from '../utils/logger.js';
 import { createStandardResponse } from '../utils/response.js';
 import { updateCreditsAndTransaction, fetchUserAndCredits, fetchBusinessProfile } from '../services/database.ts';
 import { extractUsername, normalizeRequest } from '../utils/validation.js';
+import { getApiKey } from '../services/enhanced-config-manager.js';  // ← ADD THIS
 
 export async function handleBulkAnalyze(c: Context<{ Bindings: Env }>): Promise<Response> {
   const requestId = generateRequestId();
@@ -163,6 +164,38 @@ const batchAnalyze = async (profiles: string[], analysisType: string, context: a
         remaining: profiles.length - (results.length + errors.length)
       });
     }
+
+    // Track bulk usage (add before credit deduction)
+const currentMonth = new Date().toISOString().slice(0, 7) + '-01';
+const supabaseUrl = await getApiKey('SUPABASE_URL', c.env, c.env.APP_ENV);
+const serviceRole = await getApiKey('SUPABASE_SERVICE_ROLE', c.env, c.env.APP_ENV);
+
+for (const result of results) {
+  const score = Math.round(parseFloat(result.analysis?.overall_score) || 0);
+  const creditCost = analysis_type === 'xray' ? 3 : (analysis_type === 'deep' ? 2 : 1);
+  
+  await fetch(`${supabaseUrl}/rest/v1/rpc/increment_usage_tracking`, {
+    method: 'POST',
+    headers: {
+      apikey: serviceRole,
+      Authorization: `Bearer ${serviceRole}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      p_user_id: user_id,
+      p_business_id: business_id,
+      p_month: currentMonth,
+      p_analysis_type: analysis_type,
+      p_credit_cost: creditCost,
+      p_lead_score: score
+    })
+  });
+}
+
+logger('info', 'Bulk usage tracking updated', { 
+  count: results.length,
+  month: currentMonth 
+});
 
     // Calculate final costs
     const costDetails = calculateBulkCosts(results);
