@@ -345,18 +345,46 @@ export async function saveCompleteAnalysis(
   env: Env
 ): Promise<{ run_id: string; lead_id: string }> {
   try {
+    logger('info', 'Starting complete analysis save', { 
+      username: leadData.username,
+      analysisType,
+      hasAnalysisData: !!analysisData
+    });
+
     // Step 1: Upsert lead
     const lead_id = await upsertLead(leadData, env);
+    if (!lead_id) {
+      throw new Error('upsertLead returned null/undefined lead_id');
+    }
     
     // Step 2: Insert analysis run
-    const run_id = await insertAnalysisRun(...);
+    const run_id = await insertAnalysisRun(
+      lead_id,
+      leadData.user_id,
+      leadData.business_id,
+      analysisType,
+      analysisData,
+      env
+    );
+    if (!run_id) {
+      throw new Error('insertAnalysisRun returned null/undefined run_id');
+    }
     
     // Step 3: Insert payload (if deep/xray)
     if (analysisData && (analysisType === 'deep' || analysisType === 'xray')) {
-      const payload_id = await insertAnalysisPayload(...);
+      const payload_id = await insertAnalysisPayload(
+        run_id,
+        lead_id,
+        leadData.user_id,
+        leadData.business_id,
+        analysisType,
+        analysisData,
+        env
+      );
+      logger('info', 'Analysis payload inserted successfully', { payload_id });
     }
 
-    // Step 4: Update usage_tracking (NEW)
+    // Step 4: Update usage_tracking
     const currentMonth = new Date().toISOString().slice(0, 7) + '-01';
     const creditCost = analysisType === 'xray' ? 3 : (analysisType === 'deep' ? 2 : 1);
     
@@ -391,9 +419,27 @@ export async function saveCompleteAnalysis(
       })
     });
     
-    logger('info', 'Usage tracking updated', { user_id: leadData.user_id, month: currentMonth });
+    logger('info', 'Usage tracking updated', { 
+      user_id: leadData.user_id, 
+      month: currentMonth 
+    });
 
+    logger('info', 'Complete analysis save successful', { 
+      lead_id, 
+      run_id, 
+      analysisType 
+    });
+    
     return { run_id, lead_id };
+
+  } catch (error: any) {
+    logger('error', 'saveCompleteAnalysis failed', { 
+      error: error.message,
+      errorStack: error.stack,
+      username: leadData?.username,
+      analysisType
+    });
+    throw new Error(`Complete analysis save failed: ${error.message}`);
   }
 }
 
