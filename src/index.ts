@@ -172,6 +172,11 @@ app.delete('/business-profiles/:id', async (c) => {
 // ===============================================================================
 // ADMIN ENDPOINTS - LAZY LOADED
 // ===============================================================================
+// Admin password verification (no JWT required)
+app.post('/admin/verify-password', async (c) => {
+  const { handleAdminRequest } = await import('./handlers/admin.js');
+  return handleAdminRequest(c);
+});
 
 // Admin overview
 app.get('/admin/overview', async (c) => {
