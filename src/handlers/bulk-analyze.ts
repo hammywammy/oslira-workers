@@ -181,14 +181,15 @@ for (const result of results) {
       Authorization: `Bearer ${serviceRole}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({
-      p_user_id: user_id,
-      p_business_id: business_id,
-      p_month: currentMonth,
-      p_analysis_type: analysis_type,
-      p_credit_cost: creditCost,
-      p_lead_score: score
-    })
+body: JSON.stringify({
+  p_user_id: user_id,
+  p_business_id: business_id,
+  p_month: currentMonth,
+  p_analysis_type: analysis_type,
+  p_credit_cost: creditCost,
+  p_lead_score: score,
+  p_analysis_method: 'bulk'  // NEW
+})
   });
 }
 
