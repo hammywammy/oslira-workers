@@ -384,45 +384,33 @@ export async function saveCompleteAnalysis(
       logger('info', 'Analysis payload inserted successfully', { payload_id });
     }
 
-    // Step 4: Update usage_tracking
-    const currentMonth = new Date().toISOString().slice(0, 7) + '-01';
-    const creditCost = analysisType === 'xray' ? 3 : (analysisType === 'deep' ? 2 : 1);
-    
-    const supabaseUrl = await getSupabaseUrl(env);
-    const headers = await createHeaders(env);
-    
-    // Get current usage or defaults
-    const usageResponse = await fetch(
-      `${supabaseUrl}/rest/v1/usage_tracking?user_id=eq.${leadData.user_id}&business_id=eq.${leadData.business_id}&month=eq.${currentMonth}`,
-      { headers }
-    );
-    const existingUsage = (await usageResponse.json())[0] || {
-      leads_researched: 0,
-      credits_used: 0,
-      light_analyses: 0,
-      deep_analyses: 0,
-      xray_analyses: 0
-    };
-    
-    // UPSERT with incremented values
-    await fetch(`${supabaseUrl}/rest/v1/usage_tracking`, {
-      method: 'POST',
-      headers: { ...headers, 'Prefer': 'resolution=merge-duplicates' },
-      body: JSON.stringify({
-        user_id: leadData.user_id,
-        business_id: leadData.business_id,
-        month: currentMonth,
-        leads_researched: existingUsage.leads_researched + 1,
-        credits_used: existingUsage.credits_used + creditCost,
-        [`${analysisType}_analyses`]: existingUsage[`${analysisType}_analyses`] + 1,
-        updated_at: new Date().toISOString()
-      })
-    });
-    
-    logger('info', 'Usage tracking updated', { 
-      user_id: leadData.user_id, 
-      month: currentMonth 
-    });
+// Step 4: Update usage_tracking with proper atomic increment
+const currentMonth = new Date().toISOString().slice(0, 7) + '-01';
+const creditCost = analysisType === 'xray' ? 3 : (analysisType === 'deep' ? 2 : 1);
+const overallScore = Math.round(parseFloat(analysisData?.score) || 0);
+
+const supabaseUrl = await getSupabaseUrl(env);
+const headers = await createHeaders(env);
+
+// Use RPC function for atomic increment (safer than REST API UPSERT)
+await fetch(`${supabaseUrl}/rest/v1/rpc/increment_usage_tracking`, {
+  method: 'POST',
+  headers,
+  body: JSON.stringify({
+    p_user_id: leadData.user_id,
+    p_business_id: leadData.business_id,
+    p_month: currentMonth,
+    p_analysis_type: analysisType,
+    p_credit_cost: creditCost,
+    p_lead_score: overallScore
+  })
+});
+
+logger('info', 'Usage tracking incremented', { 
+  user_id: leadData.user_id, 
+  month: currentMonth,
+  score: overallScore
+});
 
     logger('info', 'Complete analysis save successful', { 
       lead_id, 
