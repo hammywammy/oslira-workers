@@ -496,29 +496,31 @@ export async function updateCreditsAndTransaction(
     const supabaseUrl = await getSupabaseUrl(env);
     const headers = await createHeaders(env);
 
-    const userResponse = await fetch(
-      `${supabaseUrl}/rest/v1/users?select=credits&id=eq.${user_id}`,
+    // Fetch from subscriptions table instead of users
+    const subscriptionResponse = await fetch(
+      `${supabaseUrl}/rest/v1/subscriptions?select=credits_remaining&user_id=eq.${user_id}&status=eq.active`,
       { headers }
     );
 
-    if (!userResponse.ok) {
-      throw new Error(`Failed to fetch user: ${userResponse.status}`);
+    if (!subscriptionResponse.ok) {
+      throw new Error(`Failed to fetch subscription: ${subscriptionResponse.status}`);
     }
 
-    const users = await userResponse.json();
-    if (!users.length) {
-      throw new Error('User not found');
+    const subscriptions = await subscriptionResponse.json();
+    if (!subscriptions.length) {
+      throw new Error('No active subscription found');
     }
 
-    const currentCredits = users[0].credits || 0;
+    const currentCredits = subscriptions[0].credits_remaining || 0;
     const newBalance = Math.max(0, currentCredits - cost);
 
+    // Update subscriptions table instead of users
     await fetchJson(
-      `${supabaseUrl}/rest/v1/users?id=eq.${user_id}`,
+      `${supabaseUrl}/rest/v1/subscriptions?user_id=eq.${user_id}&status=eq.active`,
       {
         method: 'PATCH',
         headers,
-        body: JSON.stringify({ credits: newBalance })
+        body: JSON.stringify({ credits_remaining: newBalance })
       },
       10000
     );
@@ -574,25 +576,25 @@ export async function fetchUserAndCredits(user_id: string, env: Env): Promise<an
     const supabaseUrl = await getSupabaseUrl(env);
     const headers = await createHeaders(env);
     
+    // Fetch from subscriptions instead of users
     const response = await fetch(
-      `${supabaseUrl}/rest/v1/users?select=*&id=eq.${user_id}`,
+      `${supabaseUrl}/rest/v1/subscriptions?select=credits_remaining&user_id=eq.${user_id}&status=eq.active`,
       { headers }
     );
 
     if (!response.ok) {
-      throw new Error(`User fetch failed: ${response.status}`);
+      throw new Error(`Subscription fetch failed: ${response.status}`);
     }
 
-    const users = await response.json();
-    if (!users.length) {
-      return { isValid: false, error: 'User not found' };
+    const subscriptions = await response.json();
+    if (!subscriptions.length) {
+      return { isValid: false, error: 'No active subscription found' };
     }
 
-    const user = users[0];
     return {
       isValid: true,
-      credits: user.credits || 0,
-      userId: user.id
+      credits: subscriptions[0].credits_remaining || 0,
+      userId: user_id
     };
 
   } catch (error: any) {
