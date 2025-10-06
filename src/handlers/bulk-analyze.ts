@@ -165,7 +165,7 @@ const batchAnalyze = async (profiles: string[], analysisType: string, context: a
       });
     }
 
-    // Track bulk usage (add before credit deduction)
+// Track bulk usage (add before credit deduction)
 const currentMonth = new Date().toISOString().slice(0, 7) + '-01';
 const supabaseUrl = await getApiKey('SUPABASE_URL', c.env, c.env.APP_ENV);
 const serviceRole = await getApiKey('SUPABASE_SERVICE_ROLE', c.env, c.env.APP_ENV);
@@ -174,30 +174,47 @@ for (const result of results) {
   const score = Math.round(parseFloat(result.analysis?.overall_score) || 0);
   const creditCost = analysis_type === 'xray' ? 3 : (analysis_type === 'deep' ? 2 : 1);
   
-  await fetch(`${supabaseUrl}/rest/v1/rpc/increment_usage_tracking`, {
+  const rpcResponse = await fetch(`${supabaseUrl}/rest/v1/rpc/increment_usage_tracking`, {
     method: 'POST',
     headers: {
       apikey: serviceRole,
       Authorization: `Bearer ${serviceRole}`,
       'Content-Type': 'application/json'
     },
-body: JSON.stringify({
-  p_user_id: user_id,
-  p_business_id: business_id,
-  p_month: currentMonth,
-  p_analysis_type: analysis_type,
-  p_credit_cost: creditCost,
-  p_lead_score: score,
-  p_analysis_method: 'bulk'  // NEW
-})
+    body: JSON.stringify({
+      p_user_id: user_id,
+      p_business_id: business_id,
+      p_month: currentMonth,
+      p_analysis_type: analysis_type,
+      p_credit_cost: creditCost,
+      p_lead_score: score,
+      p_analysis_method: 'bulk'
+    })
   });
+
+  if (!rpcResponse.ok) {
+    const errorText = await rpcResponse.text();
+    logger('error', 'Bulk usage tracking RPC failed', { 
+      status: rpcResponse.status,
+      error: errorText,
+      username: result.profile?.username,
+      requestId
+    });
+  } else {
+    logger('info', 'Bulk usage tracked', { 
+      username: result.profile?.username,
+      score,
+      creditCost,
+      requestId
+    });
+  }
 }
 
-logger('info', 'Bulk usage tracking updated', { 
+logger('info', 'Bulk usage tracking completed', { 
   count: results.length,
-  month: currentMonth 
+  month: currentMonth,
+  requestId
 });
-
     // Calculate final costs
     const costDetails = calculateBulkCosts(results);
     const creditsUsed = costDetails.totalCredits;
