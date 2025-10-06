@@ -48,13 +48,6 @@ app.get('/health', (c) => c.json({
 // LAZY LOADED ENDPOINTS
 // ===============================================================================
 
-app.post('/debug/clear-rate-limit', async (c) => {
-  const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || 'unknown';
-  const key = `rate_limit:${clientIP}`;
-  await c.env.OSLIRA_KV.delete(key);
-  return c.json({ success: true, message: `Rate limit cleared for ${clientIP}` });
-});
-
 // Config endpoint (aliased for frontend compatibility)
 app.get('/config', async (c) => {
   const { handlePublicConfig } = await import('./handlers/public-config.js');
@@ -171,6 +164,101 @@ app.put('/business-profiles/:id', async (c) => {
 app.delete('/business-profiles/:id', async (c) => {
   const { handleBusinessProfiles } = await import('./handlers/business-profiles.js');
   return handleBusinessProfiles(c);
+});
+
+// ADD THESE ADMIN ROUTES TO YOUR EXISTING src/index.ts
+// Insert after your existing endpoints (around line 100+)
+
+// ===============================================================================
+// ADMIN ENDPOINTS - LAZY LOADED
+// ===============================================================================
+
+// Admin overview
+app.get('/admin/overview', async (c) => {
+  const { handleAdminRequest } = await import('./handlers/admin.js');
+  return handleAdminRequest(c);
+});
+
+// Admin users
+app.get('/admin/users', async (c) => {
+  const { handleAdminRequest } = await import('./handlers/admin.js');
+  return handleAdminRequest(c);
+});
+
+app.get('/admin/users/search', async (c) => {
+  const { handleAdminRequest } = await import('./handlers/admin.js');
+  return handleAdminRequest(c);
+});
+
+app.get('/admin/users/:id', async (c) => {
+  const { handleAdminRequest } = await import('./handlers/admin.js');
+  return handleAdminRequest(c);
+});
+
+app.post('/admin/users/:id/update-credits', async (c) => {
+  const { handleAdminRequest } = await import('./handlers/admin.js');
+  return handleAdminRequest(c);
+});
+
+app.post('/admin/users/:id/toggle-admin', async (c) => {
+  const { handleAdminRequest } = await import('./handlers/admin.js');
+  return handleAdminRequest(c);
+});
+
+app.post('/admin/users/:id/suspend', async (c) => {
+  const { handleAdminRequest } = await import('./handlers/admin.js');
+  return handleAdminRequest(c);
+});
+
+// Admin businesses
+app.get('/admin/businesses', async (c) => {
+  const { handleAdminRequest } = await import('./handlers/admin.js');
+  return handleAdminRequest(c);
+});
+
+app.get('/admin/businesses/search', async (c) => {
+  const { handleAdminRequest } = await import('./handlers/admin.js');
+  return handleAdminRequest(c);
+});
+
+app.get('/admin/businesses/:id/analytics', async (c) => {
+  const { handleAdminRequest } = await import('./handlers/admin.js');
+  return handleAdminRequest(c);
+});
+
+// Admin revenue
+app.get('/admin/revenue', async (c) => {
+  const { handleAdminRequest } = await import('./handlers/admin.js');
+  return handleAdminRequest(c);
+});
+
+// Admin usage
+app.get('/admin/usage', async (c) => {
+  const { handleAdminRequest } = await import('./handlers/admin.js');
+  return handleAdminRequest(c);
+});
+
+// Admin system
+app.get('/admin/system', async (c) => {
+  const { handleAdminRequest } = await import('./handlers/admin.js');
+  return handleAdminRequest(c);
+});
+
+// Admin leads analytics
+app.get('/admin/leads', async (c) => {
+  const { handleAdminRequest } = await import('./handlers/admin.js');
+  return handleAdminRequest(c);
+});
+
+// ===============================================================================
+// TEST/DEBUG
+// ===============================================================================
+
+app.post('/debug/clear-rate-limit', async (c) => {
+  const clientIP = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || 'unknown';
+  const key = `rate_limit:${clientIP}`;
+  await c.env.OSLIRA_KV.delete(key);
+  return c.json({ success: true, message: `Rate limit cleared for ${clientIP}` });
 });
 
 
