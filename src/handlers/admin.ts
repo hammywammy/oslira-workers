@@ -76,11 +76,23 @@ export async function handleAdminPasswordVerify(c: Context<{ Bindings: Env }>, r
     const { password, userId } = body;
     
     if (!password || !userId) {
+      logger('warn', 'Password verification missing fields', { hasPassword: !!password, hasUserId: !!userId, requestId });
       return c.json(createStandardResponse(false, undefined, 'Password and userId are required', requestId), 400);
     }
     
-    // Get ADMIN_TOKEN from environment (stored in AWS Secrets Manager)
-    const adminToken = c.env.ADMIN_TOKEN;
+    logger('info', 'Admin password verification attempt', { userId, passwordLength: password.length, requestId });
+    
+    // Get ADMIN_TOKEN from AWS Secrets Manager using enhanced config manager
+    const environment = c.env.APP_ENV || 'production';
+    let adminToken: string = '';
+    
+    try {
+      adminToken = await getApiKey('ADMIN_TOKEN', c.env, environment);
+      logger('info', 'ADMIN_TOKEN retrieved from AWS', { environment, hasToken: !!adminToken, tokenLength: adminToken?.length || 0, requestId });
+    } catch (error: any) {
+      logger('error', 'Failed to retrieve ADMIN_TOKEN from AWS', { error: error.message, environment, requestId });
+      return c.json(createStandardResponse(false, undefined, 'Admin token not configured', requestId), 500);
+    }
     
     if (!adminToken) {
       logger('error', 'ADMIN_TOKEN not configured', { requestId });
