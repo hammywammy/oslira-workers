@@ -345,65 +345,55 @@ export async function saveCompleteAnalysis(
   env: Env
 ): Promise<{ run_id: string; lead_id: string }> {
   try {
-    logger('info', 'Starting complete analysis save', { 
-      username: leadData.username,
-      analysisType,
-      hasAnalysisData: !!analysisData,
-      leadDataKeys: Object.keys(leadData),
-      analysisDataKeys: analysisData ? Object.keys(analysisData) : []
-    });
-
     // Step 1: Upsert lead
     const lead_id = await upsertLead(leadData, env);
-    if (!lead_id) {
-      throw new Error('upsertLead returned null/undefined lead_id');
-    }
-    logger('info', 'Lead upserted successfully', { lead_id });
-
+    
     // Step 2: Insert analysis run
-    const run_id = await insertAnalysisRun(
-      lead_id,
-      leadData.user_id,
-      leadData.business_id,
-      analysisType,
-      analysisData,
-      env
-    );
-    if (!run_id) {
-      throw new Error('insertAnalysisRun returned null/undefined run_id');
-    }
-    logger('info', 'Analysis run inserted successfully', { run_id });
-
-    // Step 3: Insert payload for deep/xray
+    const run_id = await insertAnalysisRun(...);
+    
+    // Step 3: Insert payload (if deep/xray)
     if (analysisData && (analysisType === 'deep' || analysisType === 'xray')) {
-      const payload_id = await insertAnalysisPayload(
-        run_id,
-        lead_id,
-        leadData.user_id,
-        leadData.business_id,
-        analysisType,
-        analysisData,
-        env
-      );
-      logger('info', 'Analysis payload inserted successfully', { payload_id });
+      const payload_id = await insertAnalysisPayload(...);
     }
 
-    logger('info', 'Complete analysis save successful', { 
-      lead_id, 
-      run_id, 
-      analysisType 
+    // Step 4: Update usage_tracking (NEW)
+    const currentMonth = new Date().toISOString().slice(0, 7) + '-01';
+    const creditCost = analysisType === 'xray' ? 3 : (analysisType === 'deep' ? 2 : 1);
+    
+    const supabaseUrl = await getSupabaseUrl(env);
+    const headers = await createHeaders(env);
+    
+    // Get current usage or defaults
+    const usageResponse = await fetch(
+      `${supabaseUrl}/rest/v1/usage_tracking?user_id=eq.${leadData.user_id}&business_id=eq.${leadData.business_id}&month=eq.${currentMonth}`,
+      { headers }
+    );
+    const existingUsage = (await usageResponse.json())[0] || {
+      leads_researched: 0,
+      credits_used: 0,
+      light_analyses: 0,
+      deep_analyses: 0,
+      xray_analyses: 0
+    };
+    
+    // UPSERT with incremented values
+    await fetch(`${supabaseUrl}/rest/v1/usage_tracking`, {
+      method: 'POST',
+      headers: { ...headers, 'Prefer': 'resolution=merge-duplicates' },
+      body: JSON.stringify({
+        user_id: leadData.user_id,
+        business_id: leadData.business_id,
+        month: currentMonth,
+        leads_researched: existingUsage.leads_researched + 1,
+        credits_used: existingUsage.credits_used + creditCost,
+        [`${analysisType}_analyses`]: existingUsage[`${analysisType}_analyses`] + 1,
+        updated_at: new Date().toISOString()
+      })
     });
     
-    return { run_id, lead_id };
+    logger('info', 'Usage tracking updated', { user_id: leadData.user_id, month: currentMonth });
 
-  } catch (error: any) {
-    logger('error', 'saveCompleteAnalysis failed', { 
-      error: error.message,
-      errorStack: error.stack,
-      username: leadData?.username,
-      analysisType
-    });
-    throw new Error(`Complete analysis save failed: ${error.message}`);
+    return { run_id, lead_id };
   }
 }
 
