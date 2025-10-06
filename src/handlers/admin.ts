@@ -97,6 +97,10 @@ export async function handleAdminRequest(c: Context<{ Bindings: Env }>): Promise
     if (path === '/admin/overview' || path === '/admin/overview/') {
       return await handleOverview(c, requestId);
     }
+
+    if (path === '/admin/validate-session') {
+  return await validateAdminSession(c, requestId);
+}
     
     if (path.startsWith('/admin/users')) {
       return await handleUsers(c, requestId);
@@ -133,7 +137,10 @@ export async function handleAdminRequest(c: Context<{ Bindings: Env }>): Promise
     return c.json(createStandardResponse(false, undefined, 'Internal server error', requestId), 500);
   }
 }
-
+async function validateAdminSession(c: Context<{ Bindings: Env }>, requestId: string): Promise<Response> {
+  const authResult = await verifyAdminAccess(c);
+  return c.json(createStandardResponse(authResult.isAdmin, undefined, undefined, requestId));
+}
 // ===============================================================================
 // OVERVIEW SECTION
 // ===============================================================================
