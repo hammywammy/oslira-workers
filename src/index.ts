@@ -166,14 +166,18 @@ app.delete('/business-profiles/:id', async (c) => {
   return handleBusinessProfiles(c);
 });
 
-// ADD THESE ADMIN ROUTES TO YOUR EXISTING src/index.ts
-// Insert after your existing endpoints (around line 100+)
-
 // ===============================================================================
 // ADMIN ENDPOINTS - LAZY LOADED
 // ===============================================================================
+
 // Admin password verification (no JWT required)
 app.post('/admin/verify-password', async (c) => {
+  const { handleAdminRequest } = await import('./handlers/admin.js');
+  return handleAdminRequest(c);
+});
+
+// Admin session validation
+app.get('/admin/validate-session', async (c) => {
   const { handleAdminRequest } = await import('./handlers/admin.js');
   return handleAdminRequest(c);
 });
@@ -184,7 +188,7 @@ app.get('/admin/overview', async (c) => {
   return handleAdminRequest(c);
 });
 
-// Admin users
+// Admin users management
 app.get('/admin/users', async (c) => {
   const { handleAdminRequest } = await import('./handlers/admin.js');
   return handleAdminRequest(c);
@@ -215,7 +219,7 @@ app.post('/admin/users/:id/suspend', async (c) => {
   return handleAdminRequest(c);
 });
 
-// Admin businesses
+// Admin businesses management
 app.get('/admin/businesses', async (c) => {
   const { handleAdminRequest } = await import('./handlers/admin.js');
   return handleAdminRequest(c);
@@ -231,25 +235,22 @@ app.get('/admin/businesses/:id/analytics', async (c) => {
   return handleAdminRequest(c);
 });
 
-// Admin revenue
+// Admin analytics sections
 app.get('/admin/revenue', async (c) => {
   const { handleAdminRequest } = await import('./handlers/admin.js');
   return handleAdminRequest(c);
 });
 
-// Admin usage
 app.get('/admin/usage', async (c) => {
   const { handleAdminRequest } = await import('./handlers/admin.js');
   return handleAdminRequest(c);
 });
 
-// Admin system
 app.get('/admin/system', async (c) => {
   const { handleAdminRequest } = await import('./handlers/admin.js');
   return handleAdminRequest(c);
 });
 
-// Admin leads analytics
 app.get('/admin/leads', async (c) => {
   const { handleAdminRequest } = await import('./handlers/admin.js');
   return handleAdminRequest(c);
