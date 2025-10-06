@@ -67,6 +67,49 @@ async function verifyAdminAccess(c: Context<{ Bindings: Env }>): Promise<{ isAdm
 }
 
 // ===============================================================================
+// ADMIN PASSWORD VERIFICATION ENDPOINT
+// ===============================================================================
+
+export async function handleAdminPasswordVerify(c: Context<{ Bindings: Env }>, requestId: string): Promise<Response> {
+  try {
+    const body = await c.req.json() as { password: string; userId: string };
+    const { password, userId } = body;
+    
+    if (!password || !userId) {
+      return c.json(createStandardResponse(false, undefined, 'Password and userId are required', requestId), 400);
+    }
+    
+    // Get ADMIN_TOKEN from environment (stored in AWS Secrets Manager)
+    const adminToken = c.env.ADMIN_TOKEN;
+    
+    if (!adminToken) {
+      logger('error', 'ADMIN_TOKEN not configured', { requestId });
+      return c.json(createStandardResponse(false, undefined, 'Admin token not configured', requestId), 500);
+    }
+    
+    // Verify password matches ADMIN_TOKEN
+    const isValid = password === adminToken;
+    
+    if (isValid) {
+      logger('info', 'Admin password verified successfully', { userId, requestId });
+      return c.json(createStandardResponse(true, { 
+        valid: true,
+        message: 'Password verified' 
+      }, undefined, requestId));
+    } else {
+      logger('warn', 'Invalid admin password attempt', { userId, requestId });
+      return c.json(createStandardResponse(false, { 
+        valid: false 
+      }, 'Invalid password', requestId), 401);
+    }
+    
+  } catch (error: any) {
+    logger('error', 'Admin password verification failed', { error: error.message, requestId });
+    return c.json(createStandardResponse(false, undefined, 'Verification failed', requestId), 500);
+  }
+}
+
+// ===============================================================================
 // MAIN ADMIN ROUTER
 // ===============================================================================
 
@@ -74,7 +117,12 @@ export async function handleAdminRequest(c: Context<{ Bindings: Env }>): Promise
   const requestId = generateRequestId();
   const path = c.req.path;
   
-  // Verify admin access
+  // NEW: Admin password verification endpoint (NO auth required - validates password only)
+  if (path === '/admin/verify-password') {
+    return await handleAdminPasswordVerify(c, requestId);
+  }
+  
+  // Verify admin access for all other routes
   const authResult = await verifyAdminAccess(c);
   
   if (!authResult.isAdmin) {
