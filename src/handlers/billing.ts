@@ -23,33 +23,39 @@ export async function handleStripeWebhook(c: Context): Promise<Response> {
       'Content-Type': 'application/json'
     };
 
-    switch (event.type) {
-      case 'checkout.session.completed':
-        await fetch(`${c.env.SUPABASE_URL}/rest/v1/users`, {
-          method: 'PATCH',
-          headers,
-          body: JSON.stringify({
-            stripe_customer_id: event.data.object.customer,
-            subscription_status: 'active',
-            updated_at: new Date().toISOString()
-          })
-        });
-        break;
-        
-      case 'customer.subscription.deleted':
-        await fetch(`${c.env.SUPABASE_URL}/rest/v1/users`, {
-          method: 'PATCH',
-          headers,
-          body: JSON.stringify({
-            subscription_status: 'cancelled',
-            updated_at: new Date().toISOString()
-          })
-        });
-        break;
-        
-      default:
-        logger('info', 'Unhandled webhook event', { eventType: event.type, requestId });
-    }
+switch (event.type) {
+  case 'checkout.session.completed':
+    const userId = event.data.object.client_reference_id; // From checkout session
+    
+    // Update subscriptions table instead of users
+    await fetch(`${c.env.SUPABASE_URL}/rest/v1/subscriptions?user_id=eq.${userId}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({
+        stripe_customer_id: event.data.object.customer,
+        status: 'active',
+        updated_at: new Date().toISOString()
+      })
+    });
+    break;
+    
+  case 'customer.subscription.deleted':
+    const customerId = event.data.object.customer;
+    
+    // Update subscriptions table
+    await fetch(`${c.env.SUPABASE_URL}/rest/v1/subscriptions?stripe_customer_id=eq.${customerId}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({
+        status: 'cancelled',
+        updated_at: new Date().toISOString()
+      })
+    });
+    break;
+    
+  default:
+    logger('info', 'Unhandled webhook event', { eventType: event.type, requestId });
+}
     
     return c.json(createStandardResponse(true, { received: true }, undefined, requestId));
     
