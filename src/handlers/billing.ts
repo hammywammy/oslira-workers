@@ -4,7 +4,7 @@ import { createStandardResponse } from '../utils/response.js';
 import { getApiKey } from '../services/enhanced-config-manager.js';
 
 const PLAN_CREDITS = {
-  starter: 100,
+  free: 25,        // ← Changed from 'starter: 100'
   pro: 500,
   agency: 1000,
   enterprise: 5000
@@ -12,7 +12,6 @@ const PLAN_CREDITS = {
 
 // Map Stripe Price IDs to plan types
 const STRIPE_PRICE_TO_PLAN: Record<string, keyof typeof PLAN_CREDITS> = {
-  'price_starter_monthly': 'starter',
   'price_pro_monthly': 'pro',
   'price_agency_monthly': 'agency',
   'price_enterprise_monthly': 'enterprise'
@@ -70,7 +69,7 @@ export async function handleStripeWebhook(c: Context): Promise<Response> {
         
         const subscription = await subResponse.json();
         const priceId = subscription.items.data[0].price.id;
-        const planType = STRIPE_PRICE_TO_PLAN[priceId] || 'starter';
+        const planType = STRIPE_PRICE_TO_PLAN[priceId] || 'free';
 
         // Update subscriptions table
         await fetch(`${supabaseUrl}/rest/v1/subscriptions?user_id=eq.${userId}`, {
