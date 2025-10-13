@@ -1,8 +1,43 @@
+// ===============================================================================
+// LEADS HANDLER - Dashboard Leads Endpoint
+// File: cloudflare-workers/src/handlers/leads.ts
+// ===============================================================================
+
 import type { Context } from 'hono';
 import type { Env } from '../types/interfaces.js';
 import { getDashboardLeads } from '../services/database.js';
-import { authenticateRequest } from '../utils/auth.js';
-import { createStandardResponse, generateRequestId, logger } from '../utils/logger.js';
+import { extractUserFromJWT } from '../utils/auth.js';
+import { generateRequestId, logger } from '../utils/logger.js';
+
+// ===============================================================================
+// AUTHENTICATION HELPER (copied from business-profiles.ts)
+// ===============================================================================
+
+async function authenticateRequest(c: Context<{ Bindings: Env }>, requestId: string) {
+  try {
+    const authHeader = c.req.header('Authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return { success: false, error: 'No valid authorization header' };
+    }
+    
+    const token = authHeader.substring(7);
+    const userResult = await extractUserFromJWT(token, c.env, requestId);
+    
+    if (!userResult.isValid) {
+      return { success: false, error: userResult.error };
+    }
+    
+    return { success: true, userId: userResult.userId };
+    
+  } catch (error: any) {
+    logger('error', 'Authentication failed', { error: error.message, requestId });
+    return { success: false, error: 'Authentication failed' };
+  }
+}
+
+// ===============================================================================
+// DASHBOARD LEADS ENDPOINT
+// ===============================================================================
 
 export async function handleGetDashboardLeads(c: Context<{ Bindings: Env }>): Promise<Response> {
   const requestId = generateRequestId();
