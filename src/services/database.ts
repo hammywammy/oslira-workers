@@ -446,15 +446,24 @@ export async function getDashboardLeads(
     const supabaseUrl = await getSupabaseUrl(env);
     const headers = await createHeaders(env);
     
-    const query = `${supabaseUrl}/rest/v1/leads?select=lead_id,username,display_name,profile_picture_url,follower_count,is_verified_account,runs(run_id,analysis_type,overall_score,niche_fit_score,engagement_score,summary_text,confidence_level,created_at)&user_id=eq.${user_id}&business_id=eq.${business_id}&order=runs.created_at.desc&limit=${limit}`;
+    // ✅ Use the optimized view
+    const query = `${supabaseUrl}/rest/v1/dashboard_leads_view?user_id=eq.${user_id}&business_id=eq.${business_id}&limit=${limit}`;
+
+    logger('info', 'Fetching dashboard leads from view', { user_id, business_id, limit });
 
     const response = await fetch(query, { headers });
 
     if (!response.ok) {
-      throw new Error(`Dashboard query failed: ${response.status}`);
+      const errorText = await response.text();
+      logger('error', 'Dashboard view query failed', { 
+        status: response.status, 
+        error: errorText 
+      });
+      throw new Error(`Dashboard query failed: ${response.status} - ${errorText}`);
     }
 
-    const results = await response.json();
+    const results: any[] = await response.json();
+    
     logger('info', 'Dashboard leads retrieved', { count: results.length });
     
     return results;
