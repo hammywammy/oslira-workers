@@ -8,7 +8,9 @@ const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 /**
  * Fetch secret from AWS Secrets Manager with caching
  * 
- * Your naming convention: Oslira/production/SECRET_NAME
+ * Handles both formats:
+ * 1. Plain text: "https://smbtwhvwsqxqtqxyqnoo.supabase.co"
+ * 2. JSON with metadata: {"apiKey": "...", "createdAt": "...", ...}
  */
 export async function getSecret(
   secretName: string,
@@ -44,8 +46,19 @@ export async function getSecret(
       throw new Error(`Secret ${fullSecretPath} has no value`);
     }
     
-    // CRITICAL: Trim whitespace and newlines
-    const value = response.SecretString.trim();
+    let value = response.SecretString.trim();
+    
+    // Try to parse as JSON (in case it has metadata wrapper)
+    try {
+      const parsed = JSON.parse(value);
+      
+      // If it's an object with an "apiKey" field, extract it
+      if (parsed && typeof parsed === 'object' && 'apiKey' in parsed) {
+        value = parsed.apiKey;
+      }
+    } catch {
+      // Not JSON, use as-is (plain text secret)
+    }
     
     // Cache the value
     secretsCache.set(cacheKey, { value, cachedAt: Date.now() });
