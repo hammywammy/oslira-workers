@@ -584,31 +584,29 @@ app.post('/test/seed-data', async (c) => {
     // 1. CREATE AUTH USER (Supabase Auth)
     // ========================================
     const testEmail = 'test@oslira.com';
-    const testPassword = 'TestPassword123!'; // Only for testing
+    const testPassword = 'TestPassword123!';
     
-    // Create user via Supabase Auth (creates in auth.users)
     const { data: authUser, error: authError } = await supabase.auth.admin.createUser({
       email: testEmail,
       password: testPassword,
-      email_confirm: true, // Skip email verification
+      email_confirm: true,
       user_metadata: {
         full_name: 'Test User',
         signature_name: 'Test'
       }
     });
 
-    if (authError && authError.message !== 'User already registered') {
+    let testUserId;
+    if (authError && authError.message.includes('already registered')) {
+      const { data: { users } } = await supabase.auth.admin.listUsers();
+      testUserId = users.find(u => u.email === testEmail)?.id;
+    } else if (authError) {
       throw new Error(`Auth user creation failed: ${authError.message}`);
+    } else {
+      testUserId = authUser.user.id;
     }
 
-    const testUserId = authUser?.user?.id || authError.message.includes('already registered') 
-      ? (await supabase.auth.admin.listUsers()).data.users.find(u => u.email === testEmail)?.id
-      : null;
-
-    if (!testUserId) {
-      throw new Error('Could not get test user ID');
-    }
-
+    if (!testUserId) throw new Error('Could not get test user ID');
     console.log('✅ Auth user created/found:', testUserId);
 
     // ========================================
@@ -623,9 +621,7 @@ app.post('/test/seed-data', async (c) => {
         signature_name: 'Test',
         onboarding_completed: true,
         is_admin: false
-      }, {
-        onConflict: 'id'
-      });
+      }, { onConflict: 'id' });
 
     if (userProfileError) {
       throw new Error(`User profile creation failed: ${userProfileError.message}`);
@@ -646,25 +642,21 @@ app.post('/test/seed-data', async (c) => {
       .select()
       .single();
 
-    if (accError) {
-      throw new Error(`Account creation failed: ${accError.message}`);
-    }
+    if (accError) throw new Error(`Account creation failed: ${accError.message}`);
     console.log('✅ Test account created:', account.id);
 
     // ========================================
-    // 4. ADD USER TO ACCOUNT (account_members)
+    // 4. ADD USER TO ACCOUNT
     // ========================================
     const { error: memberError } = await supabase
       .from('account_members')
       .insert({
         account_id: account.id,
         user_id: testUserId,
-        role: 'owner'
+        role: 'owner' // ✅ Allowed: owner, admin, member, viewer
       });
 
-    if (memberError) {
-      throw new Error(`Account member failed: ${memberError.message}`);
-    }
+    if (memberError) throw new Error(`Account member failed: ${memberError.message}`);
     console.log('✅ User added to account as owner');
 
     // ========================================
@@ -678,26 +670,22 @@ app.post('/test/seed-data', async (c) => {
         last_transaction_at: new Date().toISOString()
       });
 
-    if (balanceError) {
-      throw new Error(`Credit balance init failed: ${balanceError.message}`);
-    }
+    if (balanceError) throw new Error(`Credit balance init failed: ${balanceError.message}`);
     console.log('✅ Credit balance initialized');
 
     // ========================================
-    // 6. GRANT INITIAL CREDITS (100 credits)
+    // 6. GRANT INITIAL CREDITS (100)
     // ========================================
-const { error: creditError } = await supabase
-  .rpc('deduct_credits', {
-    p_account_id: account.id,
-    p_amount: 100,
-    p_transaction_type: 'admin_grant', // ✅ CORRECT
-    p_description: 'Test account seed credits'
-  });
+    const { error: creditError } = await supabase
+      .rpc('deduct_credits', {
+        p_account_id: account.id,
+        p_amount: 100,
+        p_transaction_type: 'admin_grant', // ✅ Allowed: subscription_renewal, analysis, refund, admin_grant, chargeback, signup_bonus
+        p_description: 'Test account seed credits'
+      });
 
-if (creditError) {
-  throw new Error(`Credit grant failed: ${creditError.message}`);
-}
-console.log('✅ 100 credits granted');
+    if (creditError) throw new Error(`Credit grant failed: ${creditError.message}`);
+    console.log('✅ 100 credits granted');
 
     // ========================================
     // 7. CREATE BUSINESS PROFILE
@@ -718,9 +706,7 @@ console.log('✅ 100 credits granted');
       .select()
       .single();
 
-    if (bizError) {
-      throw new Error(`Business profile failed: ${bizError.message}`);
-    }
+    if (bizError) throw new Error(`Business profile failed: ${bizError.message}`);
     console.log('✅ Business profile created:', business.id);
 
     // ========================================
@@ -779,39 +765,37 @@ console.log('✅ 100 credits granted');
       .insert(testLeads)
       .select();
 
-    if (leadsError) {
-      throw new Error(`Leads creation failed: ${leadsError.message}`);
-    }
+    if (leadsError) throw new Error(`Leads creation failed: ${leadsError.message}`);
     console.log('✅ 3 test leads created');
 
-// ========================================
-// 9. CREATE 3 FAKE CREDIT TRANSACTIONS
-// ========================================
-await supabase.rpc('deduct_credits', {
-  p_account_id: account.id,
-  p_amount: -2,
-  p_transaction_type: 'analysis', // ✅ CORRECT
-  p_description: 'Deep analysis of @nike'
-});
+    // ========================================
+    // 9. CREATE 3 CREDIT TRANSACTIONS
+    // ========================================
+    await supabase.rpc('deduct_credits', {
+      p_account_id: account.id,
+      p_amount: -2,
+      p_transaction_type: 'analysis', // ✅ Correct
+      p_description: 'Deep analysis of @nike'
+    });
 
-await supabase.rpc('deduct_credits', {
-  p_account_id: account.id,
-  p_amount: -1,
-  p_transaction_type: 'analysis', // ✅ CORRECT
-  p_description: 'Light analysis of @adidas'
-});
+    await supabase.rpc('deduct_credits', {
+      p_account_id: account.id,
+      p_amount: -1,
+      p_transaction_type: 'analysis', // ✅ Correct
+      p_description: 'Light analysis of @adidas'
+    });
 
-await supabase.rpc('deduct_credits', {
-  p_account_id: account.id,
-  p_amount: 50,
-  p_transaction_type: 'signup_bonus', // ✅ CORRECT
-  p_description: 'Referral bonus'
-});
+    await supabase.rpc('deduct_credits', {
+      p_account_id: account.id,
+      p_amount: 50,
+      p_transaction_type: 'signup_bonus', // ✅ Correct
+      p_description: 'Referral bonus'
+    });
 
-console.log('✅ 3 fake credit transactions created');
+    console.log('✅ 3 credit transactions created');
 
     // ========================================
-    // 10. CREATE SAMPLE ANALYSES
+    // 10. CREATE 2 SAMPLE ANALYSES
     // ========================================
     const { data: analyses, error: analysesError } = await supabase
       .from('analyses')
@@ -821,8 +805,8 @@ console.log('✅ 3 fake credit transactions created');
           account_id: account.id,
           business_profile_id: business.id,
           requested_by: testUserId,
-          analysis_type: 'deep',
-          status: 'complete',
+          analysis_type: 'deep', // ✅ Allowed: light, deep
+          status: 'completed', // ✅ Allowed: pending, processing, completed, failed
           overall_score: 85,
           niche_fit_score: 90,
           engagement_score: 88,
@@ -836,8 +820,8 @@ console.log('✅ 3 fake credit transactions created');
           account_id: account.id,
           business_profile_id: business.id,
           requested_by: testUserId,
-          analysis_type: 'light',
-          status: 'complete',
+          analysis_type: 'light', // ✅ Allowed: light, deep
+          status: 'completed', // ✅ Allowed: pending, processing, completed, failed
           overall_score: 72,
           niche_fit_score: 75,
           engagement_score: 70,
@@ -849,9 +833,7 @@ console.log('✅ 3 fake credit transactions created');
       ])
       .select();
 
-    if (analysesError) {
-      throw new Error(`Analyses creation failed: ${analysesError.message}`);
-    }
+    if (analysesError) throw new Error(`Analyses creation failed: ${analysesError.message}`);
     console.log('✅ 2 sample analyses created');
 
     // ========================================
