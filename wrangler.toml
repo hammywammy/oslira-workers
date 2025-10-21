@@ -3,11 +3,29 @@ main = "src/index.ts"
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Analytics Engine (auto-available)
+# ===========================
+# KV NAMESPACE
+# ===========================
+[[kv_namespaces]]
+binding = "OSLIRA_KV"
+id = "OSLIRA_KV"  # ← Need to get this
+
+# ===========================
+# R2 BUCKET
+# ===========================
+[[r2_buckets]]
+binding = "R2_CACHE_BUCKET"
+bucket_name = "oslira-cache"
+
+# ===========================
+# ANALYTICS ENGINE
+# ===========================
 [[analytics_engine_datasets]]
 binding = "ANALYTICS_ENGINE"
 
-# Cron triggers
+# ===========================
+# CRON TRIGGERS
+# ===========================
 [triggers]
 crons = [
   "0 3 1 * *",   # Monthly renewal (1st of month, 3 AM UTC)
@@ -21,12 +39,20 @@ crons = [
 [env.staging]
 name = "oslira-workers-staging"
 
+[[env.staging.kv_namespaces]]
+binding = "OSLIRA_KV"
+id = "OSLIRA_KV"  
+
+[[env.staging.r2_buckets]]
+binding = "R2_CACHE_BUCKET"
+bucket_name = "oslira-cache"  
+
 [[env.staging.analytics_engine_datasets]]
 binding = "ANALYTICS_ENGINE"
 
 [env.staging.triggers]
 crons = [
-  "0 4 1 * *",   # Staging: 4 AM UTC
-  "0 3 * * *",   # Staging: 3 AM UTC
-  "0 * * * *"    # Hourly
+  "0 4 1 * *",
+  "0 3 * * *",
+  "0 * * * *"
 ]
