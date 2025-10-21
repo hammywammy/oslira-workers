@@ -69,3 +69,10 @@ export function clearClientCache(): void {
   userClientCache = null;
   adminClientCache = null;
 }
+
+// ADD THIS EXPORT:
+export const SupabaseClientFactory = {
+  createUserClient,
+  createAdminClient,
+  clearClientCache
+};
