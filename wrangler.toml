@@ -8,7 +8,7 @@ compatibility_flags = ["nodejs_compat"]
 # ===========================
 [[kv_namespaces]]
 binding = "OSLIRA_KV"
-id = "OSLIRA_KV"  # ← Need to get this
+id = "dd86f413c4374811ac253bb9a6567182"  # ← Need to get this
 
 # ===========================
 # R2 BUCKET
@@ -41,7 +41,7 @@ name = "oslira-workers-staging"
 
 [[env.staging.kv_namespaces]]
 binding = "OSLIRA_KV"
-id = "OSLIRA_KV"  
+id = "dd86f413c4374811ac253bb9a6567182"  
 
 [[env.staging.r2_buckets]]
 binding = "R2_CACHE_BUCKET"
