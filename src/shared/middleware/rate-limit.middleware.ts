@@ -12,7 +12,7 @@ export interface RateLimitConfig {
  * Rate limiting using Cloudflare KV
  * Stores request counts per user/IP with automatic expiration
  */
-export async function rateLimitMiddleware(
+export function rateLimitMiddleware(
   config: RateLimitConfig
 ) {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
