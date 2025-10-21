@@ -28,16 +28,23 @@ const TEST_REGISTRY = {
     '/test/monitoring/performance-tracker'
   ],
   middleware: [
+    '/test/middleware/auth-required',
     '/test/middleware/auth-optional',
     '/test/middleware/rate-limit-general',
-    '/test/middleware/rate-limit-strict'
+    '/test/middleware/rate-limit-strict',
+    '/test/middleware/error-app-error',
+    '/test/middleware/error-unknown'
   ],
   repository: [
     '/test/repository/credits'
   ],
   utilities: [
     '/test/utils/response-success',
+    '/test/utils/response-created',
     '/test/utils/response-paginated',
+    '/test/utils/response-error',
+    '/test/utils/validation-success',
+    '/test/utils/validation-fail',
     '/test/utils/logger',
     '/test/utils/id-generators'
   ],
@@ -47,12 +54,38 @@ const TEST_REGISTRY = {
 };
 
 /**
+ * Tests that are EXPECTED to fail (auth rejection, error throwing, etc.)
+ * These tests "pass" when they return an error response
+ */
+const EXPECTED_TO_FAIL = [
+  '/test/middleware/auth-required',        // Should reject with 401
+  '/test/middleware/error-app-error',      // Should throw AppError
+  '/test/middleware/error-unknown',        // Should throw unknown error
+  '/test/utils/response-error'             // Should return error response
+];
+
+/**
  * Tests that need account_id parameter
  */
 const REQUIRES_ACCOUNT_ID = [
   '/test/repository/credits',
   '/test/integration/full-flow'
 ];
+
+/**
+ * POST endpoints with their required bodies
+ */
+const POST_ENDPOINTS: Record<string, { method: string; body?: any }> = {
+  '/test/utils/response-created': { method: 'POST' },
+  '/test/utils/validation-success': { 
+    method: 'POST',
+    body: { username: 'testuser', analysisType: 'deep' }
+  },
+  '/test/utils/validation-fail': { 
+    method: 'POST',
+    body: { username: '', analysisType: 'invalid' }
+  }
+};
 
 /**
  * Register all test endpoints
@@ -120,7 +153,7 @@ export function registerTestEndpoints(app: Hono<{ Bindings: Env }>) {
   });
 
   /**
-   * GET /test/run-all - Run all tests sequentially
+   * GET /test/run-all - Run all tests in parallel
    * Requires: X-Admin-Token, X-Account-Id headers
    */
   app.get('/test/run-all', async (c) => {
@@ -136,59 +169,87 @@ export function registerTestEndpoints(app: Hono<{ Bindings: Env }>) {
     }
 
     const startTime = Date.now();
-    const results: any[] = [];
-    let passed = 0;
-    let failed = 0;
 
-    for (const [suite, endpoints] of Object.entries(TEST_REGISTRY)) {
-      for (const endpoint of endpoints) {
+    // Build all test promises
+    const testPromises = Object.entries(TEST_REGISTRY).flatMap(([suite, endpoints]) =>
+      endpoints.map(endpoint => {
         const testStart = Date.now();
         
-        try {
-          // Build URL with account_id if needed
-          let url = endpoint;
-          if (REQUIRES_ACCOUNT_ID.includes(endpoint)) {
-            url = `${endpoint}?account_id=${accountId}`;
-          }
+        return (async () => {
+          try {
+            // Build URL with account_id if needed
+            let url = endpoint;
+            if (REQUIRES_ACCOUNT_ID.includes(endpoint)) {
+              url = `${endpoint}?account_id=${accountId}`;
+            }
 
-          const response = await app.request(url, {
-            headers: c.req.raw.headers
-          }, c.env);
-          
-          const data = await response.json();
-          const duration = Date.now() - testStart;
-          
-          if (response.ok && data.success !== false) {
-            passed++;
-            results.push({
+            // Determine method and body
+            const postConfig = POST_ENDPOINTS[endpoint];
+            const method = postConfig?.method || 'GET';
+            const headers: Record<string, string> = {};
+            
+            // Copy headers from request
+            c.req.raw.headers.forEach((value, key) => {
+              headers[key] = value;
+            });
+
+            let requestInit: any = { headers };
+            
+            if (method === 'POST') {
+              headers['Content-Type'] = 'application/json';
+              requestInit.method = 'POST';
+              if (postConfig?.body) {
+                requestInit.body = JSON.stringify(postConfig.body);
+              }
+            }
+
+            const response = await app.request(url, requestInit, c.env);
+            const data = await response.json();
+            const duration = Date.now() - testStart;
+
+            // Determine if test passed based on expectations
+            const isExpectedToFail = EXPECTED_TO_FAIL.includes(endpoint);
+            const actuallyFailed = !response.ok || data.success === false;
+            
+            let testPassed: boolean;
+            let resultStatus: 'passed' | 'failed';
+            
+            if (isExpectedToFail) {
+              // Test SHOULD fail - passes if it actually failed
+              testPassed = actuallyFailed;
+              resultStatus = testPassed ? 'passed' : 'failed';
+            } else {
+              // Test SHOULD pass - passes if it actually passed
+              testPassed = !actuallyFailed;
+              resultStatus = testPassed ? 'passed' : 'failed';
+            }
+
+            return {
               suite,
               endpoint,
-              status: 'passed',
-              duration_ms: duration
-            });
-          } else {
-            failed++;
-            results.push({
+              status: resultStatus,
+              duration_ms: duration,
+              ...(resultStatus === 'failed' && { error: data.error || data.message }),
+              ...(isExpectedToFail && { note: 'Expected to fail' })
+            };
+          } catch (error: any) {
+            return {
               suite,
               endpoint,
               status: 'failed',
-              duration_ms: duration,
-              error: data.error || data.message
-            });
+              duration_ms: Date.now() - testStart,
+              error: error.message
+            };
           }
-        } catch (error: any) {
-          failed++;
-          results.push({
-            suite,
-            endpoint,
-            status: 'failed',
-            duration_ms: Date.now() - testStart,
-            error: error.message
-          });
-        }
-      }
-    }
+        })();
+      })
+    );
 
+    // Execute all tests in parallel
+    const results = await Promise.all(testPromises);
+    
+    const passed = results.filter(r => r.status === 'passed').length;
+    const failed = results.filter(r => r.status === 'failed').length;
     const totalDuration = Date.now() - startTime;
 
     return c.json({
@@ -197,14 +258,15 @@ export function registerTestEndpoints(app: Hono<{ Bindings: Env }>) {
         total: results.length,
         passed,
         failed,
-        duration_ms: totalDuration
+        duration_ms: totalDuration,
+        note: 'Tests executed in parallel'
       },
       results
     });
   });
 
   /**
-   * GET /test/run-suite/:suite - Run specific test suite
+   * GET /test/run-suite/:suite - Run specific test suite in parallel
    * Requires: X-Admin-Token, X-Account-Id headers
    */
   app.get('/test/run-suite/:suite', async (c) => {
@@ -230,53 +292,83 @@ export function registerTestEndpoints(app: Hono<{ Bindings: Env }>) {
     }
 
     const startTime = Date.now();
-    const results: any[] = [];
-    let passed = 0;
-    let failed = 0;
 
-    for (const endpoint of endpoints) {
+    // Build all test promises
+    const testPromises = endpoints.map(endpoint => {
       const testStart = Date.now();
       
-      try {
-        // Build URL with account_id if needed
-        let url = endpoint;
-        if (REQUIRES_ACCOUNT_ID.includes(endpoint)) {
-          url = `${endpoint}?account_id=${accountId}`;
-        }
+      return (async () => {
+        try {
+          // Build URL with account_id if needed
+          let url = endpoint;
+          if (REQUIRES_ACCOUNT_ID.includes(endpoint)) {
+            url = `${endpoint}?account_id=${accountId}`;
+          }
 
-        const response = await app.request(url, {
-          headers: c.req.raw.headers
-        }, c.env);
-        
-        const data = await response.json();
-        const duration = Date.now() - testStart;
-        
-        if (response.ok && data.success !== false) {
-          passed++;
-          results.push({
-            endpoint,
-            status: 'passed',
-            duration_ms: duration
+          // Determine method and body
+          const postConfig = POST_ENDPOINTS[endpoint];
+          const method = postConfig?.method || 'GET';
+          const headers: Record<string, string> = {};
+          
+          // Copy headers from request
+          c.req.raw.headers.forEach((value, key) => {
+            headers[key] = value;
           });
-        } else {
-          failed++;
-          results.push({
+
+          let requestInit: any = { headers };
+          
+          if (method === 'POST') {
+            headers['Content-Type'] = 'application/json';
+            requestInit.method = 'POST';
+            if (postConfig?.body) {
+              requestInit.body = JSON.stringify(postConfig.body);
+            }
+          }
+
+          const response = await app.request(url, requestInit, c.env);
+          const data = await response.json();
+          const duration = Date.now() - testStart;
+
+          // Determine if test passed based on expectations
+          const isExpectedToFail = EXPECTED_TO_FAIL.includes(endpoint);
+          const actuallyFailed = !response.ok || data.success === false;
+          
+          let testPassed: boolean;
+          let resultStatus: 'passed' | 'failed';
+          
+          if (isExpectedToFail) {
+            // Test SHOULD fail - passes if it actually failed
+            testPassed = actuallyFailed;
+            resultStatus = testPassed ? 'passed' : 'failed';
+          } else {
+            // Test SHOULD pass - passes if it actually passed
+            testPassed = !actuallyFailed;
+            resultStatus = testPassed ? 'passed' : 'failed';
+          }
+
+          return {
+            endpoint,
+            status: resultStatus,
+            duration_ms: duration,
+            ...(resultStatus === 'failed' && { error: data.error || data.message }),
+            ...(isExpectedToFail && { note: 'Expected to fail' })
+          };
+        } catch (error: any) {
+          return {
             endpoint,
             status: 'failed',
-            duration_ms: duration,
-            error: data.error || data.message
-          });
+            duration_ms: Date.now() - testStart,
+            error: error.message
+          };
         }
-      } catch (error: any) {
-        failed++;
-        results.push({
-          endpoint,
-          status: 'failed',
-          duration_ms: Date.now() - testStart,
-          error: error.message
-        });
-      }
-    }
+      })();
+    });
+
+    // Execute all tests in parallel
+    const results = await Promise.all(testPromises);
+    
+    const passed = results.filter(r => r.status === 'passed').length;
+    const failed = results.filter(r => r.status === 'failed').length;
 
     return c.json({
       success: failed === 0,
@@ -285,7 +377,8 @@ export function registerTestEndpoints(app: Hono<{ Bindings: Env }>) {
         total: results.length,
         passed,
         failed,
-        duration_ms: Date.now() - startTime
+        duration_ms: Date.now() - startTime,
+        note: 'Tests executed in parallel'
       },
       results
     });
