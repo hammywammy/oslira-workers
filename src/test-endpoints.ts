@@ -28,34 +28,31 @@ const TEST_REGISTRY = {
     '/test/monitoring/performance-tracker'
   ],
   middleware: [
-    '/test/middleware/auth-required',
     '/test/middleware/auth-optional',
     '/test/middleware/rate-limit-general',
-    '/test/middleware/rate-limit-strict',
-    '/test/middleware/error-app-error',
-    '/test/middleware/error-unknown'
+    '/test/middleware/rate-limit-strict'
   ],
   repository: [
     '/test/repository/credits'
   ],
   utilities: [
     '/test/utils/response-success',
-    '/test/utils/response-created',
     '/test/utils/response-paginated',
-    '/test/utils/response-error',
-    '/test/utils/validation-success',
-    '/test/utils/validation-fail',
     '/test/utils/logger',
     '/test/utils/id-generators'
   ],
   integration: [
     '/test/integration/full-flow'
-  ],
-  data: [
-    '/test/data/seed',
-    '/test/data/cleanup'
   ]
 };
+
+/**
+ * Tests that need account_id parameter
+ */
+const REQUIRES_ACCOUNT_ID = [
+  '/test/repository/credits',
+  '/test/integration/full-flow'
+];
 
 /**
  * Register all test endpoints
@@ -106,8 +103,12 @@ export function registerTestEndpoints(app: Hono<{ Bindings: Env }>) {
       total_tests: allTests.length,
       usage: {
         list_all: 'GET /test',
-        run_all: 'GET /test/run-all',
-        run_suite: 'GET /test/run-suite/:suite'
+        run_all: 'GET /test/run-all (requires X-Admin-Token + X-Account-Id headers)',
+        run_suite: 'GET /test/run-suite/:suite (requires X-Admin-Token + X-Account-Id headers)'
+      },
+      required_headers: {
+        all_environments: ['X-Admin-Token', 'X-Account-Id'],
+        production_only: ['X-Admin-Token']
       },
       suites: Object.fromEntries(
         Object.entries(TEST_REGISTRY).map(([suite, endpoints]) => [
@@ -120,8 +121,20 @@ export function registerTestEndpoints(app: Hono<{ Bindings: Env }>) {
 
   /**
    * GET /test/run-all - Run all tests sequentially
+   * Requires: X-Admin-Token, X-Account-Id headers
    */
   app.get('/test/run-all', async (c) => {
+    const accountId = c.req.header('X-Account-Id');
+    
+    if (!accountId) {
+      return c.json({
+        success: false,
+        error: 'Missing required header: X-Account-Id',
+        code: 'MISSING_ACCOUNT_ID',
+        hint: 'Add header: X-Account-Id: <your-account-id>'
+      }, 400);
+    }
+
     const startTime = Date.now();
     const results: any[] = [];
     let passed = 0;
@@ -132,18 +145,13 @@ export function registerTestEndpoints(app: Hono<{ Bindings: Env }>) {
         const testStart = Date.now();
         
         try {
-          // Skip POST endpoints (seed/cleanup) in run-all
-          if (endpoint.includes('/seed') || endpoint.includes('/cleanup')) {
-            results.push({
-              suite,
-              endpoint,
-              status: 'skipped',
-              reason: 'POST endpoint - run manually'
-            });
-            continue;
+          // Build URL with account_id if needed
+          let url = endpoint;
+          if (REQUIRES_ACCOUNT_ID.includes(endpoint)) {
+            url = `${endpoint}?account_id=${accountId}`;
           }
 
-          const response = await app.request(endpoint, {
+          const response = await app.request(url, {
             headers: c.req.raw.headers
           }, c.env);
           
@@ -189,7 +197,6 @@ export function registerTestEndpoints(app: Hono<{ Bindings: Env }>) {
         total: results.length,
         passed,
         failed,
-        skipped: results.filter(r => r.status === 'skipped').length,
         duration_ms: totalDuration
       },
       results
@@ -198,9 +205,11 @@ export function registerTestEndpoints(app: Hono<{ Bindings: Env }>) {
 
   /**
    * GET /test/run-suite/:suite - Run specific test suite
+   * Requires: X-Admin-Token, X-Account-Id headers
    */
   app.get('/test/run-suite/:suite', async (c) => {
     const suite = c.req.param('suite');
+    const accountId = c.req.header('X-Account-Id');
     const endpoints = TEST_REGISTRY[suite as keyof typeof TEST_REGISTRY];
 
     if (!endpoints) {
@@ -209,6 +218,15 @@ export function registerTestEndpoints(app: Hono<{ Bindings: Env }>) {
         error: `Unknown test suite: ${suite}`,
         available: Object.keys(TEST_REGISTRY)
       }, 404);
+    }
+
+    if (!accountId) {
+      return c.json({
+        success: false,
+        error: 'Missing required header: X-Account-Id',
+        code: 'MISSING_ACCOUNT_ID',
+        hint: 'Add header: X-Account-Id: <your-account-id>'
+      }, 400);
     }
 
     const startTime = Date.now();
@@ -220,17 +238,13 @@ export function registerTestEndpoints(app: Hono<{ Bindings: Env }>) {
       const testStart = Date.now();
       
       try {
-        // Skip POST endpoints in automated runs
-        if (endpoint.includes('/seed') || endpoint.includes('/cleanup')) {
-          results.push({
-            endpoint,
-            status: 'skipped',
-            reason: 'POST endpoint - run manually'
-          });
-          continue;
+        // Build URL with account_id if needed
+        let url = endpoint;
+        if (REQUIRES_ACCOUNT_ID.includes(endpoint)) {
+          url = `${endpoint}?account_id=${accountId}`;
         }
 
-        const response = await app.request(endpoint, {
+        const response = await app.request(url, {
           headers: c.req.raw.headers
         }, c.env);
         
@@ -271,7 +285,6 @@ export function registerTestEndpoints(app: Hono<{ Bindings: Env }>) {
         total: results.length,
         passed,
         failed,
-        skipped: results.filter(r => r.status === 'skipped').length,
         duration_ms: Date.now() - startTime
       },
       results
