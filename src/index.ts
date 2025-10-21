@@ -574,7 +574,6 @@ app.get('/test/full-integration', async (c) => {
   }
 });
 
-//insert test data
 app.post('/test/seed-data', async (c) => {
   try {
     const supabase = await createAdminClient(c.env);
@@ -582,39 +581,59 @@ app.post('/test/seed-data', async (c) => {
     console.log('🌱 Starting test data seed...');
 
     // ========================================
-    // 1. CREATE TEST USER (in auth.users)
+    // 1. CREATE AUTH USER (Supabase Auth)
     // ========================================
-    const testUserId = '00000000-0000-0000-0000-000000000001'; // Fixed UUID for testing
     const testEmail = 'test@oslira.com';
+    const testPassword = 'TestPassword123!'; // Only for testing
     
-    // Check if user already exists
-    const { data: existingUser } = await supabase
-      .from('users')
-      .select('id')
-      .eq('id', testUserId)
-      .single();
-    
-    if (!existingUser) {
-      // Create user in public.users table
-      const { error: userError } = await supabase
-        .from('users')
-        .insert({
-          id: testUserId,
-          email: testEmail,
-          full_name: 'Test User',
-          signature_name: 'Test',
-          onboarding_completed: true,
-          is_admin: false
-        });
-      
-      if (userError) throw new Error(`User creation failed: ${userError.message}`);
-      console.log('✅ Test user created');
-    } else {
-      console.log('ℹ️  Test user already exists');
+    // Create user via Supabase Auth (creates in auth.users)
+    const { data: authUser, error: authError } = await supabase.auth.admin.createUser({
+      email: testEmail,
+      password: testPassword,
+      email_confirm: true, // Skip email verification
+      user_metadata: {
+        full_name: 'Test User',
+        signature_name: 'Test'
+      }
+    });
+
+    if (authError && authError.message !== 'User already registered') {
+      throw new Error(`Auth user creation failed: ${authError.message}`);
     }
 
+    const testUserId = authUser?.user?.id || authError.message.includes('already registered') 
+      ? (await supabase.auth.admin.listUsers()).data.users.find(u => u.email === testEmail)?.id
+      : null;
+
+    if (!testUserId) {
+      throw new Error('Could not get test user ID');
+    }
+
+    console.log('✅ Auth user created/found:', testUserId);
+
     // ========================================
-    // 2. CREATE TEST ACCOUNT
+    // 2. CREATE PUBLIC USER PROFILE
+    // ========================================
+    const { error: userProfileError } = await supabase
+      .from('users')
+      .upsert({
+        id: testUserId,
+        email: testEmail,
+        full_name: 'Test User',
+        signature_name: 'Test',
+        onboarding_completed: true,
+        is_admin: false
+      }, {
+        onConflict: 'id'
+      });
+
+    if (userProfileError) {
+      throw new Error(`User profile creation failed: ${userProfileError.message}`);
+    }
+    console.log('✅ User profile created');
+
+    // ========================================
+    // 3. CREATE TEST ACCOUNT
     // ========================================
     const { data: account, error: accError } = await supabase
       .from('accounts')
@@ -627,11 +646,13 @@ app.post('/test/seed-data', async (c) => {
       .select()
       .single();
 
-    if (accError) throw new Error(`Account creation failed: ${accError.message}`);
+    if (accError) {
+      throw new Error(`Account creation failed: ${accError.message}`);
+    }
     console.log('✅ Test account created:', account.id);
 
     // ========================================
-    // 3. ADD USER TO ACCOUNT (account_members)
+    // 4. ADD USER TO ACCOUNT (account_members)
     // ========================================
     const { error: memberError } = await supabase
       .from('account_members')
@@ -641,39 +662,45 @@ app.post('/test/seed-data', async (c) => {
         role: 'owner'
       });
 
-    if (memberError) throw new Error(`Account member failed: ${memberError.message}`);
+    if (memberError) {
+      throw new Error(`Account member failed: ${memberError.message}`);
+    }
     console.log('✅ User added to account as owner');
 
     // ========================================
-    // 4. INITIALIZE CREDIT BALANCE
+    // 5. INITIALIZE CREDIT BALANCE
     // ========================================
     const { error: balanceError } = await supabase
       .from('credit_balances')
       .insert({
         account_id: account.id,
-        current_balance: 0, // Start at 0, will grant credits next
+        current_balance: 0,
         last_transaction_at: new Date().toISOString()
       });
 
-    if (balanceError) throw new Error(`Credit balance init failed: ${balanceError.message}`);
+    if (balanceError) {
+      throw new Error(`Credit balance init failed: ${balanceError.message}`);
+    }
     console.log('✅ Credit balance initialized');
 
     // ========================================
-    // 5. GRANT INITIAL CREDITS (100 credits)
+    // 6. GRANT INITIAL CREDITS (100 credits)
     // ========================================
-    const { data: creditTx, error: creditError } = await supabase
+    const { error: creditError } = await supabase
       .rpc('deduct_credits', {
         p_account_id: account.id,
-        p_amount: 100, // Positive = grant
+        p_amount: 100,
         p_transaction_type: 'initial_grant',
         p_description: 'Test account seed credits'
       });
 
-    if (creditError) throw new Error(`Credit grant failed: ${creditError.message}`);
+    if (creditError) {
+      throw new Error(`Credit grant failed: ${creditError.message}`);
+    }
     console.log('✅ 100 credits granted');
 
     // ========================================
-    // 6. CREATE BUSINESS PROFILE
+    // 7. CREATE BUSINESS PROFILE
     // ========================================
     const { data: business, error: bizError } = await supabase
       .from('business_profiles')
@@ -691,11 +718,13 @@ app.post('/test/seed-data', async (c) => {
       .select()
       .single();
 
-    if (bizError) throw new Error(`Business profile failed: ${bizError.message}`);
+    if (bizError) {
+      throw new Error(`Business profile failed: ${bizError.message}`);
+    }
     console.log('✅ Business profile created:', business.id);
 
     // ========================================
-    // 7. CREATE 3 TEST LEADS
+    // 8. CREATE 3 TEST LEADS
     // ========================================
     const testLeads = [
       {
@@ -750,13 +779,14 @@ app.post('/test/seed-data', async (c) => {
       .insert(testLeads)
       .select();
 
-    if (leadsError) throw new Error(`Leads creation failed: ${leadsError.message}`);
+    if (leadsError) {
+      throw new Error(`Leads creation failed: ${leadsError.message}`);
+    }
     console.log('✅ 3 test leads created');
 
     // ========================================
-    // 8. CREATE 3 FAKE CREDIT TRANSACTIONS
+    // 9. CREATE 3 FAKE CREDIT TRANSACTIONS
     // ========================================
-    // Deduct 2 credits for analysis
     await supabase.rpc('deduct_credits', {
       p_account_id: account.id,
       p_amount: -2,
@@ -764,7 +794,6 @@ app.post('/test/seed-data', async (c) => {
       p_description: 'Deep analysis of @nike'
     });
 
-    // Deduct 1 credit for analysis
     await supabase.rpc('deduct_credits', {
       p_account_id: account.id,
       p_amount: -1,
@@ -772,7 +801,6 @@ app.post('/test/seed-data', async (c) => {
       p_description: 'Light analysis of @adidas'
     });
 
-    // Grant bonus credits
     await supabase.rpc('deduct_credits', {
       p_account_id: account.id,
       p_amount: 50,
@@ -783,7 +811,7 @@ app.post('/test/seed-data', async (c) => {
     console.log('✅ 3 fake credit transactions created');
 
     // ========================================
-    // 9. CREATE SAMPLE ANALYSES
+    // 10. CREATE SAMPLE ANALYSES
     // ========================================
     const { data: analyses, error: analysesError } = await supabase
       .from('analyses')
@@ -821,11 +849,13 @@ app.post('/test/seed-data', async (c) => {
       ])
       .select();
 
-    if (analysesError) throw new Error(`Analyses creation failed: ${analysesError.message}`);
+    if (analysesError) {
+      throw new Error(`Analyses creation failed: ${analysesError.message}`);
+    }
     console.log('✅ 2 sample analyses created');
 
     // ========================================
-    // 10. GET FINAL CREDIT BALANCE
+    // 11. GET FINAL CREDIT BALANCE
     // ========================================
     const { data: finalBalance } = await supabase
       .from('credit_balances')
@@ -842,6 +872,7 @@ app.post('/test/seed-data', async (c) => {
       test_data: {
         user_id: testUserId,
         user_email: testEmail,
+        user_password: testPassword,
         account_id: account.id,
         account_name: account.name,
         business_id: business.id,
@@ -872,7 +903,6 @@ app.post('/test/seed-data', async (c) => {
     }, 500);
   }
 });
-
 
 // ===============================================================================
 // ERROR HANDLING
