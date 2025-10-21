@@ -9,22 +9,12 @@ const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
  * Fetch secret from AWS Secrets Manager with caching
  * 
  * Your naming convention: Oslira/production/SECRET_NAME
- * 
- * @param secretName - Name of the secret (e.g., 'SUPABASE_URL')
- * @param env - Cloudflare Worker environment
- * @param appEnv - 'production' or 'staging'
- * @returns Secret value
- * 
- * @example
- * const supabaseUrl = await getSecret('SUPABASE_URL', env, 'production');
- * // Fetches from: Oslira/production/SUPABASE_URL
  */
 export async function getSecret(
   secretName: string,
   env: Env,
   appEnv: string
 ): Promise<string> {
-  // Build full secret path: Oslira/production/SUPABASE_URL
   const fullSecretPath = `Oslira/${appEnv}/${secretName}`;
   const cacheKey = fullSecretPath;
   const cached = secretsCache.get(cacheKey);
@@ -54,7 +44,8 @@ export async function getSecret(
       throw new Error(`Secret ${fullSecretPath} has no value`);
     }
     
-    const value = response.SecretString;
+    // CRITICAL: Trim whitespace and newlines
+    const value = response.SecretString.trim();
     
     // Cache the value
     secretsCache.set(cacheKey, { value, cachedAt: Date.now() });
@@ -67,10 +58,7 @@ export async function getSecret(
 }
 
 /**
- * Fetch multiple secrets at once (more efficient)
- * 
- * @example
- * const secrets = await getSecrets(['SUPABASE_URL', 'SUPABASE_ANON_KEY'], env, 'production');
+ * Fetch multiple secrets at once
  */
 export async function getSecrets(
   secretNames: string[],
@@ -89,7 +77,7 @@ export async function getSecrets(
 }
 
 /**
- * Clear secrets cache (useful for testing or after secret rotation)
+ * Clear secrets cache
  */
 export function clearSecretsCache(): void {
   secretsCache.clear();
