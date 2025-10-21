@@ -95,3 +95,6 @@ export async function getSecrets(
 export function clearSecretsCache(): void {
   secretsCache.clear();
 }
+
+// ADD THIS EXPORT:
+export const getApiKey = getSecret; // Alias for consistency
