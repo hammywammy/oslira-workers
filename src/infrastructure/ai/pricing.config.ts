@@ -46,7 +46,7 @@ export const AI_PRICING: Record<string, ModelPricing> = {
   max_tokens: 16384,
   supports_json_schema: true,
   reasoning_effort: 'high'
-}
+},
   
   // Anthropic Models
   'claude-3-5-sonnet-20241022': {
