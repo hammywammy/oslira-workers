@@ -147,6 +147,194 @@ app.get('/test/analytics', async (c) => {
   }
 });
 
+app.post('/test/seed-data', async (c) => {
+  try {
+    const supabase = await createAdminClient(c.env);
+
+    // 1. Create test account
+    const { data: account, error: accError } = await supabase
+      .from('accounts')
+      .insert({
+        name: 'Test Account',
+        slug: 'test-account-' + Date.now(),
+        owner_id: '00000000-0000-0000-0000-000000000001', // Fake UUID
+        is_suspended: false
+      })
+      .select()
+      .single();
+
+    if (accError) throw accError;
+
+    // 2. Create test business profile
+    const { data: business, error: bizError } = await supabase
+      .from('business_profiles')
+      .insert({
+        account_id: account.id,
+        business_name: 'Test Business',
+        business_slug: 'test-biz-' + Date.now(),
+        target_audience: 'Test audience',
+        business_one_liner: 'Test company for testing'
+      })
+      .select()
+      .single();
+
+    if (bizError) throw bizError;
+
+    // 3. Grant initial credits
+    const { data: creditTx, error: creditError } = await supabase
+      .rpc('deduct_credits', {
+        p_account_id: account.id,
+        p_amount: 100, // Positive = grant
+        p_transaction_type: 'initial_grant',
+        p_description: 'Test account seed credits'
+      });
+
+    if (creditError) throw creditError;
+
+    // 4. Create test lead
+    const { data: lead, error: leadError } = await supabase
+      .from('leads')
+      .insert({
+        account_id: account.id,
+        business_profile_id: business.id,
+        username: 'nike-test',
+        display_name: 'Nike Official',
+        follower_count: 250000000,
+        bio: 'Just Do It',
+        is_verified_account: true,
+        first_analyzed_at: new Date().toISOString(),
+        last_analyzed_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (leadError) throw leadError;
+
+    return c.json({
+      success: true,
+      message: 'Test data seeded successfully',
+      test_data: {
+        account_id: account.id,
+        account_name: account.name,
+        business_id: business.id,
+        business_name: business.name,
+        lead_id: lead.id,
+        lead_username: lead.username,
+        credits: 100
+      }
+    });
+
+  } catch (error: any) {
+    return c.json({ 
+      success: false, 
+      error: error.message,
+      hint: 'Check FK constraints and RPC functions exist'
+    }, 500);
+  }
+});
+
+app.get('/test/cache', async (c) => {
+  try {
+    const username = c.req.query('username') || 'nike';
+    const cacheService = new R2CacheService(c.env.R2_CACHE_BUCKET);
+
+    // Test set
+    const mockProfile: ProfileData = {
+      username,
+      displayName: 'Test Profile',
+      bio: 'Test bio',
+      followersCount: 1000000,
+      followingCount: 500,
+      postsCount: 100,
+      isVerified: true,
+      isPrivate: false,
+      profilePicUrl: 'https://example.com/pic.jpg',
+      externalUrl: '',
+      isBusinessAccount: false,
+      latestPosts: [],
+      scraperUsed: 'test',
+      dataQuality: 'high' as const
+    };
+
+    await cacheService.set(username, mockProfile);
+
+    // 🔧 ADD THIS: Wait for R2 propagation (2 seconds)
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Test get
+    const cached = await cacheService.get(username, 'light');
+
+    return c.json({
+      success: true,
+      test: 'R2 Cache',
+      operations: {
+        set: 'OK',
+        get: cached ? 'OK' : 'FAILED'
+      },
+      cached_data: cached,
+      note: cached ? 'Cache working correctly' : 'Cache get returned null - may need more propagation time'
+    });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+app.get('/test/r2-binding', async (c) => {
+  try {
+    // Verify binding exists
+    if (!c.env.R2_CACHE_BUCKET) {
+      return c.json({ 
+        success: false, 
+        error: 'R2_CACHE_BUCKET binding not found' 
+      }, 500);
+    }
+
+    // Try direct R2 operations
+    const testKey = 'test-binding-check';
+    const testData = { timestamp: Date.now(), test: 'hello' };
+
+    // PUT
+    await c.env.R2_CACHE_BUCKET.put(testKey, JSON.stringify(testData));
+    console.log('✅ R2 PUT succeeded');
+
+    // Wait
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // GET
+    const object = await c.env.R2_CACHE_BUCKET.get(testKey);
+    if (!object) {
+      return c.json({
+        success: false,
+        error: 'R2 GET returned null after PUT',
+        note: 'Propagation delay or binding issue'
+      });
+    }
+
+    const retrieved = await object.json();
+    console.log('✅ R2 GET succeeded');
+
+    // DELETE (cleanup)
+    await c.env.R2_CACHE_BUCKET.delete(testKey);
+
+    return c.json({
+      success: true,
+      test: 'R2 Binding Check',
+      operations: {
+        put: 'OK',
+        get: 'OK',
+        delete: 'OK'
+      },
+      data_match: retrieved.timestamp === testData.timestamp
+    });
+  } catch (error: any) {
+    return c.json({ 
+      success: false, 
+      error: error.message,
+      stack: error.stack
+    }, 500);
+  }
+});
+
 // ============================================================================
 // TEST ENDPOINTS - PHASE 1 INFRASTRUCTURE
 // ============================================================================
