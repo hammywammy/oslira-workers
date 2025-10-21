@@ -1,27 +1,32 @@
 import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
 import type { Env } from '@/shared/types/env.types';
 
-// Cache secrets for 5 minutes (balance between freshness and performance)
+// Cache secrets for 5 minutes
 const secretsCache = new Map<string, { value: string; cachedAt: number }>();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 /**
  * Fetch secret from AWS Secrets Manager with caching
  * 
- * @param secretName - Name of the secret (without environment prefix)
+ * Your naming convention: Oslira/production/SECRET_NAME
+ * 
+ * @param secretName - Name of the secret (e.g., 'SUPABASE_URL')
  * @param env - Cloudflare Worker environment
  * @param appEnv - 'production' or 'staging'
  * @returns Secret value
  * 
  * @example
  * const supabaseUrl = await getSecret('SUPABASE_URL', env, 'production');
+ * // Fetches from: Oslira/production/SUPABASE_URL
  */
 export async function getSecret(
   secretName: string,
   env: Env,
   appEnv: string
 ): Promise<string> {
-  const cacheKey = `${appEnv}/${secretName}`;
+  // Build full secret path: Oslira/production/SUPABASE_URL
+  const fullSecretPath = `Oslira/${appEnv}/${secretName}`;
+  const cacheKey = fullSecretPath;
   const cached = secretsCache.get(cacheKey);
   
   // Return cached value if still valid
@@ -39,14 +44,14 @@ export async function getSecret(
   });
   
   const command = new GetSecretValueCommand({
-    SecretId: `${appEnv}/${secretName}`
+    SecretId: fullSecretPath
   });
   
   try {
     const response = await client.send(command);
     
     if (!response.SecretString) {
-      throw new Error(`Secret ${secretName} has no value`);
+      throw new Error(`Secret ${fullSecretPath} has no value`);
     }
     
     const value = response.SecretString;
@@ -56,8 +61,8 @@ export async function getSecret(
     
     return value;
   } catch (error: any) {
-    console.error(`Failed to fetch secret ${secretName}:`, error.message);
-    throw new Error(`Secret ${secretName} not found in AWS Secrets Manager`);
+    console.error(`Failed to fetch secret ${fullSecretPath}:`, error.message);
+    throw new Error(`Secret ${fullSecretPath} not found in AWS Secrets Manager (region: ${env.AWS_REGION})`);
   }
 }
 
@@ -81,4 +86,11 @@ export async function getSecrets(
   );
   
   return results;
+}
+
+/**
+ * Clear secrets cache (useful for testing or after secret rotation)
+ */
+export function clearSecretsCache(): void {
+  secretsCache.clear();
 }
