@@ -147,8 +147,7 @@ export function registerTestEndpoints(app: Hono<{ Bindings: Env }>) {
         model: 'gpt-5-nano',
         system_prompt: 'You are a helpful assistant.',
         user_prompt: 'Say "Hello from AI Gateway test!" in one short sentence.',
-        max_tokens: 50,
-        temperature: 0
+        max_tokens: 50
       });
 
       return c.json({
@@ -332,8 +331,7 @@ export function registerTestEndpoints(app: Hono<{ Bindings: Env }>) {
         model: 'gpt-5-nano',
         system_prompt: 'Score this profile 0-100 for brand partnerships.',
         user_prompt: `Profile: @${profile.username}, ${profile.followersCount} followers. Return JSON: {"score": X, "summary": "..."}`,
-        max_tokens: 200,
-        temperature: 0
+        max_tokens: 200
       });
       perfTracker.endStep('ai_analysis');
 
