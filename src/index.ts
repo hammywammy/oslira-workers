@@ -147,92 +147,6 @@ app.get('/test/analytics', async (c) => {
   }
 });
 
-app.post('/test/seed-data', async (c) => {
-  try {
-    const supabase = await createAdminClient(c.env);
-
-    // 1. Create test account
-    const { data: account, error: accError } = await supabase
-      .from('accounts')
-      .insert({
-        name: 'Test Account',
-        slug: 'test-account-' + Date.now(),
-        owner_id: '00000000-0000-0000-0000-000000000001', // Fake UUID
-        is_suspended: false
-      })
-      .select()
-      .single();
-
-    if (accError) throw accError;
-
-    // 2. Create test business profile
-    const { data: business, error: bizError } = await supabase
-      .from('business_profiles')
-      .insert({
-        account_id: account.id,
-        business_name: 'Test Business',
-        business_slug: 'test-biz-' + Date.now(),
-        target_audience: 'Test audience',
-        business_one_liner: 'Test company for testing'
-      })
-      .select()
-      .single();
-
-    if (bizError) throw bizError;
-
-    // 3. Grant initial credits
-    const { data: creditTx, error: creditError } = await supabase
-      .rpc('deduct_credits', {
-        p_account_id: account.id,
-        p_amount: 100, // Positive = grant
-        p_transaction_type: 'initial_grant',
-        p_description: 'Test account seed credits'
-      });
-
-    if (creditError) throw creditError;
-
-    // 4. Create test lead
-    const { data: lead, error: leadError } = await supabase
-      .from('leads')
-      .insert({
-        account_id: account.id,
-        business_profile_id: business.id,
-        username: 'nike-test',
-        display_name: 'Nike Official',
-        follower_count: 250000000,
-        bio: 'Just Do It',
-        is_verified_account: true,
-        first_analyzed_at: new Date().toISOString(),
-        last_analyzed_at: new Date().toISOString()
-      })
-      .select()
-      .single();
-
-    if (leadError) throw leadError;
-
-    return c.json({
-      success: true,
-      message: 'Test data seeded successfully',
-      test_data: {
-        account_id: account.id,
-        account_name: account.name,
-        business_id: business.id,
-        business_name: business.name,
-        lead_id: lead.id,
-        lead_username: lead.username,
-        credits: 100
-      }
-    });
-
-  } catch (error: any) {
-    return c.json({ 
-      success: false, 
-      error: error.message,
-      hint: 'Check FK constraints and RPC functions exist'
-    }, 500);
-  }
-});
-
 app.get('/test/cache', async (c) => {
   try {
     const username = c.req.query('username') || 'nike';
@@ -657,6 +571,305 @@ app.get('/test/full-integration', async (c) => {
 
   } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+//insert test data
+app.post('/test/seed-data', async (c) => {
+  try {
+    const supabase = await createAdminClient(c.env);
+    
+    console.log('🌱 Starting test data seed...');
+
+    // ========================================
+    // 1. CREATE TEST USER (in auth.users)
+    // ========================================
+    const testUserId = '00000000-0000-0000-0000-000000000001'; // Fixed UUID for testing
+    const testEmail = 'test@oslira.com';
+    
+    // Check if user already exists
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('id')
+      .eq('id', testUserId)
+      .single();
+    
+    if (!existingUser) {
+      // Create user in public.users table
+      const { error: userError } = await supabase
+        .from('users')
+        .insert({
+          id: testUserId,
+          email: testEmail,
+          full_name: 'Test User',
+          signature_name: 'Test',
+          onboarding_completed: true,
+          is_admin: false
+        });
+      
+      if (userError) throw new Error(`User creation failed: ${userError.message}`);
+      console.log('✅ Test user created');
+    } else {
+      console.log('ℹ️  Test user already exists');
+    }
+
+    // ========================================
+    // 2. CREATE TEST ACCOUNT
+    // ========================================
+    const { data: account, error: accError } = await supabase
+      .from('accounts')
+      .insert({
+        owner_id: testUserId,
+        name: 'Test Account',
+        slug: 'test-account-' + Date.now(),
+        is_suspended: false
+      })
+      .select()
+      .single();
+
+    if (accError) throw new Error(`Account creation failed: ${accError.message}`);
+    console.log('✅ Test account created:', account.id);
+
+    // ========================================
+    // 3. ADD USER TO ACCOUNT (account_members)
+    // ========================================
+    const { error: memberError } = await supabase
+      .from('account_members')
+      .insert({
+        account_id: account.id,
+        user_id: testUserId,
+        role: 'owner'
+      });
+
+    if (memberError) throw new Error(`Account member failed: ${memberError.message}`);
+    console.log('✅ User added to account as owner');
+
+    // ========================================
+    // 4. INITIALIZE CREDIT BALANCE
+    // ========================================
+    const { error: balanceError } = await supabase
+      .from('credit_balances')
+      .insert({
+        account_id: account.id,
+        current_balance: 0, // Start at 0, will grant credits next
+        last_transaction_at: new Date().toISOString()
+      });
+
+    if (balanceError) throw new Error(`Credit balance init failed: ${balanceError.message}`);
+    console.log('✅ Credit balance initialized');
+
+    // ========================================
+    // 5. GRANT INITIAL CREDITS (100 credits)
+    // ========================================
+    const { data: creditTx, error: creditError } = await supabase
+      .rpc('deduct_credits', {
+        p_account_id: account.id,
+        p_amount: 100, // Positive = grant
+        p_transaction_type: 'initial_grant',
+        p_description: 'Test account seed credits'
+      });
+
+    if (creditError) throw new Error(`Credit grant failed: ${creditError.message}`);
+    console.log('✅ 100 credits granted');
+
+    // ========================================
+    // 6. CREATE BUSINESS PROFILE
+    // ========================================
+    const { data: business, error: bizError } = await supabase
+      .from('business_profiles')
+      .insert({
+        account_id: account.id,
+        business_name: 'Test Business',
+        website: 'https://testbusiness.com',
+        business_one_liner: 'AI-powered Instagram lead analysis for testing',
+        business_context_pack: {
+          target_audience: 'Instagram influencers',
+          industry: 'Marketing & Analytics',
+          offering: 'Lead scoring service'
+        }
+      })
+      .select()
+      .single();
+
+    if (bizError) throw new Error(`Business profile failed: ${bizError.message}`);
+    console.log('✅ Business profile created:', business.id);
+
+    // ========================================
+    // 7. CREATE 3 TEST LEADS
+    // ========================================
+    const testLeads = [
+      {
+        account_id: account.id,
+        business_profile_id: business.id,
+        instagram_username: 'nike',
+        display_name: 'Nike',
+        follower_count: 250000000,
+        following_count: 150,
+        post_count: 1200,
+        bio: 'Just Do It. Official Nike account.',
+        is_verified: true,
+        is_business_account: true,
+        platform: 'instagram',
+        first_analyzed_at: new Date().toISOString(),
+        last_analyzed_at: new Date().toISOString()
+      },
+      {
+        account_id: account.id,
+        business_profile_id: business.id,
+        instagram_username: 'adidas',
+        display_name: 'adidas',
+        follower_count: 28000000,
+        following_count: 200,
+        post_count: 950,
+        bio: 'Impossible is Nothing.',
+        is_verified: true,
+        is_business_account: true,
+        platform: 'instagram',
+        first_analyzed_at: new Date().toISOString(),
+        last_analyzed_at: new Date().toISOString()
+      },
+      {
+        account_id: account.id,
+        business_profile_id: business.id,
+        instagram_username: 'puma',
+        display_name: 'PUMA',
+        follower_count: 19000000,
+        following_count: 300,
+        post_count: 800,
+        bio: 'Forever Faster',
+        is_verified: true,
+        is_business_account: true,
+        platform: 'instagram',
+        first_analyzed_at: new Date().toISOString(),
+        last_analyzed_at: new Date().toISOString()
+      }
+    ];
+
+    const { data: leads, error: leadsError } = await supabase
+      .from('leads')
+      .insert(testLeads)
+      .select();
+
+    if (leadsError) throw new Error(`Leads creation failed: ${leadsError.message}`);
+    console.log('✅ 3 test leads created');
+
+    // ========================================
+    // 8. CREATE 3 FAKE CREDIT TRANSACTIONS
+    // ========================================
+    // Deduct 2 credits for analysis
+    await supabase.rpc('deduct_credits', {
+      p_account_id: account.id,
+      p_amount: -2,
+      p_transaction_type: 'analysis',
+      p_description: 'Deep analysis of @nike'
+    });
+
+    // Deduct 1 credit for analysis
+    await supabase.rpc('deduct_credits', {
+      p_account_id: account.id,
+      p_amount: -1,
+      p_transaction_type: 'analysis',
+      p_description: 'Light analysis of @adidas'
+    });
+
+    // Grant bonus credits
+    await supabase.rpc('deduct_credits', {
+      p_account_id: account.id,
+      p_amount: 50,
+      p_transaction_type: 'bonus_grant',
+      p_description: 'Referral bonus'
+    });
+
+    console.log('✅ 3 fake credit transactions created');
+
+    // ========================================
+    // 9. CREATE SAMPLE ANALYSES
+    // ========================================
+    const { data: analyses, error: analysesError } = await supabase
+      .from('analyses')
+      .insert([
+        {
+          lead_id: leads[0].id,
+          account_id: account.id,
+          business_profile_id: business.id,
+          requested_by: testUserId,
+          analysis_type: 'deep',
+          status: 'complete',
+          overall_score: 85,
+          niche_fit_score: 90,
+          engagement_score: 88,
+          confidence_level: 0.92,
+          credits_charged: 2,
+          model_used: 'gpt-5-mini',
+          completed_at: new Date().toISOString()
+        },
+        {
+          lead_id: leads[1].id,
+          account_id: account.id,
+          business_profile_id: business.id,
+          requested_by: testUserId,
+          analysis_type: 'light',
+          status: 'complete',
+          overall_score: 72,
+          niche_fit_score: 75,
+          engagement_score: 70,
+          confidence_level: 0.85,
+          credits_charged: 1,
+          model_used: 'gpt-4o-mini',
+          completed_at: new Date().toISOString()
+        }
+      ])
+      .select();
+
+    if (analysesError) throw new Error(`Analyses creation failed: ${analysesError.message}`);
+    console.log('✅ 2 sample analyses created');
+
+    // ========================================
+    // 10. GET FINAL CREDIT BALANCE
+    // ========================================
+    const { data: finalBalance } = await supabase
+      .from('credit_balances')
+      .select('current_balance')
+      .eq('account_id', account.id)
+      .single();
+
+    // ========================================
+    // RETURN COMPLETE TEST DATA
+    // ========================================
+    return c.json({
+      success: true,
+      message: 'Test data seeded successfully',
+      test_data: {
+        user_id: testUserId,
+        user_email: testEmail,
+        account_id: account.id,
+        account_name: account.name,
+        business_id: business.id,
+        business_name: business.name,
+        leads: leads.map(l => ({
+          id: l.id,
+          username: l.instagram_username,
+          followers: l.follower_count
+        })),
+        analyses: analyses.map(a => ({
+          id: a.id,
+          type: a.analysis_type,
+          score: a.overall_score,
+          status: a.status
+        })),
+        credits_balance: finalBalance.current_balance,
+        credits_flow: '100 (initial) - 2 (nike) - 1 (adidas) + 50 (bonus) = 147'
+      }
+    });
+
+  } catch (error: any) {
+    console.error('❌ Seed failed:', error);
+    return c.json({ 
+      success: false, 
+      error: error.message,
+      hint: 'Check FK constraints and RPC functions exist',
+      stack: error.stack
+    }, 500);
   }
 });
 
