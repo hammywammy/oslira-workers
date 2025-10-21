@@ -3,10 +3,6 @@ main = "src/index.ts"
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-[vars]
-APP_ENV = "production"
-AWS_REGION = "us-east-1"
-
 # Analytics Engine (auto-available)
 [[analytics_engine_datasets]]
 binding = "ANALYTICS_ENGINE"
@@ -24,10 +20,6 @@ crons = [
 # ===========================
 [env.staging]
 name = "oslira-workers-staging"
-
-[env.staging.vars]
-APP_ENV = "staging"
-AWS_REGION = "us-east-1"
 
 [[env.staging.analytics_engine_datasets]]
 binding = "ANALYTICS_ENGINE"
