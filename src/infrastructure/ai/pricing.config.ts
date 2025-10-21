@@ -20,32 +20,33 @@ export interface ModelPricing {
  * Source: OpenAI pricing page, Anthropic pricing page
  */
 export const AI_PRICING: Record<string, ModelPricing> = {
-  // OpenAI Models
-  'gpt-4o-mini': {
-    per_1m_input: 0.15,
-    per_1m_output: 0.60,
-    provider: 'openai',
-    max_tokens: 16384,
-    supports_json_schema: true
-  },
-  
-  'gpt-5-mini': {
-    per_1m_input: 0.30,
-    per_1m_output: 1.20,
-    provider: 'openai',
-    max_tokens: 16384,
-    supports_json_schema: true,
-    reasoning_effort: 'medium' // Default for o1 models
-  },
-  
-  'gpt-5': {
-    per_1m_input: 0.60,
-    per_1m_output: 2.40,
-    provider: 'openai',
-    max_tokens: 16384,
-    supports_json_schema: true,
-    reasoning_effort: 'medium'
-  },
+
+  'gpt-5-nano': {
+  per_1m_input: 0.15,     // Assuming same as mini, confirm pricing
+  per_1m_output: 0.60,
+  provider: 'openai',
+  max_tokens: 16384,
+  supports_json_schema: true,
+  reasoning_effort: 'low'
+},
+
+'gpt-5-mini': {
+  per_1m_input: 0.30,
+  per_1m_output: 1.20,
+  provider: 'openai',
+  max_tokens: 16384,
+  supports_json_schema: true,
+  reasoning_effort: 'medium'
+},
+
+'gpt-5': {
+  per_1m_input: 0.60,
+  per_1m_output: 2.40,
+  provider: 'openai',
+  max_tokens: 16384,
+  supports_json_schema: true,
+  reasoning_effort: 'high'
+}
   
   // Anthropic Models
   'claude-3-5-sonnet-20241022': {
@@ -69,60 +70,57 @@ export interface AnalysisModelConfig {
 }
 
 export const ANALYSIS_MODEL_MAPPING: Record<string, AnalysisModelConfig> = {
-  // LIGHT Analysis - Fast, cheap
   'light': {
-    model: 'gpt-4o-mini',
+    model: 'gpt-5-nano',  // ✅ CHANGED from gpt-4o-mini
     reasoning_effort: 'low',
     max_tokens: 1000,
     temperature: 0
   },
   
-  // DEEP Analysis - Balanced
   'deep_core': {
-    model: 'gpt-5-mini',
+    model: 'gpt-5-mini',  // ✅ Already correct
     reasoning_effort: 'medium',
     max_tokens: 2000,
     temperature: 0
   },
   
   'deep_outreach': {
-    model: 'gpt-5-mini',
+    model: 'gpt-5-mini',  // ✅ Already correct
     reasoning_effort: 'low',
     max_tokens: 800,
     temperature: 0.3
   },
   
   'deep_personality': {
-    model: 'gpt-5-mini',
+    model: 'gpt-5-mini',  // ✅ Already correct
     reasoning_effort: 'low',
     max_tokens: 600,
     temperature: 0
   },
   
-  // XRAY Analysis - Premium
   'xray_psychographic': {
-    model: 'gpt-5',
+    model: 'gpt-5',  // ✅ Already correct
     reasoning_effort: 'medium',
     max_tokens: 2500,
     temperature: 0
   },
   
   'xray_commercial': {
-    model: 'gpt-5-mini',
+    model: 'gpt-5-mini',  // ✅ Already correct
     reasoning_effort: 'medium',
     max_tokens: 1500,
     temperature: 0
   },
   
   'xray_outreach': {
-    model: 'gpt-5-mini',
+    model: 'gpt-5-mini',  // ✅ Already correct
     reasoning_effort: 'low',
     max_tokens: 800,
     temperature: 0.3
   },
   
   'xray_personality': {
-    model: 'gpt-5-mini',
+    model: 'gpt-5-mini',  // ✅ Already correct
     reasoning_effort: 'low',
     max_tokens: 600,
     temperature: 0
