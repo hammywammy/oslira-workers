@@ -1,6 +1,7 @@
 // src/test-endpoints.ts
 import type { Hono } from 'hono';
 import type { Env } from '@/shared/types/env.types';
+import { getSecret } from '@/infrastructure/config/secrets';
 import { registerInfrastructureTests } from './tests/infrastructure-tests';
 import { registerMonitoringTests } from './tests/monitoring-tests';
 import { registerMiddlewareTests } from './tests/middleware-tests';
@@ -61,14 +62,19 @@ const TEST_REGISTRY = {
  */
 export function registerTestEndpoints(app: Hono<{ Bindings: Env }>) {
   
-  // Disable tests in production
+  // Protect test endpoints in production with admin token
   app.use('/test/*', async (c, next) => {
     if (c.env.APP_ENV === 'production') {
-      return c.json({
-        success: false,
-        error: 'Test endpoints disabled in production',
-        code: 'TESTS_DISABLED'
-      }, 403);
+      const providedToken = c.req.header('X-Admin-Token');
+      const adminToken = await getSecret('ADMIN_TOKEN', c.env, c.env.APP_ENV).catch(() => null);
+      
+      if (!providedToken || !adminToken || providedToken !== adminToken) {
+        return c.json({
+          success: false,
+          error: 'Test endpoints require X-Admin-Token header in production',
+          code: 'ADMIN_AUTH_REQUIRED'
+        }, 403);
+      }
     }
     await next();
   });
