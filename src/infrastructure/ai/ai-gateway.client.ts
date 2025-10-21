@@ -64,8 +64,7 @@ export class AIGatewayClient {
         { role: 'system', content: request.system_prompt },
         { role: 'user', content: request.user_prompt }
       ],
-      max_completion_tokens: request.max_tokens,
-      temperature: request.temperature ?? 0
+      max_completion_tokens: request.max_tokens
     };
 
     // Add reasoning_effort for o1 models
