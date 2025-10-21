@@ -5,21 +5,19 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 APP_ENV = "production"
+AWS_REGION = "us-east-1"
 
-# Production routes
-[[routes]]
-  pattern = "api.oslira.com/*"
-  zone_name = "oslira.com"
+# Analytics Engine (auto-available)
+[[analytics_engine_datasets]]
+binding = "ANALYTICS_ENGINE"
 
-# KV Namespace for caching/session data
-[[kv_namespaces]]
-  binding = "OSLIRA_KV"
-  id = "dd86f413c4374811ac253bb9a6567182"
-
-# R2 Bucket for media/cache storage
-[[r2_buckets]]
-  binding = "R2_CACHE_BUCKET"
-  bucket_name = "oslira-preprocessor-cache"
+# Cron triggers
+[triggers]
+crons = [
+  "0 3 1 * *",   # Monthly renewal (1st of month, 3 AM UTC)
+  "0 2 * * *",   # Daily cleanup (2 AM UTC)
+  "0 * * * *"    # Hourly failed analysis cleanup
+]
 
 # ===========================
 # STAGING ENVIRONMENT
@@ -29,15 +27,14 @@ name = "oslira-workers-staging"
 
 [env.staging.vars]
 APP_ENV = "staging"
+AWS_REGION = "us-east-1"
 
-[[env.staging.routes]]
-pattern = "api.oslira.org/*"
-zone_name = "oslira.org"
+[[env.staging.analytics_engine_datasets]]
+binding = "ANALYTICS_ENGINE"
 
-[[env.staging.kv_namespaces]]
-binding = "OSLIRA_KV"
-id = "dd86f413c4374811ac253bb9a6567182"
-
-[[env.staging.r2_buckets]]
-binding = "R2_CACHE_BUCKET"
-bucket_name = "oslira-preprocessor-cache"
+[env.staging.triggers]
+crons = [
+  "0 4 1 * *",   # Staging: 4 AM UTC
+  "0 3 * * *",   # Staging: 3 AM UTC
+  "0 * * * *"    # Hourly
+]
