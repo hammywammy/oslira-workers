@@ -686,18 +686,18 @@ app.post('/test/seed-data', async (c) => {
     // ========================================
     // 6. GRANT INITIAL CREDITS (100 credits)
     // ========================================
-    const { error: creditError } = await supabase
-      .rpc('deduct_credits', {
-        p_account_id: account.id,
-        p_amount: 100,
-        p_transaction_type: 'initial_grant',
-        p_description: 'Test account seed credits'
-      });
+const { error: creditError } = await supabase
+  .rpc('deduct_credits', {
+    p_account_id: account.id,
+    p_amount: 100,
+    p_transaction_type: 'admin_grant', // ✅ CORRECT
+    p_description: 'Test account seed credits'
+  });
 
-    if (creditError) {
-      throw new Error(`Credit grant failed: ${creditError.message}`);
-    }
-    console.log('✅ 100 credits granted');
+if (creditError) {
+  throw new Error(`Credit grant failed: ${creditError.message}`);
+}
+console.log('✅ 100 credits granted');
 
     // ========================================
     // 7. CREATE BUSINESS PROFILE
@@ -784,31 +784,31 @@ app.post('/test/seed-data', async (c) => {
     }
     console.log('✅ 3 test leads created');
 
-    // ========================================
-    // 9. CREATE 3 FAKE CREDIT TRANSACTIONS
-    // ========================================
-    await supabase.rpc('deduct_credits', {
-      p_account_id: account.id,
-      p_amount: -2,
-      p_transaction_type: 'analysis',
-      p_description: 'Deep analysis of @nike'
-    });
+// ========================================
+// 9. CREATE 3 FAKE CREDIT TRANSACTIONS
+// ========================================
+await supabase.rpc('deduct_credits', {
+  p_account_id: account.id,
+  p_amount: -2,
+  p_transaction_type: 'analysis', // ✅ CORRECT
+  p_description: 'Deep analysis of @nike'
+});
 
-    await supabase.rpc('deduct_credits', {
-      p_account_id: account.id,
-      p_amount: -1,
-      p_transaction_type: 'analysis',
-      p_description: 'Light analysis of @adidas'
-    });
+await supabase.rpc('deduct_credits', {
+  p_account_id: account.id,
+  p_amount: -1,
+  p_transaction_type: 'analysis', // ✅ CORRECT
+  p_description: 'Light analysis of @adidas'
+});
 
-    await supabase.rpc('deduct_credits', {
-      p_account_id: account.id,
-      p_amount: 50,
-      p_transaction_type: 'bonus_grant',
-      p_description: 'Referral bonus'
-    });
+await supabase.rpc('deduct_credits', {
+  p_account_id: account.id,
+  p_amount: 50,
+  p_transaction_type: 'signup_bonus', // ✅ CORRECT
+  p_description: 'Referral bonus'
+});
 
-    console.log('✅ 3 fake credit transactions created');
+console.log('✅ 3 fake credit transactions created');
 
     // ========================================
     // 10. CREATE SAMPLE ANALYSES
@@ -899,6 +899,134 @@ app.post('/test/seed-data', async (c) => {
       success: false, 
       error: error.message,
       hint: 'Check FK constraints and RPC functions exist',
+      stack: error.stack
+    }, 500);
+  }
+});
+
+app.delete('/test/cleanup-seed', async (c) => {
+  try {
+    const supabase = await createAdminClient(c.env);
+    
+    console.log('🗑️ Cleaning up test data...');
+
+    const testEmail = 'test@oslira.com';
+
+    // ========================================
+    // 1. FIND TEST USER ID
+    // ========================================
+    const { data: users } = await supabase.auth.admin.listUsers();
+    const testUser = users.users.find(u => u.email === testEmail);
+    
+    if (!testUser) {
+      return c.json({
+        success: true,
+        message: 'No test user found - nothing to clean up'
+      });
+    }
+
+    const testUserId = testUser.id;
+    console.log('Found test user:', testUserId);
+
+    // ========================================
+    // 2. DELETE IN REVERSE ORDER (FK constraints)
+    // ========================================
+
+    // Delete analyses (references leads)
+    const { error: analysesError } = await supabase
+      .from('analyses')
+      .delete()
+      .eq('requested_by', testUserId);
+    
+    if (analysesError) console.warn('Analyses cleanup:', analysesError.message);
+    else console.log('✅ Analyses deleted');
+
+    // Delete leads (references accounts)
+    const { data: accounts } = await supabase
+      .from('accounts')
+      .select('id')
+      .eq('owner_id', testUserId);
+
+    if (accounts && accounts.length > 0) {
+      const accountIds = accounts.map(a => a.id);
+
+      // Delete leads
+      await supabase
+        .from('leads')
+        .delete()
+        .in('account_id', accountIds);
+      console.log('✅ Leads deleted');
+
+      // Delete business profiles
+      await supabase
+        .from('business_profiles')
+        .delete()
+        .in('account_id', accountIds);
+      console.log('✅ Business profiles deleted');
+
+      // Delete credit ledger
+      await supabase
+        .from('credit_ledger')
+        .delete()
+        .in('account_id', accountIds);
+      console.log('✅ Credit ledger deleted');
+
+      // Delete credit balances
+      await supabase
+        .from('credit_balances')
+        .delete()
+        .in('account_id', accountIds);
+      console.log('✅ Credit balances deleted');
+
+      // Delete account members
+      await supabase
+        .from('account_members')
+        .delete()
+        .in('account_id', accountIds);
+      console.log('✅ Account members deleted');
+
+      // Delete accounts
+      await supabase
+        .from('accounts')
+        .delete()
+        .in('id', accountIds);
+      console.log('✅ Accounts deleted');
+    }
+
+    // ========================================
+    // 3. DELETE USER PROFILE (public.users)
+    // ========================================
+    await supabase
+      .from('users')
+      .delete()
+      .eq('id', testUserId);
+    console.log('✅ User profile deleted');
+
+    // ========================================
+    // 4. DELETE AUTH USER (auth.users)
+    // ========================================
+    const { error: authDeleteError } = await supabase.auth.admin.deleteUser(testUserId);
+    
+    if (authDeleteError) {
+      console.warn('Auth user cleanup:', authDeleteError.message);
+    } else {
+      console.log('✅ Auth user deleted');
+    }
+
+    return c.json({
+      success: true,
+      message: 'Test data cleaned up successfully',
+      deleted: {
+        user_id: testUserId,
+        user_email: testEmail
+      }
+    });
+
+  } catch (error: any) {
+    console.error('❌ Cleanup failed:', error);
+    return c.json({ 
+      success: false, 
+      error: error.message,
       stack: error.stack
     }, 500);
   }
