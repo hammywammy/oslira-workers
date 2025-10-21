@@ -66,64 +66,55 @@ export interface AnalysisModelConfig {
   model: string;
   reasoning_effort?: 'low' | 'medium' | 'high';
   max_tokens: number;
-  temperature: number;
 }
 
 export const ANALYSIS_MODEL_MAPPING: Record<string, AnalysisModelConfig> = {
   'light': {
     model: 'gpt-5-nano',  // ✅ CHANGED from gpt-4o-mini
     reasoning_effort: 'low',
-    max_tokens: 1000,
-    temperature: 0
+    max_tokens: 1000
   },
   
   'deep_core': {
     model: 'gpt-5-mini',  // ✅ Already correct
     reasoning_effort: 'medium',
-    max_tokens: 2000,
-    temperature: 0
+    max_tokens: 2000
   },
   
   'deep_outreach': {
     model: 'gpt-5-mini',  // ✅ Already correct
     reasoning_effort: 'low',
-    max_tokens: 800,
-    temperature: 0.3
+    max_tokens: 800
   },
   
   'deep_personality': {
     model: 'gpt-5-mini',  // ✅ Already correct
     reasoning_effort: 'low',
-    max_tokens: 600,
-    temperature: 0
+    max_tokens: 600
   },
   
   'xray_psychographic': {
     model: 'gpt-5',  // ✅ Already correct
     reasoning_effort: 'medium',
-    max_tokens: 2500,
-    temperature: 0
+    max_tokens: 2500
   },
   
   'xray_commercial': {
     model: 'gpt-5-mini',  // ✅ Already correct
     reasoning_effort: 'medium',
-    max_tokens: 1500,
-    temperature: 0
+    max_tokens: 1500
   },
   
   'xray_outreach': {
     model: 'gpt-5-mini',  // ✅ Already correct
     reasoning_effort: 'low',
-    max_tokens: 800,
-    temperature: 0.3
+    max_tokens: 800
   },
   
   'xray_personality': {
     model: 'gpt-5-mini',  // ✅ Already correct
     reasoning_effort: 'low',
-    max_tokens: 600,
-    temperature: 0
+    max_tokens: 600
   }
 };
 
