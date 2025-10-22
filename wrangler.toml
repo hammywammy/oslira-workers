@@ -29,6 +29,7 @@ binding = "ANALYTICS_ENGINE"
 [[workflows]]
 binding = "ANALYSIS_WORKFLOW"
 name = "analysis-workflow"
+class_name = "AnalysisWorkflow"
 
 # ===========================
 # DURABLE OBJECTS (NEW - Phase 4B)
@@ -97,6 +98,7 @@ binding = "ANALYTICS_ENGINE"
 [[env.staging.workflows]]
 binding = "ANALYSIS_WORKFLOW"
 name = "analysis-workflow-staging"
+class_name = "AnalysisWorkflow"
 
 [[env.staging.durable_objects.bindings]]
 name = "ANALYSIS_PROGRESS"
