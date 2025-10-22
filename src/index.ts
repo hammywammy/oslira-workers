@@ -1,4 +1,4 @@
-// src/index.ts
+// src/index.ts - Phase 5 Complete
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -8,10 +8,14 @@ import { registerLeadRoutes } from './features/leads/leads.routes';
 import { registerBusinessRoutes } from './features/business/business.routes';
 import { registerCreditsRoutes } from './features/credits/credits.routes';
 import { registerAnalysisRoutes } from './features/analysis/analysis.routes';
+import { registerBulkAnalysisRoutes } from './features/analysis/bulk-analysis.routes';
 import { handleStripeWebhookQueue } from './infrastructure/queues/stripe-webhook.consumer';
 import { handleAnalysisQueue } from './infrastructure/queues/analysis.consumer';
 import AnalysisWorkflow from './infrastructure/workflows/analysis.workflow';
 import { AnalysisProgressDO } from './infrastructure/durable-objects/analysis-progress.do';
+import { executeCronJob } from './infrastructure/cron/cron-jobs.handler';
+import { getSentryService } from './infrastructure/monitoring/sentry.service';
+import { errorHandler } from './shared/middleware/error.middleware';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -34,17 +38,21 @@ app.get('/', (c) => {
   return c.json({
     status: 'healthy',
     service: 'OSLIRA Enterprise Analysis API',
-    version: '7.0.0',
+    version: '8.0.0',
     timestamp: new Date().toISOString(),
     environment: c.env.APP_ENV,
     architecture: 'async-workflows',
-    phase: 'Phase 4B Complete - Async Infrastructure',
+    phase: 'Phase 5 Complete - Production Features',
     features: {
       workflows: !!c.env.ANALYSIS_WORKFLOW,
       durable_objects: !!c.env.ANALYSIS_PROGRESS,
       queues: !!c.env.ANALYSIS_QUEUE,
       r2_cache: !!c.env.R2_CACHE_BUCKET,
-      analytics: !!c.env.ANALYTICS_ENGINE
+      analytics: !!c.env.ANALYTICS_ENGINE,
+      sentry: true,
+      cron_jobs: true,
+      prompt_caching: true,
+      bulk_analysis: true
     }
   });
 });
@@ -76,8 +84,11 @@ registerLeadRoutes(app);           // 4 endpoints
 registerBusinessRoutes(app);       // 4 endpoints
 registerCreditsRoutes(app);        // 4 endpoints
 
-// Phase 4B endpoints (Async Analysis)
+// Phase 4 endpoints (Async Analysis)
 registerAnalysisRoutes(app);       // 4 endpoints (analyze, progress, cancel, result)
+
+// Phase 5 endpoints (Bulk Analysis)
+registerBulkAnalysisRoutes(app);   // 3 endpoints (bulk, progress, cancel)
 
 // ===============================================================================
 // TEST ENDPOINTS (Disabled in production)
@@ -86,18 +97,30 @@ registerAnalysisRoutes(app);       // 4 endpoints (analyze, progress, cancel, re
 registerTestEndpoints(app);
 
 // ===============================================================================
-// ERROR HANDLING
+// ERROR HANDLING (Phase 5 - Sentry Integration)
 // ===============================================================================
 
-app.onError((err, c) => {
+app.onError(async (err, c) => {
   console.error('Worker error:', err);
   
-  return c.json({
-    success: false,
-    error: 'Internal server error',
-    message: err.message,
-    timestamp: new Date().toISOString()
-  }, 500);
+  // Send to Sentry
+  try {
+    const sentry = await getSentryService(c.env);
+    await sentry.captureException(err, {
+      request: {
+        method: c.req.method,
+        url: c.req.url
+      },
+      tags: {
+        environment: c.env.APP_ENV,
+        endpoint: c.req.path
+      }
+    });
+  } catch (sentryError) {
+    console.error('Sentry error:', sentryError);
+  }
+  
+  return errorHandler(err, c);
 });
 
 app.notFound((c) => {
@@ -123,32 +146,33 @@ export default {
   },
   
   /**
-   * Cron Trigger Handler
+   * Cron Trigger Handler (Phase 5 - Complete Implementation)
    */
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
-    console.log('Cron trigger:', event.cron);
+    console.log('[Cron] Trigger:', event.cron);
     
-    // Monthly renewal (1st of month, 3 AM UTC)
-    if (event.cron === '0 3 1 * *') {
-      console.log('[Cron] Monthly credit renewal');
-      // TODO: Implement monthly renewal logic
-    }
-    
-    // Daily cleanup (2 AM UTC)
-    if (event.cron === '0 2 * * *') {
-      console.log('[Cron] Daily cleanup');
-      // TODO: Implement cleanup logic (old analyses, etc)
-    }
-    
-    // Hourly failed analysis cleanup
-    if (event.cron === '0 * * * *') {
-      console.log('[Cron] Failed analysis cleanup');
-      // TODO: Implement failed analysis retry/cleanup
+    try {
+      await executeCronJob(event.cron, env);
+    } catch (error: any) {
+      console.error('[Cron] Job execution failed:', error);
+      
+      // Report to Sentry
+      try {
+        const sentry = await getSentryService(env);
+        await sentry.captureException(error, {
+          tags: {
+            cron_expression: event.cron,
+            environment: env.APP_ENV
+          }
+        });
+      } catch (sentryError) {
+        console.error('Sentry error:', sentryError);
+      }
     }
   },
   
   /**
-   * Queue Consumer Handler - Stripe Webhooks
+   * Queue Consumer Handler
    */
   async queue(batch: MessageBatch, env: Env, ctx: ExecutionContext): Promise<void> {
     if (batch.queue === 'stripe-webhooks' || batch.queue === 'stripe-webhooks-staging') {
