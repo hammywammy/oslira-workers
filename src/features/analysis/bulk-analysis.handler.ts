@@ -72,15 +72,26 @@ export async function bulkAnalyzeLeads(c: Context<{ Bindings: Env }>) {
     // Generate batch ID
     const batchId = generateId('batch');
 
-    // Queue all analyses
+    // Queue all analyses with batch processing
     const analyses: Array<{
       run_id: string;
       username: string;
       status: 'queued' | 'failed';
     }> = [];
 
-    for (const username of uniqueUsernames) {
-      try {
+    // Use BatchProcessor for intelligent batching (Apify limit: 10 concurrent)
+    const { BatchProcessor } = await import('@/infrastructure/batch/batch-processor.service');
+    const processor = new BatchProcessor({
+      batchSize: 10,      // 10 profiles per batch
+      maxConcurrent: 1,   // Sequential batches (Apify constraint)
+      retryAttempts: 3,
+      retryDelay: 5000
+    });
+
+    // Process usernames in batches
+    const summary = await processor.processBatch(
+      uniqueUsernames,
+      async (username) => {
         const runId = generateId('run');
 
         // Trigger workflow for each username
@@ -109,17 +120,25 @@ export async function bulkAnalyzeLeads(c: Context<{ Bindings: Env }>) {
           })
         });
 
+        return { run_id: runId, username };
+      },
+      (completed, total) => {
+        console.log(`[BulkAnalysis] Progress: ${completed}/${total}`);
+      }
+    );
+
+    // Collect results
+    for (const result of summary.results) {
+      if (result.result.success && result.result.data) {
         analyses.push({
-          run_id: runId,
-          username: username,
+          run_id: result.result.data.run_id,
+          username: result.result.data.username,
           status: 'queued'
         });
-      } catch (error: any) {
-        console.error(`[BulkAnalysis] Failed to queue ${username}:`, error);
-        
+      } else {
         analyses.push({
           run_id: 'failed',
-          username: username,
+          username: result.item,
           status: 'failed'
         });
       }
