@@ -1,247 +1,292 @@
 // infrastructure/scraping/apify.adapter.ts
 
-import type { ProfileData, AnalysisType } from '@/shared/types/analysis.types';
-import { APIFY_SCRAPERS, getScrapersForAnalysis, calculateApifyCost, type ApifyScraperConfig } from './apify.config';
+import type { Env } from '@/shared/types/env.types';
+import type { ProfileData, PostData } from '@/infrastructure/ai/prompt-builder.service';
 
-const APIFY_BASE_URL = 'https://api.apify.com/v2/acts';
-const APIFY_RUN_SYNC_ENDPOINT = '/run-sync-get-dataset-items';
+/**
+ * APIFY ADAPTER
+ * 
+ * Scrapes Instagram profiles using Apify's Instagram Profile Scraper
+ * Actor ID: apify/instagram-profile-scraper
+ * 
+ * Features:
+ * - Automatic retry on infrastructure failures (3 attempts)
+ * - Response transformation to ProfileData format
+ * - Error handling for private/deleted profiles
+ * - Cost tracking per scrape
+ */
 
-export interface ApifyResponse {
-  profile: ProfileData;
-  posts: any[];
-  scraper_used: string;
-  duration_ms: number;
-  cost: number;
+export interface ApifyScraperInput {
+  username: string[];
+  resultsLimit: number;  // Number of posts to scrape
+}
+
+export interface ApifyRawPost {
+  id: string;
+  caption?: string;
+  likesCount: number;
+  commentsCount: number;
+  timestamp: string;
+  type: 'Image' | 'Video' | 'Sidecar';
+  displayUrl: string;
+}
+
+export interface ApifyRawProfile {
+  id: string;
+  username: string;
+  fullName: string;
+  biography: string;
+  externalUrl: string | null;
+  followersCount: number;
+  followsCount: number;
+  postsCount: number;
+  verified: boolean;
+  private: boolean;
+  businessCategoryName: string | null;
+  profilePicUrl: string;
+  latestPosts: ApifyRawPost[];
+}
+
+export interface ApifyRunResult {
+  id: string;
+  status: 'RUNNING' | 'SUCCEEDED' | 'FAILED';
+  defaultDatasetId: string;
 }
 
 export class ApifyAdapter {
-  constructor(private apiToken: string) {}
+  private apiToken: string;
+  private baseURL = 'https://api.apify.com/v2';
+  private actorId = 'apify/instagram-profile-scraper';
+
+  constructor(apiToken: string) {
+    this.apiToken = apiToken;
+  }
 
   /**
-   * Scrape Instagram profile with automatic fallback
+   * Scrape Instagram profile with retry logic
    */
-  async scrapeProfile(username: string, analysisType: AnalysisType): Promise<ApifyResponse> {
-    const scrapers = getScrapersForAnalysis(analysisType);
-    
+  async scrapeProfile(
+    username: string,
+    postsLimit: number = 12,
+    maxRetries: number = 3
+  ): Promise<ProfileData> {
     let lastError: Error | null = null;
 
-    // Try each scraper in priority order
-    for (const scraper of scrapers) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        console.log(`[Apify] Attempting scraper: ${scraper.name}`);
-        const startTime = Date.now();
+        console.log(`[Apify] Attempt ${attempt}/${maxRetries} for @${username}`);
         
-        const response = await this.callScraper(scraper, username);
+        const profile = await this.executeScrape(username, postsLimit);
         
-        const duration = Date.now() - startTime;
-        const cost = calculateApifyCost(duration);
-
-        // Validate response
-        if (!response || !Array.isArray(response) || response.length === 0) {
-          throw new Error(`${scraper.name} returned no data`);
-        }
-
-        const rawProfile = response[0];
-
-        // Check for Apify error response
-        if (rawProfile.error || rawProfile.errorDescription) {
-          const errorType = rawProfile.error || 'unknown_error';
-          const errorDesc = rawProfile.errorDescription || 'An error occurred';
-          
-          if (this.isPermanentError(errorType, errorDesc)) {
-            throw new Error(this.transformError(errorType, errorDesc, username));
-          }
-          
-          throw new Error(`Scraper error: ${errorDesc}`);
-        }
-
-        // Validate username exists
-        if (!rawProfile.username && !rawProfile.handle) {
-          throw new Error('No valid profile data returned');
-        }
-
-        // Extract posts
-        const posts = this.extractPosts(response, analysisType);
-
-        // Transform profile data
-        const profile = this.transformProfileData(rawProfile, scraper);
-
-        console.log(`[Apify] Success with ${scraper.name}`, {
-          username: profile.username,
-          posts: posts.length,
-          duration_ms: duration,
-          cost: cost
-        });
-
-        return {
-          profile,
-          posts,
-          scraper_used: scraper.name,
-          duration_ms: duration,
-          cost
-        };
+        console.log(`[Apify] Success on attempt ${attempt} for @${username}`);
+        return profile;
 
       } catch (error: any) {
-        console.warn(`[Apify] ${scraper.name} failed:`, error.message);
         lastError = error;
-        
-        // Don't retry permanent errors
-        if (this.isPermanentError(error.message, error.message)) {
+
+        // Don't retry on user errors (profile not found, private, etc)
+        if (this.isUserError(error)) {
           throw error;
         }
-      }
-    }
 
-    // All scrapers failed
-    throw lastError || new Error('All scrapers failed');
-  }
-
-  /**
-   * Call Apify scraper with retries
-   */
-  private async callScraper(scraper: ApifyScraperConfig, username: string): Promise<any[]> {
-    const url = this.buildScraperUrl(scraper.actor_id);
-    const body = JSON.stringify(scraper.input(username));
-
-    let lastError: Error | null = null;
-
-    for (let attempt = 0; attempt < scraper.max_retries; attempt++) {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), scraper.timeout);
-
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'User-Agent': 'Oslira/3.0'
-          },
-          body,
-          signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        return await response.json();
-
-      } catch (error: any) {
-        lastError = error;
-        
-        if (attempt < scraper.max_retries - 1) {
-          console.log(`[Apify] Retry ${attempt + 1}/${scraper.max_retries} after ${scraper.retry_delay}ms`);
-          await this.sleep(scraper.retry_delay);
+        // Retry on infrastructure errors
+        if (attempt < maxRetries) {
+          const backoffMs = attempt * 2000; // 2s, 4s, 6s
+          console.warn(
+            `[Apify] Attempt ${attempt} failed for @${username}, retrying in ${backoffMs}ms...`,
+            error.message
+          );
+          await this.sleep(backoffMs);
         }
       }
     }
 
-    throw lastError || new Error('Scraper failed after retries');
+    // All retries exhausted
+    throw new Error(
+      `Apify scraping failed after ${maxRetries} attempts for @${username}: ${lastError?.message}`
+    );
   }
 
   /**
-   * Extract posts from Apify response
+   * Execute single scrape attempt
    */
-  private extractPosts(response: any[], analysisType: AnalysisType): any[] {
-    const rawProfile = response[0];
+  private async executeScrape(username: string, postsLimit: number): Promise<ProfileData> {
+    // Step 1: Start actor run
+    const runResult = await this.startActorRun(username, postsLimit);
 
-    // Option A: Posts nested in profile object (dS_basic)
-    if (rawProfile.latestPosts && Array.isArray(rawProfile.latestPosts)) {
-      console.log(`[Apify] Posts found in latestPosts: ${rawProfile.latestPosts.length}`);
-      return rawProfile.latestPosts;
-    }
+    // Step 2: Wait for completion (with timeout)
+    await this.waitForCompletion(runResult.id, 60000); // 60s timeout
 
-    // Option B: Posts are array items after profile (shu scrapers)
-    if (response.length > 1) {
-      console.log(`[Apify] Posts found in response array: ${response.length - 1}`);
-      return response.slice(1);
-    }
+    // Step 3: Fetch results from dataset
+    const rawProfile = await this.fetchDatasetResults(runResult.defaultDatasetId);
 
-    console.warn('[Apify] No posts found in response');
-    return [];
+    // Step 4: Transform to ProfileData format
+    return this.transformProfile(rawProfile);
   }
 
   /**
-   * Transform Apify response to ProfileData
+   * Start Apify actor run
    */
-  private transformProfileData(rawData: any, scraper: ApifyScraperConfig): ProfileData {
-    const mapping = scraper.field_mapping;
+  private async startActorRun(username: string, postsLimit: number): Promise<ApifyRunResult> {
+    const input: ApifyScraperInput = {
+      username: [username],
+      resultsLimit: postsLimit
+    };
 
+    const response = await fetch(`${this.baseURL}/acts/${this.actorId}/runs`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.apiToken}`
+      },
+      body: JSON.stringify(input)
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Apify API error (${response.status}): ${error}`);
+    }
+
+    const result = await response.json();
+    return result.data as ApifyRunResult;
+  }
+
+  /**
+   * Wait for actor run to complete
+   */
+  private async waitForCompletion(runId: string, timeoutMs: number): Promise<void> {
+    const startTime = Date.now();
+    const pollInterval = 2000; // Check every 2 seconds
+
+    while (Date.now() - startTime < timeoutMs) {
+      const run = await this.getRunStatus(runId);
+
+      if (run.status === 'SUCCEEDED') {
+        return;
+      }
+
+      if (run.status === 'FAILED') {
+        throw new Error('Apify actor run failed');
+      }
+
+      // Still running, wait and check again
+      await this.sleep(pollInterval);
+    }
+
+    throw new Error(`Apify run timed out after ${timeoutMs}ms`);
+  }
+
+  /**
+   * Get actor run status
+   */
+  private async getRunStatus(runId: string): Promise<ApifyRunResult> {
+    const response = await fetch(`${this.baseURL}/actor-runs/${runId}`, {
+      headers: {
+        'Authorization': `Bearer ${this.apiToken}`
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to get run status: ${response.status}`);
+    }
+
+    const result = await response.json();
+    return result.data as ApifyRunResult;
+  }
+
+  /**
+   * Fetch results from dataset
+   */
+  private async fetchDatasetResults(datasetId: string): Promise<ApifyRawProfile> {
+    const response = await fetch(
+      `${this.baseURL}/datasets/${datasetId}/items?format=json`,
+      {
+        headers: {
+          'Authorization': `Bearer ${this.apiToken}`
+        }
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch dataset: ${response.status}`);
+    }
+
+    const items = await response.json();
+
+    if (!items || items.length === 0) {
+      throw new Error('Profile not found or is private');
+    }
+
+    return items[0] as ApifyRawProfile;
+  }
+
+  /**
+   * Transform Apify response to ProfileData format
+   */
+  private transformProfile(raw: ApifyRawProfile): ProfileData {
     return {
-      username: this.extractField(rawData, mapping.username) || '',
-      displayName: this.extractField(rawData, mapping.displayName) || '',
-      bio: this.extractField(rawData, mapping.bio) || '',
-      followersCount: parseInt(this.extractField(rawData, mapping.followersCount)?.toString() || '0') || 0,
-      followingCount: parseInt(this.extractField(rawData, mapping.followingCount)?.toString() || '0') || 0,
-      postsCount: parseInt(this.extractField(rawData, mapping.postsCount)?.toString() || '0') || 0,
-      isVerified: Boolean(this.extractField(rawData, mapping.isVerified)),
-      isPrivate: Boolean(this.extractField(rawData, mapping.isPrivate)),
-      profilePicUrl: this.extractField(rawData, mapping.profilePicUrl) || '',
-      externalUrl: this.extractField(rawData, mapping.externalUrl) || '',
-      isBusinessAccount: Boolean(this.extractField(rawData, mapping.isBusinessAccount)),
-      latestPosts: [],  // Added later
-      scraperUsed: scraper.name,
-      dataQuality: 'medium'
+      username: raw.username,
+      display_name: raw.fullName || raw.username,
+      follower_count: raw.followersCount,
+      following_count: raw.followsCount,
+      post_count: raw.postsCount,
+      bio: raw.biography || '',
+      external_url: raw.externalUrl,
+      is_verified: raw.verified,
+      is_private: raw.private,
+      is_business_account: !!raw.businessCategoryName,
+      profile_pic_url: raw.profilePicUrl,
+      posts: this.transformPosts(raw.latestPosts || [])
     };
   }
 
   /**
-   * Extract field value using mapping fallbacks
+   * Transform posts array
    */
-  private extractField(data: any, fieldMapping: readonly string[]): any {
-    for (const field of fieldMapping) {
-      if (data[field] !== undefined && data[field] !== null) {
-        return data[field];
-      }
+  private transformPosts(rawPosts: ApifyRawPost[]): PostData[] {
+    return rawPosts.map(post => ({
+      id: post.id,
+      caption: post.caption || '',
+      like_count: post.likesCount,
+      comment_count: post.commentsCount,
+      timestamp: post.timestamp,
+      media_type: this.mapMediaType(post.type),
+      media_url: post.displayUrl
+    }));
+  }
+
+  /**
+   * Map Apify media type to our format
+   */
+  private mapMediaType(apifyType: string): 'photo' | 'video' | 'carousel' {
+    switch (apifyType) {
+      case 'Image':
+        return 'photo';
+      case 'Video':
+        return 'video';
+      case 'Sidecar':
+        return 'carousel';
+      default:
+        return 'photo';
     }
-    return null;
   }
 
   /**
-   * Build Apify API URL
+   * Check if error is user error (don't retry) vs infrastructure error (retry)
    */
-  private buildScraperUrl(actorId: string): string {
-    return `${APIFY_BASE_URL}/${actorId}${APIFY_RUN_SYNC_ENDPOINT}?token=${this.apiToken}`;
-  }
-
-  /**
-   * Check if error is permanent (don't retry)
-   */
-  private isPermanentError(errorType: string, errorDesc: string): boolean {
-    const permanent = [
-      'not_found',
-      'not found',
-      'does not exist',
-      'private',
-      '403'
+  private isUserError(error: Error): boolean {
+    const message = error.message.toLowerCase();
+    
+    const userErrorPatterns = [
+      'profile not found',
+      'is private',
+      'user not found',
+      'account deleted',
+      'invalid username',
+      'does not exist'
     ];
 
-    const combined = `${errorType} ${errorDesc}`.toLowerCase();
-    return permanent.some(term => combined.includes(term));
-  }
-
-  /**
-   * Transform error to user-friendly message
-   */
-  private transformError(errorType: string, errorDesc: string, username: string): string {
-    const combined = `${errorType} ${errorDesc}`.toLowerCase();
-
-    if (combined.includes('not found') || combined.includes('does not exist')) {
-      return `Instagram profile @${username} not found`;
-    }
-    if (combined.includes('private') || combined.includes('403')) {
-      return `Instagram profile @${username} is private`;
-    }
-    if (combined.includes('rate limit') || combined.includes('429')) {
-      return 'Instagram is temporarily limiting requests. Try again in a few minutes.';
-    }
-    if (combined.includes('timeout')) {
-      return 'Profile scraping timed out. Please try again.';
-    }
-
-    return 'Failed to retrieve profile data';
+    return userErrorPatterns.some(pattern => message.includes(pattern));
   }
 
   /**
@@ -249,5 +294,19 @@ export class ApifyAdapter {
    */
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Estimate cost of scrape
+   * Based on Apify pricing: ~$0.001 per profile scrape
+   */
+  static estimateCost(postsLimit: number): number {
+    // Base cost: $0.001
+    // Additional cost for more posts: $0.0001 per post over 12
+    const baseCost = 0.001;
+    const extraPosts = Math.max(0, postsLimit - 12);
+    const extraCost = extraPosts * 0.0001;
+    
+    return baseCost + extraCost;
   }
 }
