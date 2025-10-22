@@ -1,27 +1,81 @@
 // src/shared/middleware/auth.middleware.ts
 import type { Context, Next } from 'hono';
 import type { Env } from '@/shared/types/env.types';
-import { createUserClient } from '@/infrastructure/database/supabase.client';
+import { createUserClient, createAdminClient } from '@/infrastructure/database/supabase.client';
+import { getSecret } from '@/infrastructure/config/secrets';
 
 export interface AuthContext {
   userId: string;
   email: string;
   accountIds: string[];
   primaryAccountId: string;
+  isTestMode?: boolean;
 }
 
 /**
  * Validates JWT and attaches user info to context
  * Use on all authenticated routes
+ * 
+ * TESTING BYPASS: In non-production environments, allows X-Admin-Token + X-Account-Id
+ * to bypass JWT authentication for easier API testing
  */
 export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) {
+  
+  // ============================================================================
+  // TESTING BYPASS (Non-Production Only)
+  // ============================================================================
+  if (c.env.APP_ENV !== 'production') {
+    const adminToken = c.req.header('X-Admin-Token');
+    const testAccountId = c.req.header('X-Account-Id');
+    
+    if (adminToken && testAccountId) {
+      try {
+        const storedAdminToken = await getSecret('ADMIN_TOKEN', c.env, c.env.APP_ENV).catch(() => null);
+        
+        if (storedAdminToken && adminToken === storedAdminToken) {
+          // Verify account exists
+          const supabase = await createAdminClient(c.env);
+          const { data: account, error } = await supabase
+            .from('accounts')
+            .select('id')
+            .eq('id', testAccountId)
+            .is('deleted_at', null)
+            .single();
+          
+          if (!error && account) {
+            // Bypass JWT - use test account
+            c.set('auth', {
+              userId: 'test-user-bypass',
+              email: 'test@oslira.com',
+              accountIds: [testAccountId],
+              primaryAccountId: testAccountId,
+              isTestMode: true
+            } as AuthContext);
+            
+            await next();
+            return;
+          }
+        }
+      } catch (error) {
+        console.warn('Admin token bypass failed:', error);
+        // Fall through to normal JWT auth
+      }
+    }
+  }
+  
+  // ============================================================================
+  // NORMAL JWT AUTHENTICATION
+  // ============================================================================
   const authHeader = c.req.header('Authorization');
   
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return c.json({
       success: false,
       error: 'Missing or invalid Authorization header',
-      code: 'UNAUTHORIZED'
+      code: 'UNAUTHORIZED',
+      hint: c.env.APP_ENV !== 'production' 
+        ? 'For testing: use X-Admin-Token + X-Account-Id headers'
+        : undefined
     }, 401);
   }
   
@@ -61,7 +115,8 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) 
       userId: user.id,
       email: user.email || '',
       accountIds,
-      primaryAccountId: accountIds[0] // First account is primary
+      primaryAccountId: accountIds[0], // First account is primary
+      isTestMode: false
     } as AuthContext);
     
     await next();
@@ -107,7 +162,8 @@ export async function optionalAuthMiddleware(c: Context<{ Bindings: Env }>, next
           userId: user.id,
           email: user.email || '',
           accountIds,
-          primaryAccountId: accountIds[0]
+          primaryAccountId: accountIds[0],
+          isTestMode: false
         } as AuthContext);
       }
     }
