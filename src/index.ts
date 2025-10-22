@@ -9,6 +9,7 @@ import { registerBusinessRoutes } from './features/business/business.routes';
 import { registerCreditsRoutes } from './features/credits/credits.routes';
 import { registerAnalysisRoutes } from './features/analysis/analysis.routes';
 import { registerBulkAnalysisRoutes } from './features/analysis/bulk-analysis.routes';
+import { registerProfileRefreshRoutes } from './features/leads/profile-refresh.routes';
 import { handleStripeWebhookQueue } from './infrastructure/queues/stripe-webhook.consumer';
 import { handleAnalysisQueue } from './infrastructure/queues/analysis.consumer';
 import AnalysisWorkflow from './infrastructure/workflows/analysis.workflow';
@@ -38,11 +39,11 @@ app.get('/', (c) => {
   return c.json({
     status: 'healthy',
     service: 'OSLIRA Enterprise Analysis API',
-    version: '8.0.0',
+    version: '9.0.0',
     timestamp: new Date().toISOString(),
     environment: c.env.APP_ENV,
     architecture: 'async-workflows',
-    phase: 'Phase 5 Complete - Production Features',
+    phase: 'Phase 6-7 Complete - Cache Strategy & Batch Optimization',
     features: {
       workflows: !!c.env.ANALYSIS_WORKFLOW,
       durable_objects: !!c.env.ANALYSIS_PROGRESS,
@@ -52,7 +53,10 @@ app.get('/', (c) => {
       sentry: true,
       cron_jobs: true,
       prompt_caching: true,
-      bulk_analysis: true
+      bulk_analysis: true,
+      smart_cache_ttl: true,
+      batch_processor: true,
+      profile_refresh: true
     }
   });
 });
@@ -89,6 +93,9 @@ registerAnalysisRoutes(app);       // 4 endpoints (analyze, progress, cancel, re
 
 // Phase 5 endpoints (Bulk Analysis)
 registerBulkAnalysisRoutes(app);   // 3 endpoints (bulk, progress, cancel)
+
+// Phase 6-7 endpoints (Cache & Refresh)
+registerProfileRefreshRoutes(app); // 3 endpoints (refresh-check, force-refresh, cache-stats)
 
 // ===============================================================================
 // TEST ENDPOINTS (Disabled in production)
