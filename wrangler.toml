@@ -8,7 +8,7 @@ compatibility_flags = ["nodejs_compat"]
 # ===========================
 [[kv_namespaces]]
 binding = "OSLIRA_KV"
-id = "dd86f413c4374811ac253bb9a6567182"  # ← Need to get this
+id = "dd86f413c4374811ac253bb9a6567182"
 
 # ===========================
 # R2 BUCKET
@@ -22,6 +22,50 @@ bucket_name = "oslira-cache"
 # ===========================
 [[analytics_engine_datasets]]
 binding = "ANALYTICS_ENGINE"
+
+# ===========================
+# WORKFLOWS (NEW - Phase 4B)
+# ===========================
+[[workflows]]
+binding = "ANALYSIS_WORKFLOW"
+name = "analysis-workflow"
+
+# ===========================
+# DURABLE OBJECTS (NEW - Phase 4B)
+# ===========================
+[[durable_objects.bindings]]
+name = "ANALYSIS_PROGRESS"
+class_name = "AnalysisProgressDO"
+script_name = "oslira-workers"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["AnalysisProgressDO"]
+
+# ===========================
+# QUEUES (NEW - Phase 4B)
+# ===========================
+[[queues.producers]]
+binding = "STRIPE_WEBHOOK_QUEUE"
+queue = "stripe-webhooks"
+
+[[queues.producers]]
+binding = "ANALYSIS_QUEUE"
+queue = "analysis-jobs"
+
+[[queues.consumers]]
+queue = "stripe-webhooks"
+max_batch_size = 10
+max_batch_timeout = 30
+max_retries = 3
+dead_letter_queue = "stripe-webhooks-dlq"
+
+[[queues.consumers]]
+queue = "analysis-jobs"
+max_batch_size = 5
+max_batch_timeout = 60
+max_retries = 3
+dead_letter_queue = "analysis-jobs-dlq"
 
 # ===========================
 # CRON TRIGGERS
@@ -41,14 +85,31 @@ name = "oslira-workers-staging"
 
 [[env.staging.kv_namespaces]]
 binding = "OSLIRA_KV"
-id = "dd86f413c4374811ac253bb9a6567182"  
+id = "dd86f413c4374811ac253bb9a6567182"
 
 [[env.staging.r2_buckets]]
 binding = "R2_CACHE_BUCKET"
-bucket_name = "oslira-cache"  
+bucket_name = "oslira-cache"
 
 [[env.staging.analytics_engine_datasets]]
 binding = "ANALYTICS_ENGINE"
+
+[[env.staging.workflows]]
+binding = "ANALYSIS_WORKFLOW"
+name = "analysis-workflow-staging"
+
+[[env.staging.durable_objects.bindings]]
+name = "ANALYSIS_PROGRESS"
+class_name = "AnalysisProgressDO"
+script_name = "oslira-workers-staging"
+
+[[env.staging.queues.producers]]
+binding = "STRIPE_WEBHOOK_QUEUE"
+queue = "stripe-webhooks-staging"
+
+[[env.staging.queues.producers]]
+binding = "ANALYSIS_QUEUE"
+queue = "analysis-jobs-staging"
 
 [env.staging.triggers]
 crons = [
