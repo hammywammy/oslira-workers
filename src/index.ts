@@ -1,7 +1,12 @@
+// src/index.ts
+
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { Env } from '@/shared/types/env.types';
 import { registerTestEndpoints } from './test-endpoints';
+import { registerLeadRoutes } from './features/leads/leads.routes';
+import { registerBusinessRoutes } from './features/business/business.routes';
+import { registerCreditsRoutes } from './features/credits/credits.routes';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -28,7 +33,7 @@ app.get('/', (c) => {
     timestamp: new Date().toISOString(),
     environment: c.env.APP_ENV,
     architecture: 'feature-first',
-    phase: 'Phase 1 Complete - Building Features'
+    phase: 'Phase 3 Complete - Full CRUD Endpoints'
   });
 });
 
@@ -39,25 +44,25 @@ app.get('/health', async (c) => {
     bindings: {
       kv: !!c.env.OSLIRA_KV,
       r2: !!c.env.R2_CACHE_BUCKET,
-      workflows: !!c.env.ANALYSIS_WORKFLOW,
       analytics: !!c.env.ANALYTICS_ENGINE
     }
   });
 });
 
 // ===============================================================================
+// PRODUCTION API ENDPOINTS (Phase 3)
+// ===============================================================================
+
+// Register feature routes
+registerLeadRoutes(app);           // 4 endpoints
+registerBusinessRoutes(app);       // 4 endpoints (3 + GET /:id)
+registerCreditsRoutes(app);        // 4 endpoints (3 + GET /pricing)
+
+// ===============================================================================
 // TEST ENDPOINTS (Disabled in production)
 // ===============================================================================
 
 registerTestEndpoints(app);
-
-// ===============================================================================
-// PRODUCTION API ENDPOINTS
-// ===============================================================================
-
-// TODO: Add production endpoints here
-// app.post('/api/leads/analyze', async (c) => { ... });
-// app.get('/api/leads/:id', async (c) => { ... });
 
 // ===============================================================================
 // ERROR HANDLING
