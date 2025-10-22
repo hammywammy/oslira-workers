@@ -238,7 +238,7 @@ export class CronJobsHandler {
 
       for (const analysis of failedAnalyses) {
         try {
-          const retryCount = analysis.retry_count || 0;
+          let retryCount = analysis.retry_count || 0;
           
           // Retry if attempts < 3
           if (retryCount < 3) {
