@@ -11,7 +11,7 @@ import { getSentryService } from '@/infrastructure/monitoring/sentry.service';
  * Handles all scheduled tasks:
  * 1. Monthly credit renewal (subscriptions)
  * 2. Daily cleanup (old analyses, soft deleted records)
- * 3. Hourly failed analysis retry/cleanup
+ * 3. Hourly failed analysis refunds
  */
 
 export class CronJobsHandler {
@@ -70,7 +70,7 @@ export class CronJobsHandler {
           await creditsRepo.addCredits(
             sub.account_id,
             credits,
-            'subscription',
+            'subscription_renewal',
             `Monthly ${sub.plan_type} subscription renewal`
           );
 
@@ -153,7 +153,7 @@ export class CronJobsHandler {
         console.log(`[Cron] Deleted ${profilesDeleted?.length || 0} old business profiles`);
       }
 
-      // 3. Delete old completed analyses (>90 days)
+      // 3. Hard delete old completed analyses (>90 days)
       const { data: analysesDeleted, error: analysesError } = await supabase
         .from('analyses')
         .delete()
@@ -165,10 +165,25 @@ export class CronJobsHandler {
         console.error('[Cron] Error deleting old analyses:', analysesError);
       } else {
         totalDeleted += analysesDeleted?.length || 0;
-        console.log(`[Cron] Deleted ${analysesDeleted?.length || 0} old analyses`);
+        console.log(`[Cron] Deleted ${analysesDeleted?.length || 0} old completed analyses`);
       }
 
-      // 4. Delete abandoned pending analyses (>24 hours)
+      // 4. Hard delete failed analyses (>30 days)
+      const { data: failedDeleted, error: failedError } = await supabase
+        .from('analyses')
+        .delete()
+        .eq('status', 'failed')
+        .lt('created_at', thirtyDaysAgo)
+        .select('id');
+
+      if (failedError) {
+        console.error('[Cron] Error deleting failed analyses:', failedError);
+      } else {
+        totalDeleted += failedDeleted?.length || 0;
+        console.log(`[Cron] Deleted ${failedDeleted?.length || 0} old failed analyses`);
+      }
+
+      // 5. Delete abandoned pending analyses (>24 hours)
       const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       
       const { data: pendingDeleted, error: pendingError } = await supabase
@@ -203,7 +218,7 @@ export class CronJobsHandler {
 
   /**
    * Hourly failed analysis cleanup
-   * Retries failed analyses (up to 3 attempts) and refunds credits
+   * Refunds credits for failed analyses older than 1 hour
    */
   async hourlyFailedAnalysisCleanup(): Promise<void> {
     console.log('[Cron] Starting failed analysis cleanup...');
@@ -215,13 +230,12 @@ export class CronJobsHandler {
       const supabase = await SupabaseClientFactory.createAdminClient(this.env);
       const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
 
-      // Get failed analyses from last hour
-      // ✅ FIXED: Changed credits_used → credits_charged
+      // Get failed analyses older than 1 hour that haven't been soft-deleted
       const { data: failedAnalyses, error } = await supabase
         .from('analyses')
-        .select('id, account_id, credits_charged, created_at, retry_count')
+        .select('id, account_id, credits_charged, created_at')
         .eq('status', 'failed')
-        .gt('created_at', oneHourAgo)
+        .lt('created_at', oneHourAgo)
         .is('deleted_at', null);
 
       if (error) throw error;
@@ -235,47 +249,28 @@ export class CronJobsHandler {
 
       const creditsRepo = new CreditsRepository(supabase);
       let refundedCount = 0;
-      let retriedCount = 0;
 
       for (const analysis of failedAnalyses) {
         try {
-          const retryCount = analysis.retry_count || 0;
-          
-          // Retry if attempts < 3
-          if (retryCount < 3) {
-            // TODO: Re-queue analysis via ANALYSIS_QUEUE
-            console.log(`[Cron] Would retry analysis ${analysis.id} (attempt ${retryCount + 1})`);
-            
-            await supabase
-              .from('analyses')
-              .update({
-                retry_count: retryCount + 1,
-                status: 'pending'
-              })
-              .eq('id', analysis.id);
-            
-            retriedCount++;
-          } else {
-            // Max retries reached - refund credits
-            // ✅ FIXED: Changed analysis.credits_used → analysis.credits_charged
-            if (analysis.credits_charged > 0) {
-              await creditsRepo.addCredits(
-                analysis.account_id,
-                analysis.credits_charged,
-                'refund',
-                `Analysis ${analysis.id} failed after 3 attempts`
-              );
+          // Refund credits if charged
+          if (analysis.credits_charged && analysis.credits_charged > 0) {
+            await creditsRepo.addCredits(
+              analysis.account_id,
+              analysis.credits_charged,
+              'refund',
+              `Automatic refund for failed analysis ${analysis.id}`
+            );
 
-              refundedCount++;
-              console.log(`[Cron] Refunded ${analysis.credits_charged} credits for analysis ${analysis.id}`);
-            }
-
-            // Mark as permanently failed
-            await supabase
-              .from('analyses')
-              .update({ status: 'failed_permanent' })
-              .eq('id', analysis.id);
+            refundedCount++;
+            console.log(`[Cron] Refunded ${analysis.credits_charged} credits for analysis ${analysis.id}`);
           }
+
+          // Soft delete the failed analysis (keep for audit)
+          await supabase
+            .from('analyses')
+            .update({ deleted_at: new Date().toISOString() })
+            .eq('id', analysis.id);
+            
         } catch (analysisError: any) {
           console.error(`[Cron] Failed to process analysis ${analysis.id}:`, analysisError);
           
@@ -288,10 +283,10 @@ export class CronJobsHandler {
         }
       }
 
-      console.log(`[Cron] Failed analysis cleanup complete: ${retriedCount} retried, ${refundedCount} refunded`);
+      console.log(`[Cron] Failed analysis cleanup complete: ${refundedCount} refunded`);
       
       await sentry.captureMessage(
-        `Failed analysis cleanup: ${retriedCount} retried, ${refundedCount} refunded`,
+        `Failed analysis cleanup: ${refundedCount} credits refunded`,
         'info',
         { tags: { cron_job: 'failed_analysis_cleanup' } }
       );
