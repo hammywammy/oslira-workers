@@ -8,6 +8,7 @@ import type { Workflow } from 'cloudflare:workers';
  * 
  * Phase 1-3: KV, R2, Analytics Engine
  * Phase 4B: Workflows, Durable Objects, Queues
+ * Phase 3 (Onboarding): Business Context Generation
  */
 
 export interface Env {
@@ -32,18 +33,21 @@ export interface Env {
   ANALYTICS_ENGINE: AnalyticsEngineDataset;
 
   // ===============================================================================
-  // PHASE 4B BINDINGS (NEW)
+  // PHASE 4B BINDINGS
   // ===============================================================================
   
   // Workflows (async orchestration)
   ANALYSIS_WORKFLOW: Workflow;
+  BUSINESS_CONTEXT_WORKFLOW: Workflow;
   
   // Durable Objects (progress tracking)
   ANALYSIS_PROGRESS: DurableObjectNamespace;
+  BUSINESS_CONTEXT_PROGRESS: DurableObjectNamespace;
   
   // Queues (async message processing)
   STRIPE_WEBHOOK_QUEUE: Queue;
   ANALYSIS_QUEUE: Queue;
+  BUSINESS_CONTEXT_QUEUE: Queue;
 }
 
 /**
