@@ -17,47 +17,120 @@ import { SupabaseClientFactory } from '@/infrastructure/database/supabase.client
 import { getAuthContext } from '@/shared/middleware/auth.middleware';
 
 /**
+ * Convert Google User ID (string number) to deterministic UUID v5
+ * 
+ * Google IDs: "112093094941937129431" (not UUID format)
+ * Solution: Hash to UUID using namespace UUID
+ * 
+ * This ensures:
+ * - Same Google ID always produces same UUID
+ * - UUID is valid for PostgreSQL uuid type
+ * - Consistent across sessions
+ */
+async function googleIdToUUID(googleId: string): Promise<string> {
+  // Use a fixed namespace UUID for Google IDs (generated once)
+  const GOOGLE_NAMESPACE = '6ba7b810-9dad-11d1-80b4-00c04fd430c8'; // Standard DNS namespace
+  
+  // Create deterministic UUID from Google ID
+  const encoder = new TextEncoder();
+  const data = encoder.encode(GOOGLE_NAMESPACE + googleId);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  
+  // Take first 16 bytes and format as UUID v5
+  const uuid = [
+    hashArray.slice(0, 4).map(b => b.toString(16).padStart(2, '0')).join(''),
+    hashArray.slice(4, 6).map(b => b.toString(16).padStart(2, '0')).join(''),
+    hashArray.slice(6, 8).map(b => b.toString(16).padStart(2, '0')).join(''),
+    hashArray.slice(8, 10).map(b => b.toString(16).padStart(2, '0')).join(''),
+    hashArray.slice(10, 16).map(b => b.toString(16).padStart(2, '0')).join('')
+  ].join('-');
+  
+  // Set version to 5 (SHA-1 name-based) and variant bits
+  const chars = uuid.split('');
+  chars[14] = '5'; // Version 5
+  chars[19] = '8'; // Variant 10xx
+  
+  return chars.join('');
+}
+
+/**
  * POST /api/auth/google/callback
  * Exchange Google authorization code for tokens
  * 
  * Flow:
  * 1. Exchange code with Google → get user info
- * 2. Create/update user in database (atomic)
- * 3. Issue JWT + refresh token
- * 4. Return tokens + user info to frontend
+ * 2. Convert Google ID to UUID (deterministic hash)
+ * 3. Create/update user in database (atomic)
+ * 4. Issue JWT + refresh token
+ * 5. Return tokens + user info to frontend
  */
 export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
   try {
     const body = await c.req.json() as GoogleCallbackRequest;
     
     if (!body.code) {
+      console.error('[GoogleCallback] Missing authorization code');
       return c.json({ error: 'Missing authorization code' }, 400);
     }
+
+    console.log('[GoogleCallback] Starting OAuth flow');
 
     // Step 1: Exchange code with Google
     const oauthService = new GoogleOAuthService(c.env);
     const googleUser = await oauthService.completeOAuthFlow(body.code);
 
-    // Step 2: Create/update user atomically
+    console.log('[GoogleCallback] Google user received', {
+      googleId: googleUser.id,
+      email: googleUser.email,
+      name: googleUser.name
+    });
+
+    // Step 2: Convert Google ID to UUID
+    const userId = await googleIdToUUID(googleUser.id);
+    
+    console.log('[GoogleCallback] Converted Google ID to UUID', {
+      googleId: googleUser.id,
+      uuid: userId
+    });
+
+    // Step 3: Create/update user atomically
     const supabase = await SupabaseClientFactory.createAdminClient(c.env);
+    
+    console.log('[GoogleCallback] Calling create_account_atomic');
     
     const { data: accountData, error: accountError } = await supabase
       .rpc('create_account_atomic', {
-        p_user_id: googleUser.id,
+        p_user_id: userId, // ← Now a valid UUID
         p_email: googleUser.email,
         p_full_name: googleUser.name,
         p_avatar_url: googleUser.picture
       });
 
     if (accountError || !accountData) {
-      console.error('[GoogleCallback] Account creation failed:', accountError);
-      return c.json({ error: 'Failed to create account' }, 500);
+      console.error('[GoogleCallback] Account creation failed:', {
+        error: accountError,
+        code: accountError?.code,
+        message: accountError?.message,
+        details: accountError?.details
+      });
+      return c.json({ 
+        error: 'Failed to create account',
+        details: accountError?.message 
+      }, 500);
     }
 
-    // Step 3: Issue tokens
+    console.log('[GoogleCallback] Account created successfully', {
+      userId: accountData.user_id,
+      accountId: accountData.account_id,
+      isNewUser: accountData.is_new_user
+    });
+
+    // Step 4: Issue tokens
     const jwtService = new JWTService(c.env);
     const tokenService = new TokenService(supabase);
 
+    console.log('[GoogleCallback] Generating JWT');
     const accessToken = await jwtService.sign({
       userId: accountData.user_id,
       accountId: accountData.account_id,
@@ -65,12 +138,15 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
       onboardingCompleted: accountData.onboarding_completed
     });
 
+    console.log('[GoogleCallback] Creating refresh token');
     const refreshToken = await tokenService.create(
       accountData.user_id,
       accountData.account_id
     );
 
-    // Step 4: Return response
+    console.log('[GoogleCallback] Tokens created successfully');
+
+    // Step 5: Return response
     const response: AuthResponse = {
       accessToken,
       refreshToken,
@@ -90,10 +166,15 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
       isNewUser: accountData.is_new_user
     };
 
+    console.log('[GoogleCallback] Returning success response');
     return c.json(response, 200);
 
   } catch (error: any) {
-    console.error('[GoogleCallback] Error:', error);
+    console.error('[GoogleCallback] Unexpected error:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    });
     return c.json({ 
       error: 'Authentication failed',
       message: error.message 
@@ -121,33 +202,35 @@ export async function handleRefresh(c: Context<{ Bindings: Env }>) {
 
     const supabase = await SupabaseClientFactory.createAdminClient(c.env);
     const tokenService = new TokenService(supabase);
+    const jwtService = new JWTService(c.env);
 
-    // Validate old token
-    const tokenRecord = await tokenService.validate(body.refreshToken);
-    if (!tokenRecord) {
+    // Validate and rotate token
+    const tokenData = await tokenService.validate(body.refreshToken);
+    
+    if (!tokenData) {
       return c.json({ error: 'Invalid or expired refresh token' }, 401);
     }
 
-    // Get user info (for JWT payload)
-    const { data: user, error: userError } = await supabase
+    // Create new refresh token
+    const newRefreshToken = await tokenService.rotate(
+      body.refreshToken,
+      tokenData.user_id,
+      tokenData.account_id
+    );
+
+    // Fetch user's current onboarding status
+    const { data: user } = await supabase
       .from('users')
-      .select('id, email, onboarding_completed')
-      .eq('id', tokenRecord.user_id)
+      .select('email, onboarding_completed')
+      .eq('id', tokenData.user_id)
       .single();
 
-    if (userError || !user) {
-      return c.json({ error: 'User not found' }, 404);
-    }
-
-    // Rotate tokens
-    const newRefreshToken = await tokenService.rotate(body.refreshToken);
-
-    const jwtService = new JWTService(c.env);
+    // Issue new access token
     const newAccessToken = await jwtService.sign({
-      userId: tokenRecord.user_id,
-      accountId: tokenRecord.account_id,
-      email: user.email,
-      onboardingCompleted: user.onboarding_completed
+      userId: tokenData.user_id,
+      accountId: tokenData.account_id,
+      email: user?.email || tokenData.user_id,
+      onboardingCompleted: user?.onboarding_completed || false
     });
 
     const response: RefreshResponse = {
@@ -163,18 +246,17 @@ export async function handleRefresh(c: Context<{ Bindings: Env }>) {
     return c.json({ 
       error: 'Token refresh failed',
       message: error.message 
-    }, 401);
+    }, 500);
   }
 }
 
 /**
  * POST /api/auth/logout
- * Revoke refresh token (logout)
+ * Revoke refresh token
  * 
  * Flow:
- * 1. Validate refresh token
- * 2. Mark token as revoked
- * 3. Return success
+ * 1. Revoke refresh token in database
+ * 2. Return success
  */
 export async function handleLogout(c: Context<{ Bindings: Env }>) {
   try {
@@ -187,28 +269,24 @@ export async function handleLogout(c: Context<{ Bindings: Env }>) {
     const supabase = await SupabaseClientFactory.createAdminClient(c.env);
     const tokenService = new TokenService(supabase);
 
-    // Revoke token
     await tokenService.revoke(body.refreshToken);
 
-    return c.json({ 
-      success: true,
-      message: 'Logged out successfully' 
-    }, 200);
+    return c.json({ success: true }, 200);
 
   } catch (error: any) {
     console.error('[Logout] Error:', error);
-    // Still return success (best effort logout)
     return c.json({ 
-      success: true,
-      message: 'Logged out' 
-    }, 200);
+      error: 'Logout failed',
+      message: error.message 
+    }, 500);
   }
 }
 
 /**
  * GET /api/auth/session
  * Get current user session info
- * Requires valid JWT in Authorization header
+ * 
+ * Requires: JWT authentication (via middleware)
  * 
  * Flow:
  * 1. Extract auth context (from middleware)
