@@ -1,8 +1,9 @@
-// src/index.ts - Phase 5 Complete
+// src/index.ts - Phase 3 Update (Business Context Generation)
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { Env } from '@/shared/types/env.types';
+import type { MessageBatch } from '@cloudflare/workers-types';
 import { registerTestEndpoints } from './test-endpoints';
 import { registerAuthRoutes } from './features/auth/auth.routes';
 import { registerLeadRoutes } from './features/leads/leads.routes';
@@ -11,10 +12,14 @@ import { registerCreditsRoutes } from './features/credits/credits.routes';
 import { registerAnalysisRoutes } from './features/analysis/analysis.routes';
 import { registerBulkAnalysisRoutes } from './features/analysis/bulk-analysis.routes';
 import { registerProfileRefreshRoutes } from './features/leads/profile-refresh.routes';
+import { registerOnboardingRoutes } from './features/onboarding/onboarding.routes';
 import { handleStripeWebhookQueue } from './infrastructure/queues/stripe-webhook.consumer';
 import { handleAnalysisQueue } from './infrastructure/queues/analysis.consumer';
+import { handleBusinessContextQueue } from './infrastructure/queues/business-context.consumer';
 import AnalysisWorkflow from './infrastructure/workflows/analysis.workflow';
+import BusinessContextWorkflow from './infrastructure/workflows/business-context.workflow';
 import { AnalysisProgressDO } from './infrastructure/durable-objects/analysis-progress.do';
+import { BusinessContextProgressDO } from './infrastructure/durable-objects/business-context-progress.do';
 import { executeCronJob } from './infrastructure/cron/cron-jobs.handler';
 import { getSentryService } from './infrastructure/monitoring/sentry.service';
 import { errorHandler } from './shared/middleware/error.middleware';
@@ -27,34 +32,30 @@ const app = new Hono<{ Bindings: Env }>();
 
 app.use('*', cors({
   origin: (origin) => {
-    // Allowed origins for production and development
     const allowedOrigins = [
-      'https://app.oslira.com',      // Production app
-      'https://oslira.com',   
-      'https://staging-app.oslira.com',      // Production app
-      'https://staging.oslira.com',// Marketing site (if needed)
-      'http://localhost:5173',        // Local dev (Vite default)
-      'http://localhost:5174',        // Alternative Vite port
-      'http://127.0.0.1:5173',        // Alternative localhost
+      'https://app.oslira.com',
+      'https://oslira.com',
+      'https://staging-app.oslira.com',
+      'https://staging.oslira.com',
+      'http://localhost:5173',
+      'http://localhost:5174',
+      'http://127.0.0.1:5173',
     ];
 
-    // Allow if origin is in whitelist
     if (origin && allowedOrigins.includes(origin)) {
       return origin;
     }
 
-    // For development: Allow any localhost port
     if (origin && (origin.includes('localhost') || origin.includes('127.0.0.1'))) {
       return origin;
     }
 
-    // Default fallback (production app)
     return 'https://app.oslira.com';
   },
   allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  credentials: true,  // CRITICAL: Allow Authorization headers with cookies
-  maxAge: 86400,      // Cache preflight for 24 hours
+  credentials: true,
+  maxAge: 86400,
 }));
 
 // ===============================================================================
@@ -65,15 +66,15 @@ app.get('/', (c) => {
   return c.json({
     status: 'healthy',
     service: 'OSLIRA Enterprise Analysis API',
-    version: '9.0.0',
+    version: '10.0.0',
     timestamp: new Date().toISOString(),
     environment: c.env.APP_ENV,
     architecture: 'async-workflows',
-    phase: 'Phase 6-7 Complete - Cache Strategy & Batch Optimization',
+    phase: 'Phase 3 Complete - Business Context Generation',
     features: {
-      workflows: !!c.env.ANALYSIS_WORKFLOW,
-      durable_objects: !!c.env.ANALYSIS_PROGRESS,
-      queues: !!c.env.ANALYSIS_QUEUE,
+      workflows: !!c.env.ANALYSIS_WORKFLOW && !!c.env.BUSINESS_CONTEXT_WORKFLOW,
+      durable_objects: !!c.env.ANALYSIS_PROGRESS && !!c.env.BUSINESS_CONTEXT_PROGRESS,
+      queues: !!c.env.ANALYSIS_QUEUE && !!c.env.BUSINESS_CONTEXT_QUEUE,
       r2_cache: !!c.env.R2_CACHE_BUCKET,
       analytics: !!c.env.ANALYTICS_ENGINE,
       sentry: true,
@@ -82,7 +83,8 @@ app.get('/', (c) => {
       bulk_analysis: true,
       smart_cache_ttl: true,
       batch_processor: true,
-      profile_refresh: true
+      profile_refresh: true,
+      business_context_generation: true
     }
   });
 });
@@ -95,11 +97,18 @@ app.get('/health', async (c) => {
       kv: !!c.env.OSLIRA_KV,
       r2: !!c.env.R2_CACHE_BUCKET,
       analytics: !!c.env.ANALYTICS_ENGINE,
-      workflows: !!c.env.ANALYSIS_WORKFLOW,
-      durable_objects: !!c.env.ANALYSIS_PROGRESS,
+      workflows: {
+        analysis: !!c.env.ANALYSIS_WORKFLOW,
+        business_context: !!c.env.BUSINESS_CONTEXT_WORKFLOW
+      },
+      durable_objects: {
+        analysis_progress: !!c.env.ANALYSIS_PROGRESS,
+        business_context_progress: !!c.env.BUSINESS_CONTEXT_PROGRESS
+      },
       queues: {
         stripe_webhooks: !!c.env.STRIPE_WEBHOOK_QUEUE,
-        analysis: !!c.env.ANALYSIS_QUEUE
+        analysis: !!c.env.ANALYSIS_QUEUE,
+        business_context: !!c.env.BUSINESS_CONTEXT_QUEUE
       }
     }
   });
@@ -109,20 +118,24 @@ app.get('/health', async (c) => {
 // PRODUCTION API ENDPOINTS
 // ===============================================================================
 
-registerAuthRoutes(app);  
+registerAuthRoutes(app);
+
 // Phase 3 endpoints (CRUD)
-registerLeadRoutes(app);           // 4 endpoints
-registerBusinessRoutes(app);       // 4 endpoints
-registerCreditsRoutes(app);        // 4 endpoints
+registerLeadRoutes(app);
+registerBusinessRoutes(app);
+registerCreditsRoutes(app);
 
 // Phase 4 endpoints (Async Analysis)
-registerAnalysisRoutes(app);       // 4 endpoints (analyze, progress, cancel, result)
+registerAnalysisRoutes(app);
 
 // Phase 5 endpoints (Bulk Analysis)
-registerBulkAnalysisRoutes(app);   // 3 endpoints (bulk, progress, cancel)
+registerBulkAnalysisRoutes(app);
 
 // Phase 6-7 endpoints (Cache & Refresh)
-registerProfileRefreshRoutes(app); // 3 endpoints (refresh-check, force-refresh, cache-stats)
+registerProfileRefreshRoutes(app);
+
+// Phase 3 endpoints (Onboarding - NEW)
+registerOnboardingRoutes(app);
 
 // ===============================================================================
 // TEST ENDPOINTS (Disabled in production)
@@ -131,13 +144,12 @@ registerProfileRefreshRoutes(app); // 3 endpoints (refresh-check, force-refresh,
 registerTestEndpoints(app);
 
 // ===============================================================================
-// ERROR HANDLING (Phase 5 - Sentry Integration)
+// ERROR HANDLING
 // ===============================================================================
 
 app.onError(async (err, c) => {
   console.error('Worker error:', err);
-  
-  // Send to Sentry
+
   try {
     const sentry = await getSentryService(c.env);
     await sentry.captureException(err, {
@@ -153,7 +165,7 @@ app.onError(async (err, c) => {
   } catch (sentryError) {
     console.error('Sentry error:', sentryError);
   }
-  
+
   return errorHandler(err, c);
 });
 
@@ -178,19 +190,18 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     return app.fetch(request, env, ctx);
   },
-  
+
   /**
-   * Cron Trigger Handler (Phase 5 - Complete Implementation)
+   * Cron Trigger Handler
    */
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     console.log('[Cron] Trigger:', event.cron);
-    
+
     try {
       await executeCronJob(event.cron, env);
     } catch (error: any) {
       console.error('[Cron] Job execution failed:', error);
-      
-      // Report to Sentry
+
       try {
         const sentry = await getSentryService(env);
         await sentry.captureException(error, {
@@ -204,7 +215,7 @@ export default {
       }
     }
   },
-  
+
   /**
    * Queue Consumer Handler
    */
@@ -213,18 +224,22 @@ export default {
       await handleStripeWebhookQueue(batch, env);
     } else if (batch.queue === 'analysis-jobs' || batch.queue === 'analysis-jobs-staging') {
       await handleAnalysisQueue(batch, env);
+    } else if (batch.queue === 'business-context-jobs' || batch.queue === 'business-context-jobs-staging') {
+      await handleBusinessContextQueue(batch, env);
     }
   }
 };
 
 // ===============================================================================
-// EXPORT WORKFLOW
+// EXPORT WORKFLOWS
 // ===============================================================================
 
 export { AnalysisWorkflow };
+export { BusinessContextWorkflow };
 
 // ===============================================================================
-// EXPORT DURABLE OBJECT
+// EXPORT DURABLE OBJECTS
 // ===============================================================================
 
 export { AnalysisProgressDO };
+export { BusinessContextProgressDO };
