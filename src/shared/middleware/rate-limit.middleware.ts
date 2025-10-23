@@ -3,9 +3,8 @@ import type { Context, Next } from 'hono';
 import type { Env } from '@/shared/types/env.types';
 
 export interface RateLimitConfig {
-  windowMs: number;      // Time window in milliseconds
-  maxRequests: number;   // Max requests per window
-  keyPrefix: string;     // KV key prefix
+  requests: number;  // Max requests per window
+  window: number;    // Time window in seconds
 }
 
 /**
@@ -20,9 +19,13 @@ export function rateLimitMiddleware(
     const auth = c.get('auth') as { userId?: string } | undefined;
     const identifier = auth?.userId || c.req.header('cf-connecting-ip') || 'anonymous';
     
-    const key = `${config.keyPrefix}:${identifier}`;
+    const keyPrefix = 'ratelimit';
+    const key = `${keyPrefix}:${identifier}`;
     const now = Date.now();
-    const windowStart = now - config.windowMs;
+    const windowMs = config.window * 1000; // Convert to milliseconds
+    
+    // CRITICAL: Ensure TTL is always positive (minimum 1 second)
+    const expirationTtl = Math.max(1, Math.ceil(config.window));
     
     try {
       // Get current count from KV
@@ -32,15 +35,21 @@ export function rateLimitMiddleware(
       } | null;
       
       let count = 0;
-      let resetAt = now + config.windowMs;
+      let resetAt = now + windowMs;
       
       if (stored && stored.resetAt > now) {
         // Within current window
         count = stored.count + 1;
         resetAt = stored.resetAt;
         
-        if (count > config.maxRequests) {
+        if (count > config.requests) {
           const retryAfter = Math.ceil((resetAt - now) / 1000);
+          
+          console.warn(`[RateLimit] Limit exceeded for ${identifier}`, {
+            count,
+            limit: config.requests,
+            retryAfter
+          });
           
           return c.json({
             success: false,
@@ -49,7 +58,7 @@ export function rateLimitMiddleware(
             retryAfter
           }, 429, {
             'Retry-After': retryAfter.toString(),
-            'X-RateLimit-Limit': config.maxRequests.toString(),
+            'X-RateLimit-Limit': config.requests.toString(),
             'X-RateLimit-Remaining': '0',
             'X-RateLimit-Reset': resetAt.toString()
           });
@@ -57,24 +66,24 @@ export function rateLimitMiddleware(
       } else {
         // New window
         count = 1;
-        resetAt = now + config.windowMs;
+        resetAt = now + windowMs;
       }
       
-      // Update count in KV
+      // Update count in KV with validated TTL
       await c.env.OSLIRA_KV.put(
         key,
         JSON.stringify({ count, resetAt }),
-        { expirationTtl: Math.ceil(config.windowMs / 1000) }
+        { expirationTtl } // ← Always positive, minimum 1 second
       );
       
       // Add rate limit headers
-      c.header('X-RateLimit-Limit', config.maxRequests.toString());
-      c.header('X-RateLimit-Remaining', Math.max(0, config.maxRequests - count).toString());
+      c.header('X-RateLimit-Limit', config.requests.toString());
+      c.header('X-RateLimit-Remaining', Math.max(0, config.requests - count).toString());
       c.header('X-RateLimit-Reset', resetAt.toString());
       
       await next();
     } catch (error) {
-      console.error('Rate limit error:', error);
+      console.error('[RateLimit] Error:', error);
       // Fail open - allow request if rate limiting fails
       await next();
     }
@@ -87,29 +96,31 @@ export function rateLimitMiddleware(
 export const RATE_LIMITS = {
   // Analysis endpoints - expensive operations
   ANALYSIS: {
-    windowMs: 60 * 60 * 1000, // 1 hour
-    maxRequests: 100,
-    keyPrefix: 'ratelimit:analysis'
+    requests: 100,
+    window: 3600 // 1 hour in seconds
   },
   
   // Anonymous analysis - stricter limits
   ANONYMOUS_ANALYSIS: {
-    windowMs: 60 * 60 * 1000, // 1 hour
-    maxRequests: 5,
-    keyPrefix: 'ratelimit:anon-analysis'
+    requests: 5,
+    window: 3600 // 1 hour in seconds
   },
   
   // API general - generous limits
   API_GENERAL: {
-    windowMs: 60 * 1000, // 1 minute
-    maxRequests: 60,
-    keyPrefix: 'ratelimit:api'
+    requests: 60,
+    window: 60 // 1 minute in seconds
   },
   
   // Webhook endpoints - very strict
   WEBHOOK: {
-    windowMs: 60 * 1000, // 1 minute
-    maxRequests: 10,
-    keyPrefix: 'ratelimit:webhook'
+    requests: 10,
+    window: 60 // 1 minute in seconds
+  },
+  
+  // Auth endpoints - moderate limits
+  AUTH: {
+    requests: 10,
+    window: 600 // 10 minutes in seconds
   }
 } as const;
