@@ -216,9 +216,10 @@ export class CronJobsHandler {
       const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
 
       // Get failed analyses from last hour
+      // ✅ FIXED: Changed credits_used → credits_charged
       const { data: failedAnalyses, error } = await supabase
         .from('analyses')
-        .select('id, account_id, credits_used, created_at, retry_count')
+        .select('id, account_id, credits_charged, created_at, retry_count')
         .eq('status', 'failed')
         .gt('created_at', oneHourAgo)
         .is('deleted_at', null);
@@ -234,11 +235,11 @@ export class CronJobsHandler {
 
       const creditsRepo = new CreditsRepository(supabase);
       let refundedCount = 0;
-      let retryCount = 0;
+      let retriedCount = 0;
 
       for (const analysis of failedAnalyses) {
         try {
-          let retryCount = analysis.retry_count || 0;
+          const retryCount = analysis.retry_count || 0;
           
           // Retry if attempts < 3
           if (retryCount < 3) {
@@ -253,19 +254,20 @@ export class CronJobsHandler {
               })
               .eq('id', analysis.id);
             
-            retryCount++;
+            retriedCount++;
           } else {
             // Max retries reached - refund credits
-            if (analysis.credits_used > 0) {
+            // ✅ FIXED: Changed analysis.credits_used → analysis.credits_charged
+            if (analysis.credits_charged > 0) {
               await creditsRepo.addCredits(
                 analysis.account_id,
-                analysis.credits_used,
+                analysis.credits_charged,
                 'refund',
                 `Analysis ${analysis.id} failed after 3 attempts`
               );
 
               refundedCount++;
-              console.log(`[Cron] Refunded ${analysis.credits_used} credits for analysis ${analysis.id}`);
+              console.log(`[Cron] Refunded ${analysis.credits_charged} credits for analysis ${analysis.id}`);
             }
 
             // Mark as permanently failed
@@ -286,10 +288,10 @@ export class CronJobsHandler {
         }
       }
 
-      console.log(`[Cron] Failed analysis cleanup complete: ${retryCount} retried, ${refundedCount} refunded`);
+      console.log(`[Cron] Failed analysis cleanup complete: ${retriedCount} retried, ${refundedCount} refunded`);
       
       await sentry.captureMessage(
-        `Failed analysis cleanup: ${retryCount} retried, ${refundedCount} refunded`,
+        `Failed analysis cleanup: ${retriedCount} retried, ${refundedCount} refunded`,
         'info',
         { tags: { cron_job: 'failed_analysis_cleanup' } }
       );
