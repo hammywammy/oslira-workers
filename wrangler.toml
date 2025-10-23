@@ -24,27 +24,37 @@ bucket_name = "oslira-cache"
 binding = "ANALYTICS_ENGINE"
 
 # ===========================
-# WORKFLOWS (NEW - Phase 4B)
+# WORKFLOWS
 # ===========================
 [[workflows]]
 binding = "ANALYSIS_WORKFLOW"
 name = "analysis-workflow"
 class_name = "AnalysisWorkflow"
 
+[[workflows]]
+binding = "BUSINESS_CONTEXT_WORKFLOW"
+name = "business-context-workflow"
+class_name = "BusinessContextWorkflow"
+
 # ===========================
-# DURABLE OBJECTS (NEW - Phase 4B)
+# DURABLE OBJECTS
 # ===========================
 [[durable_objects.bindings]]
 name = "ANALYSIS_PROGRESS"
 class_name = "AnalysisProgressDO"
 script_name = "oslira-workers"
 
+[[durable_objects.bindings]]
+name = "BUSINESS_CONTEXT_PROGRESS"
+class_name = "BusinessContextProgressDO"
+script_name = "oslira-workers"
+
 [[migrations]]
 tag = "v1"
-new_classes = ["AnalysisProgressDO"]
+new_classes = ["AnalysisProgressDO", "BusinessContextProgressDO"]
 
 # ===========================
-# QUEUES (NEW - Phase 4B)
+# QUEUES
 # ===========================
 [[queues.producers]]
 binding = "STRIPE_WEBHOOK_QUEUE"
@@ -53,6 +63,10 @@ queue = "stripe-webhooks"
 [[queues.producers]]
 binding = "ANALYSIS_QUEUE"
 queue = "analysis-jobs"
+
+[[queues.producers]]
+binding = "BUSINESS_CONTEXT_QUEUE"
+queue = "business-context-jobs"
 
 [[queues.consumers]]
 queue = "stripe-webhooks"
@@ -67,6 +81,13 @@ max_batch_size = 5
 max_batch_timeout = 60
 max_retries = 3
 dead_letter_queue = "analysis-jobs-dlq"
+
+[[queues.consumers]]
+queue = "business-context-jobs"
+max_batch_size = 3
+max_batch_timeout = 60
+max_retries = 3
+dead_letter_queue = "business-context-jobs-dlq"
 
 # ===========================
 # CRON TRIGGERS
@@ -100,9 +121,19 @@ binding = "ANALYSIS_WORKFLOW"
 name = "analysis-workflow-staging"
 class_name = "AnalysisWorkflow"
 
+[[env.staging.workflows]]
+binding = "BUSINESS_CONTEXT_WORKFLOW"
+name = "business-context-workflow-staging"
+class_name = "BusinessContextWorkflow"
+
 [[env.staging.durable_objects.bindings]]
 name = "ANALYSIS_PROGRESS"
 class_name = "AnalysisProgressDO"
+script_name = "oslira-workers-staging"
+
+[[env.staging.durable_objects.bindings]]
+name = "BUSINESS_CONTEXT_PROGRESS"
+class_name = "BusinessContextProgressDO"
 script_name = "oslira-workers-staging"
 
 [[env.staging.queues.producers]]
@@ -112,6 +143,10 @@ queue = "stripe-webhooks-staging"
 [[env.staging.queues.producers]]
 binding = "ANALYSIS_QUEUE"
 queue = "analysis-jobs-staging"
+
+[[env.staging.queues.producers]]
+binding = "BUSINESS_CONTEXT_QUEUE"
+queue = "business-context-jobs-staging"
 
 [env.staging.triggers]
 crons = [
