@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { Env } from '@/shared/types/env.types';
 import { registerTestEndpoints } from './test-endpoints';
+import { registerAuthRoutes } from './features/auth/auth.routes';
 import { registerLeadRoutes } from './features/leads/leads.routes';
 import { registerBusinessRoutes } from './features/business/business.routes';
 import { registerCreditsRoutes } from './features/credits/credits.routes';
@@ -108,6 +109,7 @@ app.get('/health', async (c) => {
 // PRODUCTION API ENDPOINTS
 // ===============================================================================
 
+registerAuthRoutes(app);  
 // Phase 3 endpoints (CRUD)
 registerLeadRoutes(app);           // 4 endpoints
 registerBusinessRoutes(app);       // 4 endpoints
