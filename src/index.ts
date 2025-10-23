@@ -25,10 +25,35 @@ const app = new Hono<{ Bindings: Env }>();
 // ===============================================================================
 
 app.use('*', cors({
-  origin: '*',
+  origin: (origin) => {
+    // Allowed origins for production and development
+    const allowedOrigins = [
+      'https://app.oslira.com',      // Production app
+      'https://oslira.com',   
+      'https://staging-app.oslira.com',      // Production app
+      'https://staging.oslira.com',// Marketing site (if needed)
+      'http://localhost:5173',        // Local dev (Vite default)
+      'http://localhost:5174',        // Alternative Vite port
+      'http://127.0.0.1:5173',        // Alternative localhost
+    ];
+
+    // Allow if origin is in whitelist
+    if (origin && allowedOrigins.includes(origin)) {
+      return origin;
+    }
+
+    // For development: Allow any localhost port
+    if (origin && (origin.includes('localhost') || origin.includes('127.0.0.1'))) {
+      return origin;
+    }
+
+    // Default fallback (production app)
+    return 'https://app.oslira.com';
+  },
   allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  credentials: false
+  credentials: true,  // CRITICAL: Allow Authorization headers with cookies
+  maxAge: 86400,      // Cache preflight for 24 hours
 }));
 
 // ===============================================================================
