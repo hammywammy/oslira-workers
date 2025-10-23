@@ -1,196 +1,171 @@
 // src/shared/middleware/auth.middleware.ts
+// UPDATED FOR CUSTOM JWT AUTHENTICATION
+
 import type { Context, Next } from 'hono';
 import type { Env } from '@/shared/types/env.types';
-import { createUserClient, createAdminClient } from '@/infrastructure/database/supabase.client';
-import { getSecret } from '@/infrastructure/config/secrets';
-
-export interface AuthContext {
-  userId: string;
-  email: string;
-  accountIds: string[];
-  primaryAccountId: string;
-  isTestMode?: boolean;
-}
+import type { AuthContext } from '@/features/auth/auth.types';
+import { JWTService } from '@/infrastructure/auth/jwt.service';
 
 /**
- * Validates JWT and attaches user info to context
- * Use on all authenticated routes
+ * AUTH MIDDLEWARE
  * 
- * TESTING BYPASS: In non-production environments, allows X-Admin-Token + X-Account-Id
- * to bypass JWT authentication for easier API testing
+ * Validates JWT access token and attaches auth context to request
+ * 
+ * Features:
+ * - Validates JWT signature + expiry
+ * - Enforces onboarding completion (except for auth/onboarding endpoints)
+ * - Attaches auth context: { userId, accountId, email, onboardingCompleted }
+ * 
+ * Usage:
+ * app.get('/api/leads', authMiddleware, handler);
  */
 export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) {
-  
-  // ============================================================================
-  // TESTING BYPASS (Non-Production Only)
-  // ============================================================================
-  if (c.env.APP_ENV !== 'production') {
-    const adminToken = c.req.header('X-Admin-Token');
-    const testAccountId = c.req.header('X-Account-Id');
-    
-    if (adminToken && testAccountId) {
-      try {
-        const storedAdminToken = await getSecret('ADMIN_TOKEN', c.env, c.env.APP_ENV).catch(() => null);
-        
-        if (storedAdminToken && adminToken === storedAdminToken) {
-          // Verify account exists
-          const supabase = await createAdminClient(c.env);
-          const { data: account, error } = await supabase
-            .from('accounts')
-            .select('id')
-            .eq('id', testAccountId)
-            .is('deleted_at', null)
-            .single();
-          
-          if (!error && account) {
-            // Bypass JWT - use test account
-            c.set('auth', {
-              userId: 'test-user-bypass',
-              email: 'test@oslira.com',
-              accountIds: [testAccountId],
-              primaryAccountId: testAccountId,
-              isTestMode: true
-            } as AuthContext);
-            
-            await next();
-            return;
-          }
-        }
-      } catch (error) {
-        console.warn('Admin token bypass failed:', error);
-        // Fall through to normal JWT auth
-      }
-    }
-  }
-  
-  // ============================================================================
-  // NORMAL JWT AUTHENTICATION
-  // ============================================================================
-  const authHeader = c.req.header('Authorization');
-  
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return c.json({
-      success: false,
-      error: 'Missing or invalid Authorization header',
-      code: 'UNAUTHORIZED',
-      hint: c.env.APP_ENV !== 'production' 
-        ? 'For testing: use X-Admin-Token + X-Account-Id headers'
-        : undefined
-    }, 401);
-  }
-  
-  const token = authHeader.substring(7);
-  
   try {
-    // Verify JWT with Supabase
-    const supabase = await createUserClient(c.env);
-    const { data: { user }, error } = await supabase.auth.getUser(token);
+    // Extract token from Authorization header
+    const authHeader = c.req.header('Authorization');
     
-    if (error || !user) {
-      return c.json({
-        success: false,
-        error: 'Invalid or expired token',
-        code: 'INVALID_TOKEN'
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return c.json({ 
+        error: 'Missing or invalid Authorization header',
+        message: 'Format: Authorization: Bearer <token>' 
       }, 401);
     }
-    
-    // Get user's accounts
-    const { data: memberships } = await supabase
-      .from('account_members')
-      .select('account_id, role')
-      .eq('user_id', user.id);
-    
-    const accountIds = memberships?.map(m => m.account_id) || [];
-    
-    if (accountIds.length === 0) {
+
+    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+
+    // Verify JWT
+    const jwtService = new JWTService(c.env);
+    const payload = await jwtService.verify(token);
+
+    if (!payload) {
+      return c.json({ 
+        error: 'Invalid or expired token',
+        message: 'Please refresh your token or log in again' 
+      }, 401);
+    }
+
+    // Check onboarding completion
+    // Skip check for auth and onboarding endpoints
+    const path = c.req.path;
+    const isAuthEndpoint = path.includes('/api/auth/');
+    const isOnboardingEndpoint = path.includes('/api/onboarding/');
+
+    if (!isAuthEndpoint && !isOnboardingEndpoint && !payload.onboardingCompleted) {
       return c.json({
-        success: false,
-        error: 'User has no associated accounts',
-        code: 'NO_ACCOUNTS'
+        error: 'Onboarding not completed',
+        message: 'Please complete onboarding to access this resource',
+        redirect: '/onboarding'
       }, 403);
     }
-    
+
     // Attach auth context to request
-    c.set('auth', {
-      userId: user.id,
-      email: user.email || '',
-      accountIds,
-      primaryAccountId: accountIds[0], // First account is primary
-      isTestMode: false
-    } as AuthContext);
-    
+    const authContext: AuthContext = {
+      userId: payload.userId,
+      accountId: payload.accountId,
+      email: payload.email,
+      onboardingCompleted: payload.onboardingCompleted
+    };
+
+    c.set('auth', authContext);
+
     await next();
+
   } catch (error: any) {
-    console.error('Auth middleware error:', error);
-    return c.json({
-      success: false,
+    console.error('[AuthMiddleware] Error:', error);
+    return c.json({ 
       error: 'Authentication failed',
-      code: 'AUTH_ERROR'
-    }, 500);
+      message: error.message 
+    }, 401);
   }
 }
 
 /**
- * Optional auth - attaches user if token present, continues if not
- * Use for endpoints that work both authenticated and anonymous
+ * OPTIONAL AUTH MIDDLEWARE
+ * 
+ * Attempts to authenticate but doesn't fail if token is missing/invalid
+ * Useful for endpoints that work for both authenticated and anonymous users
+ * 
+ * Usage:
+ * app.get('/api/public-data', optionalAuthMiddleware, handler);
  */
 export async function optionalAuthMiddleware(c: Context<{ Bindings: Env }>, next: Next) {
-  const authHeader = c.req.header('Authorization');
-  
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    // No auth provided - continue without user context
-    await next();
-    return;
-  }
-  
-  const token = authHeader.substring(7);
-  
   try {
-    const supabase = await createUserClient(c.env);
-    const { data: { user }, error } = await supabase.auth.getUser(token);
+    const authHeader = c.req.header('Authorization');
     
-    if (!error && user) {
-      const { data: memberships } = await supabase
-        .from('account_members')
-        .select('account_id, role')
-        .eq('user_id', user.id);
-      
-      const accountIds = memberships?.map(m => m.account_id) || [];
-      
-      if (accountIds.length > 0) {
-        c.set('auth', {
-          userId: user.id,
-          email: user.email || '',
-          accountIds,
-          primaryAccountId: accountIds[0],
-          isTestMode: false
-        } as AuthContext);
-      }
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      // No auth provided - continue without auth context
+      await next();
+      return;
     }
+
+    const token = authHeader.substring(7);
+    const jwtService = new JWTService(c.env);
+    const payload = await jwtService.verify(token);
+
+    if (payload) {
+      // Valid token - attach auth context
+      const authContext: AuthContext = {
+        userId: payload.userId,
+        accountId: payload.accountId,
+        email: payload.email,
+        onboardingCompleted: payload.onboardingCompleted
+      };
+      c.set('auth', authContext);
+    }
+
+    await next();
+
   } catch (error) {
-    // Fail silently for optional auth
-    console.warn('Optional auth failed:', error);
+    // Ignore errors - proceed without auth
+    await next();
   }
-  
-  await next();
 }
 
 /**
- * Helper to get auth context from request
+ * GET AUTH CONTEXT
+ * 
+ * Helper to extract auth context from request
+ * Throws error if auth context is missing
+ * 
+ * Usage:
+ * const auth = getAuthContext(c);
+ * console.log(auth.userId, auth.accountId);
  */
-export function getAuthContext(c: Context): AuthContext {
-  const auth = c.get('auth');
-  if (!auth) {
-    throw new Error('Auth context not found - did you forget authMiddleware?');
-  }
-  return auth as AuthContext;
-}
-
-/**
- * Helper to check if user has access to account
- */
-export function hasAccountAccess(c: Context, accountId: string): boolean {
+export function getAuthContext(c: Context<{ Bindings: Env }>): AuthContext {
   const auth = c.get('auth') as AuthContext | undefined;
-  if (!auth) return false;
-  return auth.accountIds.includes(accountId);
+  
+  if (!auth) {
+    throw new Error('Auth context not found - ensure authMiddleware is applied');
+  }
+
+  return auth;
+}
+
+/**
+ * CHECK ADMIN
+ * 
+ * Verify if request has valid admin token
+ * Used for admin-only endpoints
+ * 
+ * Usage:
+ * if (!isAdmin(c)) return c.json({ error: 'Unauthorized' }, 403);
+ */
+export function isAdmin(c: Context<{ Bindings: Env }>): boolean {
+  const adminToken = c.req.header('X-Admin-Token');
+  return adminToken === c.env.ADMIN_TOKEN;
+}
+
+/**
+ * ADMIN MIDDLEWARE
+ * 
+ * Requires valid admin token in X-Admin-Token header
+ * 
+ * Usage:
+ * app.post('/api/admin/cleanup', adminMiddleware, handler);
+ */
+export async function adminMiddleware(c: Context<{ Bindings: Env }>, next: Next) {
+  if (!isAdmin(c)) {
+    return c.json({ error: 'Admin access required' }, 403);
+  }
+  await next();
 }
