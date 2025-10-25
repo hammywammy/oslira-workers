@@ -1,4 +1,21 @@
-// features/onboarding/onboarding.handler.ts
+// src/features/onboarding/onboarding.handler.ts
+
+/**
+ * ONBOARDING HANDLERS
+ * 
+ * Endpoints for business context generation during onboarding
+ * 
+ * Flow:
+ * 1. POST /generate-context → Queue async generation → Return run_id
+ * 2. GET /progress → Poll for status updates (0-100%)
+ * 3. GET /result → Get final generated context when complete
+ * 
+ * Architecture:
+ * - Uses Cloudflare Queues for async processing
+ * - Uses Workflows for long-running AI generation
+ * - Uses Durable Objects for progress tracking
+ * - No worker timeout limits (can run 30+ minutes if needed)
+ */
 
 import type { Context } from 'hono';
 import type { Env } from '@/shared/types/env.types';
@@ -7,11 +24,29 @@ import { GenerateContextRequestSchema, GetProgressParamsSchema } from './onboard
 import { getAuthContext } from '@/shared/utils/auth.util';
 import { validateBody } from '@/shared/utils/validation.util';
 import { successResponse, errorResponse } from '@/shared/utils/response.util';
-import { v4 as uuidv4 } from 'uuid';
+
+/**
+ * Generate UUID v4
+ * 
+ * Cloudflare Workers don't have 'uuid' package
+ * Use crypto.randomUUID() which is standard Web API
+ */
+function generateUUID(): string {
+  return crypto.randomUUID();
+}
 
 /**
  * POST /api/business/generate-context
  * Start business context generation (async via queue)
+ * 
+ * Flow:
+ * 1. Validate request body
+ * 2. Generate unique run_id
+ * 3. Initialize progress tracker (Durable Object)
+ * 4. Queue message for async processing
+ * 5. Return run_id immediately (202 Accepted)
+ * 
+ * Frontend then polls /progress endpoint to track status
  */
 export async function generateBusinessContext(c: Context<{ Bindings: Env }>) {
   try {
@@ -21,12 +56,12 @@ export async function generateBusinessContext(c: Context<{ Bindings: Env }>) {
     // Validate request body
     const input = validateBody(GenerateContextRequestSchema, body);
 
-    // Generate run ID
-    const runId = uuidv4();
+    // Generate run ID using crypto.randomUUID()
+    const runId = generateUUID();
 
     console.log('[GenerateBusinessContext] Starting:', {
       run_id: runId,
-      account_id: auth.primaryAccountId,
+      account_id: auth.accountId,
       business_name: input.user_inputs.business_name
     });
 
@@ -38,14 +73,14 @@ export async function generateBusinessContext(c: Context<{ Bindings: Env }>) {
       method: 'POST',
       body: JSON.stringify({
         run_id: runId,
-        account_id: auth.primaryAccountId
+        account_id: auth.accountId
       })
     });
 
     // Queue message for async processing
     const message: BusinessContextQueueMessage = {
       run_id: runId,
-      account_id: auth.primaryAccountId,
+      account_id: auth.accountId,
       user_inputs: input.user_inputs,
       requested_at: new Date().toISOString()
     };
@@ -79,13 +114,21 @@ export async function generateBusinessContext(c: Context<{ Bindings: Env }>) {
 /**
  * GET /api/business/generate-context/:runId/progress
  * Get current generation progress
+ * 
+ * Returns:
+ * - status: 'pending' | 'processing' | 'complete' | 'failed'
+ * - progress: 0-100
+ * - current_step: Human-readable description
+ * - result: Only present when status = 'complete'
+ * 
+ * Frontend should poll this endpoint every 1-2 seconds
  */
 export async function getGenerationProgress(c: Context<{ Bindings: Env }>) {
   try {
     const auth = getAuthContext(c);
     const runId = c.req.param('runId');
 
-    // Validate runId format
+    // Validate runId format (UUID)
     validateBody(GetProgressParamsSchema, { runId });
 
     // Get progress from Durable Object
@@ -99,8 +142,8 @@ export async function getGenerationProgress(c: Context<{ Bindings: Env }>) {
       return errorResponse(c, 'Generation not found', 'NOT_FOUND', 404);
     }
 
-    // Verify ownership (basic security check)
-    if (progress.account_id !== auth.primaryAccountId) {
+    // Verify ownership (security check)
+    if (progress.account_id !== auth.accountId) {
       return errorResponse(c, 'Unauthorized', 'UNAUTHORIZED', 403);
     }
 
@@ -120,6 +163,15 @@ export async function getGenerationProgress(c: Context<{ Bindings: Env }>) {
 /**
  * GET /api/business/generate-context/:runId/result
  * Get final generation result (when complete)
+ * 
+ * Returns full business context data:
+ * - business_one_liner
+ * - business_summary_generated
+ * - ideal_customer_profile
+ * - operational_metadata
+ * - ai_metadata (cost, tokens, time)
+ * 
+ * Only available when status = 'complete'
  */
 export async function getGenerationResult(c: Context<{ Bindings: Env }>) {
   try {
@@ -141,7 +193,7 @@ export async function getGenerationResult(c: Context<{ Bindings: Env }>) {
     }
 
     // Verify ownership
-    if (progress.account_id !== auth.primaryAccountId) {
+    if (progress.account_id !== auth.accountId) {
       return errorResponse(c, 'Unauthorized', 'UNAUTHORIZED', 403);
     }
 
@@ -151,19 +203,20 @@ export async function getGenerationResult(c: Context<{ Bindings: Env }>) {
         c,
         `Generation not complete. Current status: ${progress.status}`,
         'NOT_COMPLETE',
-        409
+        400
       );
     }
 
-    return successResponse(c, {
-      run_id: runId,
-      status: 'complete',
-      completed_at: progress.completed_at,
-      result: progress.result
-    });
+    // Return result
+    return successResponse(c, progress.result);
 
   } catch (error: any) {
     console.error('[GetGenerationResult] Error:', error);
+
+    if (error.message.includes('not found')) {
+      return errorResponse(c, 'Generation not found', 'NOT_FOUND', 404);
+    }
+
     return errorResponse(c, 'Failed to get result', 'RESULT_ERROR', 500);
   }
 }
