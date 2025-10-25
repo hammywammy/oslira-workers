@@ -49,9 +49,16 @@ name = "BUSINESS_CONTEXT_PROGRESS"
 class_name = "BusinessContextProgressDO"
 script_name = "oslira-workers"
 
+# ===========================
+# DURABLE OBJECTS MIGRATIONS
+# ===========================
 [[migrations]]
 tag = "v1"
-new_classes = ["AnalysisProgressDO", "BusinessContextProgressDO"]
+new_classes = ["AnalysisProgressDO"]
+
+[[migrations]]
+tag = "v2"
+new_classes = ["BusinessContextProgressDO"]
 
 # ===========================
 # QUEUES
