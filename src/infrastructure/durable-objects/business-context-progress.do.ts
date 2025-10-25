@@ -2,6 +2,7 @@
 
 import { DurableObject } from 'cloudflare:workers';
 import type { BusinessContextProgressState } from '@/shared/types/business-context.types';
+import type { Env } from '@/shared/types/env.types';
 
 /**
  * BUSINESS CONTEXT PROGRESS DURABLE OBJECT
