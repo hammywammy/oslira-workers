@@ -336,7 +336,6 @@ export async function handleLogout(c: Context<{ Bindings: Env }>) {
  */
 export async function handleGetSession(c: Context<{ Bindings: Env }>) {
   try {
-    // Auth context attached by middleware
     const auth = getAuthContext(c);
 
     if (!auth) {
@@ -353,19 +352,28 @@ export async function handleGetSession(c: Context<{ Bindings: Env }>) {
       .single();
 
     if (userError || !user) {
+      console.error('[GetSession] User not found:', auth.userId, userError);
       return c.json({ error: 'User not found' }, 404);
     }
 
-    // Fetch account data
+    // Fetch account data (WITHOUT credit_balance)
     const { data: account, error: accountError } = await supabase
       .from('accounts')
-      .select('id, name, credit_balance')
+      .select('id, name')
       .eq('id', auth.accountId)
       .single();
 
     if (accountError || !account) {
+      console.error('[GetSession] Account not found:', auth.accountId, accountError);
       return c.json({ error: 'Account not found' }, 404);
     }
+
+    // Fetch credit balance separately
+    const { data: creditBalance } = await supabase
+      .from('credit_balances')
+      .select('current_balance')
+      .eq('account_id', auth.accountId)
+      .single();
 
     const response: SessionResponse = {
       user: {
@@ -378,7 +386,7 @@ export async function handleGetSession(c: Context<{ Bindings: Env }>) {
       account: {
         id: account.id,
         name: account.name,
-        credit_balance: account.credit_balance
+        credit_balance: creditBalance?.current_balance || 0
       }
     };
 
