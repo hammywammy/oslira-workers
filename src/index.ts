@@ -24,6 +24,7 @@ import { executeCronJob } from './infrastructure/cron/cron-jobs.handler';
 import { getSentryService } from './infrastructure/monitoring/sentry.service';
 import { errorHandler } from './shared/middleware/error.middleware';
 
+
 const app = new Hono<{ Bindings: Env }>();
 
 // ===============================================================================
