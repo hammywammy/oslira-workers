@@ -14,6 +14,11 @@
  * - Refresh Token: Opaque UUID, 30 days expiry, stored hashed in DB
  * - Token Rotation: Each refresh creates NEW token, invalidates old one
  * 
+ * USER CREATION:
+ * - Uses deterministic UUID generation from Google ID
+ * - Calls create_account_atomic() Postgres function
+ * - Atomic user + account creation (no race conditions)
+ * 
  * INITIALIZATION FLOW (Frontend):
  * 1. App loads → Frontend checks localStorage for refresh token
  * 2. If exists → Frontend calls /api/auth/refresh
@@ -25,17 +30,6 @@
  * - /session: Requires valid Bearer token in header
  * - On init, access token might be expired → /refresh is safer
  * - Industry standard: Auth0, Clerk, WorkOS all use this pattern
- * 
- * SECURITY:
- * - Refresh tokens hashed in DB (never stored plaintext)
- * - Token rotation prevents reuse attacks
- * - Tokens can be revoked via database
- * - Short-lived access tokens limit exposure window
- * 
- * REFERENCES:
- * - https://auth0.com/docs/secure/tokens/refresh-tokens
- * - https://workos.com/blog/why-your-app-needs-refresh-tokens
- * - https://www.rfc-editor.org/rfc/rfc6749#section-1.5
  */
 
 import type { Context } from 'hono';
@@ -53,7 +47,45 @@ import { SupabaseClientFactory } from '@/infrastructure/database/supabase.client
 import { JWTService } from '@/infrastructure/auth/jwt.service';
 import { TokenService } from '@/infrastructure/auth/token.service';
 import { GoogleOAuthService } from '@/infrastructure/auth/google-oauth.service';
-import { UserAccountService } from '@/infrastructure/auth/user-account.service';
+import { getAuthContext } from '@/shared/middleware/auth.middleware';
+
+/**
+ * Convert Google User ID (string number) to deterministic UUID v5
+ * 
+ * Google IDs: "112093094941937129431" (not UUID format)
+ * Solution: Hash to UUID using namespace UUID
+ * 
+ * This ensures:
+ * - Same Google ID always produces same UUID
+ * - UUID is valid for PostgreSQL uuid type
+ * - Consistent across sessions
+ */
+async function googleIdToUUID(googleId: string): Promise<string> {
+  // Use a fixed namespace UUID for Google IDs
+  const GOOGLE_NAMESPACE = '6ba7b810-9dad-11d1-80b4-00c04fd430c8';
+  
+  // Create deterministic UUID from Google ID
+  const encoder = new TextEncoder();
+  const data = encoder.encode(GOOGLE_NAMESPACE + googleId);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  
+  // Take first 16 bytes and format as UUID v5
+  const uuid = [
+    hashArray.slice(0, 4).map(b => b.toString(16).padStart(2, '0')).join(''),
+    hashArray.slice(4, 6).map(b => b.toString(16).padStart(2, '0')).join(''),
+    hashArray.slice(6, 8).map(b => b.toString(16).padStart(2, '0')).join(''),
+    hashArray.slice(8, 10).map(b => b.toString(16).padStart(2, '0')).join(''),
+    hashArray.slice(10, 16).map(b => b.toString(16).padStart(2, '0')).join('')
+  ].join('-');
+  
+  // Set version to 5 (SHA-1 name-based) and variant bits
+  const chars = uuid.split('');
+  chars[14] = '5'; // Version 5
+  chars[19] = '8'; // Variant 10xx
+  
+  return chars.join('');
+}
 
 /**
  * POST /api/auth/google/callback
@@ -62,14 +94,11 @@ import { UserAccountService } from '@/infrastructure/auth/user-account.service';
  * Flow:
  * 1. Exchange auth code with Google for access token
  * 2. Fetch user profile from Google
- * 3. Create or update user/account in database
- * 4. Issue JWT access token
- * 5. Create refresh token (stored hashed in DB)
- * 6. Return tokens + user data to frontend
- * 
- * Frontend then:
- * - Stores tokens in localStorage
- * - Redirects to /dashboard or /onboarding
+ * 3. Convert Google ID to deterministic UUID
+ * 4. Create or update user/account in database (atomic function)
+ * 5. Issue JWT access token
+ * 6. Create refresh token (stored hashed in DB)
+ * 7. Return tokens + user data to frontend
  */
 export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
   try {
@@ -86,28 +115,54 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
 
     // Step 1: Exchange code with Google
     const googleOAuth = new GoogleOAuthService(c.env);
-    const tokens = await googleOAuth.exchangeCode(body.code);
-    console.log('[GoogleCallback] Google tokens received');
-
-    const googleUser = await googleOAuth.getUserInfo(tokens.access_token);
+    const googleUser = await googleOAuth.completeOAuthFlow(body.code);
+    
     console.log('[GoogleCallback] Google user info received:', {
-      id: googleUser.id,
+      googleId: googleUser.id,
       email: googleUser.email,
-      verified: googleUser.verified_email
+      name: googleUser.name
     });
 
-    // Step 2: Create or update user/account
-    const supabase = await SupabaseClientFactory.createAdminClient(c.env);
-    const userAccountService = new UserAccountService(supabase);
+    // Step 2: Convert Google ID to UUID
+    const userId = await googleIdToUUID(googleUser.id);
     
-    const accountData = await userAccountService.findOrCreateFromGoogle(googleUser);
-    console.log('[GoogleCallback] User/account created:', {
+    console.log('[GoogleCallback] Converted Google ID to UUID', {
+      googleId: googleUser.id,
+      uuid: userId
+    });
+
+    // Step 3: Create/update user atomically
+    const supabase = await SupabaseClientFactory.createAdminClient(c.env);
+    
+    console.log('[GoogleCallback] Calling create_account_atomic');
+    
+    const { data: accountData, error: accountError } = await supabase
+      .rpc('create_account_atomic', {
+        p_user_id: userId,
+        p_email: googleUser.email,
+        p_full_name: googleUser.name,
+        p_avatar_url: googleUser.picture
+      });
+
+    if (accountError || !accountData) {
+      console.error('[GoogleCallback] Account creation failed:', {
+        error: accountError,
+        code: accountError?.code,
+        message: accountError?.message
+      });
+      return c.json({ 
+        error: 'Failed to create account',
+        details: accountError?.message 
+      }, 500);
+    }
+
+    console.log('[GoogleCallback] Account created successfully', {
       userId: accountData.user_id,
       accountId: accountData.account_id,
       isNewUser: accountData.is_new_user
     });
 
-    // Step 3: Issue JWT access token
+    // Step 4: Issue JWT access token
     const jwtService = new JWTService(c.env);
     const accessToken = await jwtService.sign({
       userId: accountData.user_id,
@@ -115,17 +170,19 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
       email: accountData.email,
       onboardingCompleted: accountData.onboarding_completed
     });
+
     console.log('[GoogleCallback] JWT access token issued');
 
-    // Step 4: Create refresh token
+    // Step 5: Create refresh token
     const tokenService = new TokenService(supabase);
     const refreshToken = await tokenService.create(
       accountData.user_id,
       accountData.account_id
     );
+
     console.log('[GoogleCallback] Refresh token created');
 
-    // Step 5: Return response
+    // Step 6: Return response
     const response: AuthResponse = {
       accessToken,
       refreshToken,
@@ -178,16 +235,6 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
  * 3. Invalidate old refresh token in DB
  * 4. Issue new JWT access token
  * 5. Return new tokens to frontend
- * 
- * Why token rotation?
- * - If token is stolen, attacker gets at most one use
- * - Legitimate user's next refresh invalidates stolen token
- * - Enables detection of token theft (multiple refresh attempts)
- * 
- * Frontend flow after receiving response:
- * - Stores new tokens in localStorage
- * - Can now make authenticated API calls
- * - May fetch user data via /session endpoint
  */
 export async function handleRefresh(c: Context<{ Bindings: Env }>) {
   try {
@@ -255,15 +302,6 @@ export async function handleRefresh(c: Context<{ Bindings: Env }>) {
 /**
  * POST /api/auth/logout
  * Revoke refresh token
- * 
- * Flow:
- * 1. Mark refresh token as revoked in database
- * 2. Token can no longer be used for /refresh calls
- * 3. Access token remains valid until expiry (15min max)
- * 
- * Note: Access tokens are stateless JWTs - cannot be revoked
- * They expire naturally after 15 minutes
- * For instant revocation, would need token blacklist (not implemented)
  */
 export async function handleLogout(c: Context<{ Bindings: Env }>) {
   try {
@@ -295,35 +333,11 @@ export async function handleLogout(c: Context<{ Bindings: Env }>) {
  * Get current user session information
  * 
  * REQUIRES: JWT authentication (via middleware)
- * 
- * USE CASES:
- * - Fetch latest user data after profile update
- * - Verify current onboarding status
- * - Get updated credit balance
- * 
- * NOT USED FOR:
- * - Initial app load (use /refresh instead)
- * - Session validation (JWT middleware handles this)
- * 
- * Flow:
- * 1. Middleware validates JWT from Authorization header
- * 2. Extract userId/accountId from JWT claims
- * 3. Fetch user + account data from database
- * 4. Return current session info
- * 
- * Frontend should call this:
- * - After completing onboarding
- * - After updating profile
- * - When explicitly needing fresh data
- * 
- * Frontend should NOT call this:
- * - On app initialization (use /refresh)
- * - Before every API call (unnecessary)
  */
 export async function handleGetSession(c: Context<{ Bindings: Env }>) {
   try {
     // Auth context attached by middleware
-    const auth = c.get('auth');
+    const auth = getAuthContext(c);
 
     if (!auth) {
       return c.json({ error: 'Unauthorized' }, 401);
