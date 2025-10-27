@@ -46,17 +46,18 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) 
 
     // Check onboarding completion
     // Skip check for auth and onboarding endpoints
-    const path = c.req.path;
-    const isAuthEndpoint = path.includes('/api/auth/');
-    const isOnboardingEndpoint = path.includes('/api/onboarding/');
+const path = c.req.path;
+const isAuthEndpoint = path.includes('/api/auth/');
+const isOnboardingEndpoint = path.includes('/api/onboarding/');
+const isBusinessEndpoint = path.includes('/api/business/'); // ✅ ADDED: Allow business endpoints during onboarding
 
-    if (!isAuthEndpoint && !isOnboardingEndpoint && !payload.onboardingCompleted) {
-      return c.json({
-        error: 'Onboarding not completed',
-        message: 'Please complete onboarding to access this resource',
-        redirect: '/onboarding'
-      }, 403);
-    }
+if (!isAuthEndpoint && !isOnboardingEndpoint && !isBusinessEndpoint && !payload.onboardingCompleted) {
+  return c.json({
+    error: 'Onboarding not completed',
+    message: 'Please complete onboarding to access this resource',
+    redirect: '/onboarding'
+  }, 403);
+}
 
     // Attach auth context to request
     const authContext: AuthContext = {
