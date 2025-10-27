@@ -17,8 +17,14 @@ import { BusinessContextPromptBuilder } from './business-context-prompts.service
  * Features:
  * - All calls via AI Gateway (GPT-5)
  * - Parallel execution (Promise.all)
- * - Retry logic with exponential backoff
+ * - Retry logic with exponential backoff (3 attempts)
  * - Cost tracking
+ * 
+ * Token Limits (4x increase from original):
+ * - One-liner: 800 tokens (was 200)
+ * - Summary: 800 tokens (was 200)
+ * - ICP JSON: 2000 tokens (was 500)
+ * - Operational JSON: 2000 tokens (was 500)
  */
 
 export class OnboardingService {
@@ -39,6 +45,11 @@ export class OnboardingService {
     const startTime = Date.now();
 
     console.log('[OnboardingService] Starting 4 parallel AI calls...');
+    console.log('[OnboardingService] User inputs:', {
+      business_name: userInputs.business_name,
+      industry: userInputs.industry,
+      signature_name: userInputs.signature_name
+    });
 
     try {
       // Execute all 4 calls in parallel with retry logic
@@ -62,17 +73,29 @@ export class OnboardingService {
         icpJson.usage.total_cost +
         opMetadataJson.usage.total_cost;
 
-      console.log('[OnboardingService] All AI calls complete:', {
+      console.log('[OnboardingService] All 4 calls completed successfully:', {
         total_time_ms: totalTime,
         total_tokens: totalTokens,
-        total_cost: totalCost.toFixed(4)
+        total_cost: totalCost,
+        one_liner_length: oneLiner.content.length,
+        summary_length: summaryGenerated.content.length
       });
 
-      return {
-        business_one_liner: oneLiner.content as string,
-        business_summary_generated: summaryGenerated.content as string,
-        ideal_customer_profile: icpJson.content,
-        operational_metadata: opMetadataJson.content,
+      // Parse ICP and Operational JSON
+      const icpData = typeof icpJson.content === 'string' 
+        ? JSON.parse(icpJson.content) 
+        : icpJson.content;
+
+      const opData = typeof opMetadataJson.content === 'string'
+        ? JSON.parse(opMetadataJson.content)
+        : opMetadataJson.content;
+
+      // Construct final result
+      const result: BusinessContextResult = {
+        business_one_liner: oneLiner.content,
+        business_summary_generated: summaryGenerated.content,
+        ideal_customer_profile: icpData,
+        operational_metadata: opData,
         ai_metadata: {
           model_used: 'gpt-5',
           total_tokens: totalTokens,
@@ -81,55 +104,80 @@ export class OnboardingService {
         }
       };
 
+      console.log('[OnboardingService] Business context generated successfully');
+      return result;
+
     } catch (error: any) {
-      console.error('[OnboardingService] AI generation failed:', error);
+      console.error('[OnboardingService] Fatal error in generateBusinessContext:', {
+        error_name: error.name,
+        error_message: error.message,
+        error_stack: error.stack
+      });
       throw new Error(`Business context generation failed: ${error.message}`);
     }
   }
 
   // ===========================================================================
-  // CALL 1: Business One-Liner (with retry)
+  // CALL 1: One-Liner (with retry)
   // ===========================================================================
 
   private async generateOneLinerWithRetry(data: OnboardingFormData, attempt = 1): Promise<any> {
+    console.log(`[OnboardingService] One-liner generation attempt ${attempt}/3`);
+    
     try {
       return await this.aiClient.call({
         model: 'gpt-5',
-        system_prompt: 'You are a copywriter creating concise business taglines. Maximum 140 characters.',
+        system_prompt: 'You write concise, punchy business taglines. Maximum 140 characters. No fluff.',
         user_prompt: this.promptBuilder.buildOneLinerPrompt(data),
-        max_tokens: 50,
+        max_tokens: 800, // ✅ INCREASED: 200 → 800 (4x)
         temperature: 0.7
       });
     } catch (error: any) {
+      console.error(`[OnboardingService] One-liner attempt ${attempt} failed:`, {
+        error_name: error.name,
+        error_message: error.message
+      });
+
       if (attempt < 3) {
-        console.warn(`[OnboardingService] One-liner attempt ${attempt} failed, retrying...`);
-        await this.sleep(Math.pow(2, attempt) * 1000);
+        const backoffMs = Math.pow(2, attempt) * 1000;
+        console.warn(`[OnboardingService] Retrying one-liner in ${backoffMs}ms...`);
+        await this.sleep(backoffMs);
         return this.generateOneLinerWithRetry(data, attempt + 1);
       }
-      throw error;
+      
+      throw new Error(`One-liner generation failed after 3 attempts: ${error.message}`);
     }
   }
 
   // ===========================================================================
-  // CALL 2: Business Summary Generated (with retry)
+  // CALL 2: Summary (with retry)
   // ===========================================================================
 
   private async generateSummaryWithRetry(data: OnboardingFormData, attempt = 1): Promise<any> {
+    console.log(`[OnboardingService] Summary generation attempt ${attempt}/3`);
+    
     try {
       return await this.aiClient.call({
         model: 'gpt-5',
-        system_prompt: 'You are a business writer creating polished 4-sentence descriptions.',
+        system_prompt: 'You write clear, professional business summaries. Exactly 4 sentences. No marketing fluff.',
         user_prompt: this.promptBuilder.buildSummaryPrompt(data),
-        max_tokens: 200,
+        max_tokens: 800, // ✅ INCREASED: 200 → 800 (4x)
         temperature: 0.5
       });
     } catch (error: any) {
+      console.error(`[OnboardingService] Summary attempt ${attempt} failed:`, {
+        error_name: error.name,
+        error_message: error.message
+      });
+
       if (attempt < 3) {
-        console.warn(`[OnboardingService] Summary attempt ${attempt} failed, retrying...`);
-        await this.sleep(Math.pow(2, attempt) * 1000);
+        const backoffMs = Math.pow(2, attempt) * 1000;
+        console.warn(`[OnboardingService] Retrying summary in ${backoffMs}ms...`);
+        await this.sleep(backoffMs);
         return this.generateSummaryWithRetry(data, attempt + 1);
       }
-      throw error;
+      
+      throw new Error(`Summary generation failed after 3 attempts: ${error.message}`);
     }
   }
 
@@ -138,22 +186,31 @@ export class OnboardingService {
   // ===========================================================================
 
   private async generateICPJsonWithRetry(data: OnboardingFormData, attempt = 1): Promise<any> {
+    console.log(`[OnboardingService] ICP JSON generation attempt ${attempt}/3`);
+    
     try {
       return await this.aiClient.callStructured({
         model: 'gpt-5',
         system_prompt: 'You format user data into JSON. Never add data that wasn\'t provided. Never include business_summary in the output.',
         user_prompt: this.promptBuilder.buildICPJsonPrompt(data),
-        max_tokens: 500,
+        max_tokens: 2000, // ✅ INCREASED: 500 → 2000 (4x)
         reasoning_effort: 'minimal',
         tool_schema: this.promptBuilder.getICPJsonSchema()
       });
     } catch (error: any) {
+      console.error(`[OnboardingService] ICP JSON attempt ${attempt} failed:`, {
+        error_name: error.name,
+        error_message: error.message
+      });
+
       if (attempt < 3) {
-        console.warn(`[OnboardingService] ICP JSON attempt ${attempt} failed, retrying...`);
-        await this.sleep(Math.pow(2, attempt) * 1000);
+        const backoffMs = Math.pow(2, attempt) * 1000;
+        console.warn(`[OnboardingService] Retrying ICP JSON in ${backoffMs}ms...`);
+        await this.sleep(backoffMs);
         return this.generateICPJsonWithRetry(data, attempt + 1);
       }
-      throw error;
+      
+      throw new Error(`ICP JSON generation failed after 3 attempts: ${error.message}`);
     }
   }
 
@@ -162,22 +219,31 @@ export class OnboardingService {
   // ===========================================================================
 
   private async generateOperationalJsonWithRetry(data: OnboardingFormData, attempt = 1): Promise<any> {
+    console.log(`[OnboardingService] Operational JSON generation attempt ${attempt}/3`);
+    
     try {
       return await this.aiClient.callStructured({
         model: 'gpt-5',
         system_prompt: 'You format user data into JSON. Never add data that wasn\'t provided. Always include business_summary in the output.',
         user_prompt: this.promptBuilder.buildOperationalJsonPrompt(data),
-        max_tokens: 500,
+        max_tokens: 2000, // ✅ INCREASED: 500 → 2000 (4x)
         reasoning_effort: 'minimal',
         tool_schema: this.promptBuilder.getOperationalJsonSchema()
       });
     } catch (error: any) {
+      console.error(`[OnboardingService] Operational JSON attempt ${attempt} failed:`, {
+        error_name: error.name,
+        error_message: error.message
+      });
+
       if (attempt < 3) {
-        console.warn(`[OnboardingService] Operational JSON attempt ${attempt} failed, retrying...`);
-        await this.sleep(Math.pow(2, attempt) * 1000);
+        const backoffMs = Math.pow(2, attempt) * 1000;
+        console.warn(`[OnboardingService] Retrying operational JSON in ${backoffMs}ms...`);
+        await this.sleep(backoffMs);
         return this.generateOperationalJsonWithRetry(data, attempt + 1);
       }
-      throw error;
+      
+      throw new Error(`Operational JSON generation failed after 3 attempts: ${error.message}`);
     }
   }
 
