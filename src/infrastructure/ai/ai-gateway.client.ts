@@ -256,9 +256,8 @@ export class AIGatewayClient {
       body.reasoning_effort = request.reasoning_effort; // ✅ FIXED: Top-level parameter
     }
 
-    if (request.temperature !== undefined) {
-      body.temperature = request.temperature;
-    }
+    // NOTE: GPT-5 reasoning models only support temperature: 1 (default)
+    // Do not set temperature parameter - it will error on non-default values
 
     // Add JSON schema if supported and provided
     if (request.json_schema && pricing.supports_json_schema) {
