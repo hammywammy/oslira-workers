@@ -129,8 +129,8 @@ export class OnboardingService {
         model: 'gpt-5',
         system_prompt: 'You write concise, punchy business taglines. Maximum 140 characters. No fluff.',
         user_prompt: this.promptBuilder.buildOneLinerPrompt(data),
-        max_tokens: 800, // ✅ INCREASED: 200 → 800 (4x)
-        temperature: 0.7
+        max_tokens: 800 // ✅ INCREASED: 200 → 800 (4x)
+        // temperature removed - GPT-5 only supports default value of 1
       });
     } catch (error: any) {
       console.error(`[OnboardingService] One-liner attempt ${attempt} failed:`, {
@@ -161,8 +161,8 @@ export class OnboardingService {
         model: 'gpt-5',
         system_prompt: 'You write clear, professional business summaries. Exactly 4 sentences. No marketing fluff.',
         user_prompt: this.promptBuilder.buildSummaryPrompt(data),
-        max_tokens: 800, // ✅ INCREASED: 200 → 800 (4x)
-        temperature: 0.5
+        max_tokens: 800 // ✅ INCREASED: 200 → 800 (4x)
+        // temperature removed - GPT-5 only supports default value of 1
       });
     } catch (error: any) {
       console.error(`[OnboardingService] Summary attempt ${attempt} failed:`, {
