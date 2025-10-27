@@ -1,4 +1,5 @@
 // infrastructure/database/repositories/business.repository.ts
+// FIXED: Added idempotent createBusinessProfile method for workflow
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { BaseRepository } from './base.repository';
@@ -7,23 +8,38 @@ export interface BusinessProfile {
   id: string;
   account_id: string;
   business_name: string;
-  business_slug: string;
+  website: string | null;
   business_one_liner: string | null;
-  business_niche: string | null;
-  target_audience: string;
-  industry: string | null;
-  icp_min_followers: number | null;
-  icp_max_followers: number | null;
-  icp_min_engagement_rate: number | null;
-  icp_content_themes: string[] | null;
-  icp_geographic_focus: string | null;
-  icp_industry_niche: string | null;
-  selling_points: string[] | null;
-  brand_voice: string | null;
-  outreach_goals: string | null;
+  ideal_customer_profile: any;
+  context_version: string;
+  context_generated_at: string | null;
+  context_manually_edited: boolean;
+  context_updated_at: string | null;
+  deleted_at: string | null;
   created_at: string;
   updated_at: string;
-  deleted_at: string | null;
+  signature_name: string | null;
+  operational_metadata: any;
+  business_summary_generated: string | null;
+}
+
+// NEW: Interface for workflow-specific creation
+export interface CreateBusinessProfileData {
+  account_id: string;
+  business_name: string;
+  signature_name: string;
+  business_one_liner: string;
+  business_summary: string; // User's raw input (not stored in table directly)
+  business_summary_generated: string;
+  website?: string | null;
+  industry: string;
+  company_size: string;
+  target_audience: string;
+  icp_min_followers: number;
+  icp_max_followers: number;
+  brand_voice: string;
+  operational_metadata: any;
+  ai_generation_metadata: any;
 }
 
 export class BusinessRepository extends BaseRepository<BusinessProfile> {
@@ -45,42 +61,139 @@ export class BusinessRepository extends BaseRepository<BusinessProfile> {
   }
 
   /**
-   * Get business by slug
+   * Get business by account_id and signature_name (for idempotency check)
+   * This is our "unique key" for workflow retries
    */
-  async getBySlug(accountId: string, slug: string): Promise<BusinessProfile | null> {
+  async getByAccountAndSignature(
+    accountId: string,
+    signatureName: string
+  ): Promise<BusinessProfile | null> {
     const { data, error } = await this.supabase
       .from('business_profiles')
       .select('*')
       .eq('account_id', accountId)
-      .eq('business_slug', slug)
+      .eq('signature_name', signatureName)
       .is('deleted_at', null)
-      .single();
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     if (error) {
-      if (error.code === 'PGRST116') return null;
+      console.error('[BusinessRepository] getByAccountAndSignature error:', error);
       throw error;
     }
 
-    return data as BusinessProfile;
+    return data as BusinessProfile | null;
   }
 
   /**
-   * Create business profile with generated slug
+   * IDEMPOTENT: Create business profile (for workflow use)
+   * 
+   * CRITICAL: This method is idempotent and safe for workflow retries.
+   * - First checks if profile already exists (by account_id + signature_name)
+   * - Returns existing profile if found (idempotency)
+   * - Only inserts if truly new
+   * 
+   * This follows Cloudflare Workflows best practices:
+   * "Check if operation already completed before executing non-idempotent actions"
+   */
+  async createBusinessProfile(
+    data: CreateBusinessProfileData
+  ): Promise<{ business_profile_id: string; was_created: boolean }> {
+    console.log('[BusinessRepository] createBusinessProfile called', {
+      account_id: data.account_id,
+      business_name: data.business_name,
+      signature_name: data.signature_name
+    });
+
+    // =========================================================================
+    // STEP 1: IDEMPOTENCY CHECK
+    // Check if this profile was already created (retry scenario)
+    // =========================================================================
+    
+    const existing = await this.getByAccountAndSignature(
+      data.account_id,
+      data.signature_name
+    );
+
+    if (existing) {
+      console.log('[BusinessRepository] IDEMPOTENCY: Profile already exists, returning existing', {
+        existing_id: existing.id,
+        created_at: existing.created_at
+      });
+
+      return {
+        business_profile_id: existing.id,
+        was_created: false
+      };
+    }
+
+    // =========================================================================
+    // STEP 2: INSERT NEW PROFILE
+    // Only reached if profile doesn't exist
+    // =========================================================================
+
+    console.log('[BusinessRepository] Creating new business profile...');
+
+    const { data: profile, error } = await this.supabase
+      .from('business_profiles')
+      .insert({
+        account_id: data.account_id,
+        business_name: data.business_name,
+        signature_name: data.signature_name,
+        website: data.website || null,
+        business_one_liner: data.business_one_liner,
+        ideal_customer_profile: {
+          business_description: data.business_summary, // Store raw summary
+          target_audience: data.target_audience,
+          industry: data.industry,
+          icp_min_followers: data.icp_min_followers,
+          icp_max_followers: data.icp_max_followers,
+          brand_voice: data.brand_voice
+        },
+        operational_metadata: {
+          ...data.operational_metadata,
+          company_size: data.company_size,
+          ai_generation_metadata: data.ai_generation_metadata
+        },
+        business_summary_generated: data.business_summary_generated,
+        context_version: 'v1.0',
+        context_generated_at: new Date().toISOString(),
+        context_manually_edited: false,
+        context_updated_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('[BusinessRepository] Insert failed:', {
+        error_code: error.code,
+        error_message: error.message,
+        error_details: error.details
+      });
+      throw error;
+    }
+
+    console.log('[BusinessRepository] Profile created successfully', {
+      profile_id: profile.id
+    });
+
+    return {
+      business_profile_id: profile.id,
+      was_created: true
+    };
+  }
+
+  /**
+   * LEGACY: Create business profile with generated slug (not used by workflow)
    */
   async createBusiness(
     accountId: string,
-    data: Omit<BusinessProfile, 'id' | 'account_id' | 'business_slug' | 'created_at' | 'updated_at' | 'deleted_at'>
+    data: Omit<BusinessProfile, 'id' | 'account_id' | 'created_at' | 'updated_at' | 'deleted_at'>
   ): Promise<BusinessProfile> {
-    // Generate slug using Supabase RPC
-    const { data: slug, error: slugError } = await this.supabase
-      .rpc('generate_slug', { input_text: data.business_name });
-
-    if (slugError) throw slugError;
-
     return this.create({
       ...data,
-      account_id: accountId,
-      business_slug: slug
+      account_id: accountId
     } as any);
   }
 }
