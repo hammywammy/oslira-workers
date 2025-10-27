@@ -84,15 +84,15 @@ dead_letter_queue = "stripe-webhooks-dlq"
 
 [[queues.consumers]]
 queue = "analysis-jobs"
-max_batch_size = 5
-max_batch_timeout = 60
+max_batch_size = 1
+max_batch_timeout = 5
 max_retries = 3
 dead_letter_queue = "analysis-jobs-dlq"
 
 [[queues.consumers]]
 queue = "business-context-jobs"
-max_batch_size = 3
-max_batch_timeout = 60
+max_batch_size = 1        # ✅ Process immediately (no batching needed for onboarding)
+max_batch_timeout = 5     # ✅ 5 seconds max wait (safety net)
 max_retries = 3
 dead_letter_queue = "business-context-jobs-dlq"
 
