@@ -27,7 +27,7 @@ export function registerOnboardingRoutes(app: Hono<{ Bindings: Env }>) {
 
   // Rate limiting (5 generations per hour per user)
   app.use('/api/business/generate-context', rateLimitMiddleware({
-    requests: 5,
+    requests: 50,
     window: 3600
   }));
 
