@@ -3,7 +3,13 @@
 /**
  * BUSINESS CONTEXT GENERATION TYPES
  * 
- * Phase 3: Onboarding business context AI generation
+ * Phase 3: Onboarding business context AI generation (4-step flow)
+ * 
+ * This system collects 7 fields from users and generates 2 AI-enhanced strings:
+ * - business_one_liner (140 chars)
+ * - business_summary_generated (4 sentences)
+ * 
+ * All other data is stored as-is in manually constructed JSONB columns.
  */
 
 // ===============================================================================
@@ -18,108 +24,101 @@ export interface BusinessContextWorkflowParams {
 }
 
 // ===============================================================================
-// ONBOARDING FORM DATA
+// ONBOARDING FORM DATA (4-STEP FLOW)
 // ===============================================================================
 
+/**
+ * Data collected from 4-step onboarding
+ * 
+ * Step 1: Identity (full_name)
+ * Step 2: Business Context (business_summary, communication_tone)
+ * Step 3: Target Customer (target_description, followers, company_sizes)
+ * Step 4: Review & Submit
+ */
 export interface OnboardingFormData {
-  // Step 1: Personal Identity
-  signature_name: string;
+  // Step 1: Identity
+  full_name: string;              // User's complete name (e.g., "Hamza Williams")
+  signature_name: string;         // Derived: First word of full_name (e.g., "Hamza")
   
-  // Step 2: Business Basics
-  business_name: string;
-  business_summary: string; // User's raw description (50-500 chars)
-  industry: string;
-  company_size: '1-10' | '11-50' | '51+';
-  website?: string | null;
+  // Step 2: Business Context
+  business_summary: string;       // 50-750 chars: User's raw business description
+  communication_tone: 'professional' | 'friendly' | 'casual';
   
-  // Step 3: Goals
-  primary_objective: 'lead-generation' | 'sales-automation' | 'market-research' | 'customer-retention';
-  monthly_lead_goal: number;
-  
-  // Step 4: Challenges
-  challenges: string[]; // ['low-quality-leads', 'time-consuming', etc.]
-  
-  // Step 5: Target Audience
-  target_description: string; // 20-500 chars
-  icp_min_followers: number;
-  icp_max_followers: number;
-  target_company_sizes: string[]; // ['startup', 'smb', 'enterprise']
-  
-  // Step 6: Communication
-  communication_channels: string[]; // ['email', 'instagram', 'sms']
-  brand_voice: 'professional' | 'friendly' | 'casual';
-  
-  // Step 7: Team
-  team_size: 'just-me' | 'small-team' | 'large-team';
-  campaign_manager: 'myself' | 'sales-team' | 'marketing-team' | 'mixed-team';
+  // Step 3: Target Customer
+  target_description: string;     // 50-750 chars: Who they want to reach
+  icp_min_followers: number;      // Minimum follower count for ideal customers
+  icp_max_followers: number;      // Maximum follower count for ideal customers
+  target_company_sizes: ('startup' | 'smb' | 'enterprise')[];
 }
 
 // ===============================================================================
 // AI GENERATION RESULTS
 // ===============================================================================
 
+/**
+ * Result of AI generation workflow
+ * 
+ * Contains 2 AI-generated strings + metadata
+ * NO structured data generation (manual JSON construction only)
+ */
 export interface BusinessContextResult {
-  business_one_liner: string; // 140 char max
-  business_summary_generated: string; // 4 sentences
-  ideal_customer_profile: IdealCustomerProfile;
-  operational_metadata: OperationalMetadata;
+  // AI-generated content
+  business_one_liner: string;           // 140 char tagline
+  business_summary_generated: string;   // 4 polished sentences
   
-  // Metadata
-  ai_metadata: {
-    model_used: string;
-    total_tokens: number;
-    total_cost: number;
-    generation_time_ms: number;
-  };
+  // Cost tracking
+  ai_metadata: AIGenerationMetadata;
 }
 
-export interface IdealCustomerProfile {
-  business_description: string; // From user input
-  target_audience: string; // From user input
-  industry: string;
-  icp_min_followers: number;
-  icp_max_followers: number;
-  brand_voice: string;
-}
-
-export interface OperationalMetadata {
-  business_summary: string; // User's raw input (stored here too)
-  company_size: string;
-  monthly_lead_goal: number;
-  primary_objective: string;
-  challenges: string[];
-  target_company_sizes: string[];
-  communication_channels: string[];
-  communication_tone: string;
-  team_size: string;
-  campaign_manager: string;
+/**
+ * AI generation cost and performance tracking
+ */
+export interface AIGenerationMetadata {
+  model_used: string;           // e.g., "gpt-5-mini"
+  total_tokens: number;         // Combined input + output tokens
+  total_cost: number;           // USD (e.g., 0.00276)
+  generation_time_ms: number;   // Milliseconds for parallel AI calls
+  generated_at: string;         // ISO timestamp
 }
 
 // ===============================================================================
 // PROGRESS STATE (Durable Object)
 // ===============================================================================
 
+/**
+ * Real-time progress tracking for async workflow
+ * 
+ * Polled by frontend every 1-2 seconds during onboarding
+ */
 export interface BusinessContextProgressState {
   run_id: string;
   account_id: string;
   status: 'pending' | 'processing' | 'complete' | 'failed';
-  progress: number; // 0-100
-  current_step: string;
-  total_steps: number; // Always 3
-  started_at: string;
-  updated_at: string;
-  completed_at?: string;
-  error_message?: string;
-  result?: BusinessContextResult;
+  progress: number;           // 0-100 percentage
+  current_step: string;       // Human-readable status (e.g., "Generating business tagline")
+  total_steps: number;        // Always 3: (1) AI generation, (2) Database save, (3) Complete
+  started_at: string;         // ISO timestamp
+  updated_at: string;         // ISO timestamp
+  completed_at?: string;      // ISO timestamp (only when status = 'complete')
+  error_message?: string;     // Only when status = 'failed'
+  result?: BusinessContextResult;  // Only when status = 'complete'
 }
 
 // ===============================================================================
 // QUEUE MESSAGE
 // ===============================================================================
 
+/**
+ * Message sent to Cloudflare Queue for async processing
+ * 
+ * Queue config:
+ * - max_batch_size: 1 (immediate processing)
+ * - max_batch_timeout: 5 seconds
+ * - max_retries: 3
+ */
 export interface BusinessContextQueueMessage {
   run_id: string;
   account_id: string;
   user_inputs: OnboardingFormData;
-  requested_at: string;
+  requested_at: string;         // ISO timestamp
 }
