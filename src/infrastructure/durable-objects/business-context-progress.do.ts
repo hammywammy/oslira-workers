@@ -94,31 +94,96 @@ export class BusinessContextProgressDO extends DurableObject {
 
 // POST /complete - Mark as complete
 if (method === 'POST' && url.pathname === '/complete') {
-  const body = await request.json();
-  console.log('[ProgressDO] Completing generation');
+  console.log('[ProgressDO] ========== COMPLETE ENDPOINT START ==========');
   
-  // ✅ FIX: Set status to 'complete' AND update progress
-  if (this.state) {
-    this.state.status = 'complete';  // ✅ THIS LINE WAS MISSING
-    this.state.progress = 100;
-    this.state.current_step = 'Onboarding complete';
-    this.state.completed_at = new Date().toISOString();
+  try {
+    const body = await request.json();
+    console.log('[ProgressDO] Complete request body:', {
+      has_result: !!body?.result,
+      result_keys: body?.result ? Object.keys(body.result) : []
+    });
     
-    // Store result if provided
-    if (body?.result) {
-      this.state.result = body.result;
+    // Get current progress from storage
+    console.log('[ProgressDO] Fetching current progress from storage...');
+    const current = await this.state.storage.get<BusinessContextProgressState>('progress');
+    
+    if (!current) {
+      console.error('[ProgressDO] ✗ COMPLETE FAILED: Progress not initialized');
+      return Response.json({ 
+        success: false, 
+        error: 'Progress not initialized' 
+      }, { status: 400 });
     }
     
-    await this.ctx.storage.put('progress', this.state);
-    
-    console.log('[ProgressDO] ✓ Complete - Status set to "complete"', {
-      run_id: this.state.run_id,
-      status: this.state.status,
-      progress: this.state.progress
+    console.log('[ProgressDO] Current progress state:', {
+      run_id: current.run_id,
+      status: current.status,
+      progress: current.progress,
+      current_step: current.current_step
     });
+    
+    // Build completed state
+    const completed: BusinessContextProgressState = {
+      ...current,
+      status: 'complete',
+      progress: 100,
+      current_step: 'Business context generated successfully',
+      updated_at: new Date().toISOString(),
+      completed_at: new Date().toISOString(),
+      result: body?.result || current.result
+    };
+    
+    console.log('[ProgressDO] Completed state to save:', {
+      run_id: completed.run_id,
+      status: completed.status,
+      progress: completed.progress,
+      current_step: completed.current_step,
+      has_result: !!completed.result
+    });
+    
+    // Save to storage
+    console.log('[ProgressDO] Saving completed state to storage...');
+    await this.state.storage.put('progress', completed);
+    console.log('[ProgressDO] ✓ Storage write successful');
+    
+    // Verify write
+    console.log('[ProgressDO] Verifying saved state...');
+    const verified = await this.state.storage.get<BusinessContextProgressState>('progress');
+    console.log('[ProgressDO] Verified state from storage:', {
+      status: verified?.status,
+      progress: verified?.progress,
+      matches_expected: verified?.status === 'complete' && verified?.progress === 100
+    });
+    
+    if (verified?.status !== 'complete') {
+      console.error('[ProgressDO] ✗ VERIFICATION FAILED: Status not set to complete!');
+      return Response.json({ 
+        success: false, 
+        error: 'Verification failed - status not persisted' 
+      }, { status: 500 });
+    }
+    
+    console.log('[ProgressDO] ========== COMPLETE ENDPOINT SUCCESS ==========');
+    return Response.json({ 
+      success: true,
+      status: verified.status,
+      progress: verified.progress
+    });
+    
+  } catch (error: any) {
+    console.error('[ProgressDO] ========== COMPLETE ENDPOINT FAILED ==========');
+    console.error('[ProgressDO] ✗ Complete error:', {
+      error_name: error.name,
+      error_message: error.message,
+      error_stack: error.stack?.split('\n').slice(0, 5).join('\n')
+    });
+    
+    return Response.json({ 
+      success: false, 
+      error: error.message,
+      error_name: error.name
+    }, { status: 500 });
   }
-  
-  return Response.json({ success: true });
 }
       // POST /fail - Mark as failed
       if (method === 'POST' && url.pathname === '/fail') {
