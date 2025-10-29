@@ -43,29 +43,64 @@ export class BusinessContextWorkflow extends WorkflowEntrypoint<Env, BusinessCon
         console.log('[Workflow] AI complete');
       });
 
-      // STEP 3: Save to Database
-      const businessProfileId = await step.do('save_to_database', async () => {
-        await this.updateProgress(progressDO, 70, 'Saving business profile');
+// STEP 2: Save to Database
+const businessProfileId = await step.do('save_to_database', async () => {
+  console.log('[Step2] ENTRY - Saving business profile to database');
+  const saveStartTime = Date.now();
+  
+  try {
+    await this.updateProgress(progressDO, 70, 'Saving business profile');
 
-        const supabase = await SupabaseClientFactory.createAdminClient(this.env);
-        const businessRepo = new BusinessRepository(supabase);
+    const supabase = await SupabaseClientFactory.createAdminClient(this.env);
+    const businessRepo = new BusinessRepository(supabase);
 
-        // Parse signature name (first name only)
-        const signature_name = params.user_inputs.full_name.split(' ')[0];
+    console.log('[Step2] Calling createBusinessProfile with data:', {
+      account_id: params.account_id,
+      full_name: params.user_inputs.full_name,
+      signature_name: params.user_inputs.signature_name,
+      has_business_one_liner: !!contextResult.business_one_liner,
+      has_business_summary_generated: !!contextResult.business_summary_generated
+    });
 
-        const result = await businessRepo.createBusinessProfile({
-          account_id: params.account_id,
-          full_name: params.user_inputs.full_name,
-          signature_name: signature_name,
-          business_one_liner: contextResult.business_one_liner,
-          business_summary_generated: contextResult.business_summary_generated,
-          business_context: contextResult.business_context
-        });
+    const result = await businessRepo.createBusinessProfile({
+      account_id: params.account_id,
+      full_name: params.user_inputs.full_name,
+      signature_name: params.user_inputs.signature_name,
+      business_one_liner: contextResult.business_one_liner,
+      business_summary_generated: contextResult.business_summary_generated,
+      
+      // User inputs for manual JSON construction
+      business_summary: params.user_inputs.business_summary,
+      communication_tone: params.user_inputs.communication_tone,
+      target_description: params.user_inputs.target_description,
+      icp_min_followers: params.user_inputs.icp_min_followers,
+      icp_max_followers: params.user_inputs.icp_max_followers,
+      target_company_sizes: params.user_inputs.target_company_sizes,
+      
+      // AI generation metadata
+      ai_generation_metadata: contextResult.ai_metadata
+    });
 
-        await this.updateProgress(progressDO, 95, 'Profile created');
-        console.log('[Workflow] Saved profile:', result.business_profile_id);
-        return result.business_profile_id;
-      });
+    const saveDuration = Date.now() - saveStartTime;
+    console.log('[Step2] ✓ Database save SUCCESS', {
+      duration_ms: saveDuration,
+      profile_id: result.business_profile_id,
+      was_created: result.was_created
+    });
+
+    await this.updateProgress(progressDO, 95, 'Profile created successfully');
+
+    return result.business_profile_id;
+    
+  } catch (error: any) {
+    console.error('[Step2] ✗ Database save FAILED', {
+      error_name: error.name,
+      error_message: error.message,
+      error_stack: error.stack?.split('\n').slice(0, 3).join('\n')
+    });
+    throw error;
+  }
+});
 
       // STEP 4: Complete
       await step.do('mark_complete', async () => {
