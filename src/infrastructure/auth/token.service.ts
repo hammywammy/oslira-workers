@@ -105,33 +105,32 @@ export class TokenService {
    * @param oldToken - Current token to invalidate
    * @returns New token string
    */
-  async rotate(oldToken: string): Promise<string> {
-    // Validate old token
-    const oldRecord = await this.validate(oldToken);
-    if (!oldRecord) {
-      throw new Error('Invalid or expired refresh token');
-    }
-
-    // Create new token
-    const newToken = await this.create(oldRecord.user_id, oldRecord.account_id);
-
-    // Mark old token as replaced
-    const { error } = await this.supabase
-      .from('refresh_tokens')
-      .update({
-        revoked_at: new Date().toISOString(),
-        replaced_by_token: newToken
-      })
-      .eq('token', oldToken);
-
-    if (error) {
-      console.error('[TokenService] Rotation update failed:', error);
-      // Don't throw - new token already created
-    }
-
-    return newToken;
+async rotate(oldToken: string, userId: string, accountId: string): Promise<string> {
+  // Validate old token
+  const oldRecord = await this.validate(oldToken);
+  if (!oldRecord) {
+    throw new Error('Invalid or expired refresh token');
   }
 
+  // Create new token with explicit userId and accountId
+  const newToken = await this.create(userId, accountId);
+
+  // Mark old token as replaced
+  const { error } = await this.supabase
+    .from('refresh_tokens')
+    .update({
+      revoked_at: new Date().toISOString(),
+      replaced_by_token: newToken
+    })
+    .eq('token', oldToken);
+
+  if (error) {
+    console.error('[TokenService] Rotation update failed:', error);
+    // Don't throw - new token already created
+  }
+
+  return newToken;
+}
   /**
    * Revoke token (logout)
    * Marks token as revoked immediately
