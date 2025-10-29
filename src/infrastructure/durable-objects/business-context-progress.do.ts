@@ -92,16 +92,18 @@ export class BusinessContextProgressDO extends DurableObject {
         return Response.json({ success: true });
       }
 
-      // POST /complete - Mark as complete
-      if (method === 'POST' && url.pathname === '/complete') {
-        const result = await request.json();
-        console.log('[ProgressDO] Completing generation');
-        
-        await this.completeGeneration(result);
-        
-        console.log('[ProgressDO] ✓ Complete');
-        return Response.json({ success: true });
-      }
+     // POST /complete - Mark as complete
+if (method === 'POST' && url.pathname === '/complete') {
+  const body = await request.json();
+  console.log('[ProgressDO] Completing generation');
+  
+  // ✅ Handle both formats
+  const result = body.result || body;
+  await this.completeGeneration(result);
+  
+  console.log('[ProgressDO] ✓ Complete');
+  return Response.json({ success: true });
+}
 
       // POST /fail - Mark as failed
       if (method === 'POST' && url.pathname === '/fail') {
