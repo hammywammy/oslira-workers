@@ -179,24 +179,33 @@ export class BusinessContextWorkflow extends WorkflowEntrypoint<Env, BusinessCon
         }
       });
 
-      // =========================================================================
-      // STEP 5: Mark Complete
-      // =========================================================================
-      await step.do('mark_complete', async () => {
-        await progressDO.fetch('http://do/complete', {
-          method: 'POST',
-          body: JSON.stringify({
-            result: {
-              business_profile_id: businessProfileId,
-              business_one_liner: contextResult.business_one_liner,
-              business_summary_generated: contextResult.business_summary_generated
-            }
-          })
-        });
-        
-        await this.updateProgress(progressDO, 100, 'Onboarding complete');
-        console.log('[Workflow] Complete');
-      });
+// STEP 5: Mark Complete
+await step.do('mark_complete', async () => {
+  console.log('[Workflow] Calling /complete endpoint...');
+  
+  const completeResponse = await progressDO.fetch('http://do/complete', {
+    method: 'POST',
+    body: JSON.stringify({
+      result: {
+        business_profile_id: businessProfileId,
+        business_one_liner: contextResult.business_one_liner,
+        business_summary_generated: contextResult.business_summary_generated
+      }
+    })
+  });
+
+  if (!completeResponse.ok) {
+    const error = await completeResponse.text();
+    console.error('[Workflow] /complete endpoint failed:', error);
+    throw new Error(`Failed to mark complete: ${error}`);
+  }
+
+  const completeData = await completeResponse.json();
+  console.log('[Workflow] ✓ Complete endpoint response:', completeData);
+  console.log('[Workflow] ========== WORKFLOW COMPLETE ==========');
+  
+  // ✅ NO MORE UPDATES AFTER THIS - STATUS STAYS 'complete'
+});
 
       console.log('[Workflow] ========== SUCCESS ==========', {
         run_id: params.run_id,
