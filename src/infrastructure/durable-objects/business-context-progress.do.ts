@@ -92,19 +92,34 @@ export class BusinessContextProgressDO extends DurableObject {
         return Response.json({ success: true });
       }
 
-     // POST /complete - Mark as complete
+// POST /complete - Mark as complete
 if (method === 'POST' && url.pathname === '/complete') {
   const body = await request.json();
   console.log('[ProgressDO] Completing generation');
   
-  // ✅ Handle both formats
-  const result = body.result || body;
-  await this.completeGeneration(result);
+  // ✅ FIX: Set status to 'complete' AND update progress
+  if (this.state) {
+    this.state.status = 'complete';  // ✅ THIS LINE WAS MISSING
+    this.state.progress = 100;
+    this.state.current_step = 'Onboarding complete';
+    this.state.completed_at = new Date().toISOString();
+    
+    // Store result if provided
+    if (body?.result) {
+      this.state.result = body.result;
+    }
+    
+    await this.ctx.storage.put('progress', this.state);
+    
+    console.log('[ProgressDO] ✓ Complete - Status set to "complete"', {
+      run_id: this.state.run_id,
+      status: this.state.status,
+      progress: this.state.progress
+    });
+  }
   
-  console.log('[ProgressDO] ✓ Complete');
   return Response.json({ success: true });
 }
-
       // POST /fail - Mark as failed
       if (method === 'POST' && url.pathname === '/fail') {
         const error = await request.json();
