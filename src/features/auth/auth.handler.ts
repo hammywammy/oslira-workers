@@ -18,18 +18,13 @@
  * - Uses deterministic UUID generation from Google ID
  * - Calls create_account_atomic() Postgres function
  * - Atomic user + account creation (no race conditions)
+ * - Creates Stripe customer for ALL users (free and paid)
  * 
  * INITIALIZATION FLOW (Frontend):
  * 1. App loads → Frontend checks localStorage for refresh token
  * 2. If exists → Frontend calls /api/auth/refresh
  * 3. Backend validates refresh token → Issues new tokens
  * 4. Frontend stores new tokens → Fetches user data via /session
- * 
- * WHY /refresh vs /session FOR INIT:
- * - /refresh: Takes refresh token in body, no Bearer header needed
- * - /session: Requires valid Bearer token in header
- * - On init, access token might be expired → /refresh is safer
- * - Industry standard: Auth0, Clerk, WorkOS all use this pattern
  */
 
 import type { Context } from 'hono';
@@ -96,13 +91,14 @@ async function googleIdToUUID(googleId: string): Promise<string> {
  * 2. Fetch user profile from Google
  * 3. Convert Google ID to deterministic UUID
  * 4. Create or update user/account in database (atomic function)
- * 5. Issue JWT access token
- * 6. Create refresh token (stored hashed in DB)
- * 7. Return tokens + user data to frontend
+ * 5. Create Stripe customer (for new users only)
+ * 6. Issue JWT access token
+ * 7. Create refresh token (stored hashed in DB)
+ * 8. Return tokens + user data to frontend
  */
 export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
   try {
-    console.log('[GoogleCallback] Request received');
+    console.log('[GoogleCallback] ========== REQUEST START ==========');
     
     const body = await c.req.json() as GoogleCallbackRequest;
     
@@ -111,30 +107,42 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
       return c.json({ error: 'Missing authorization code' }, 400);
     }
 
-    console.log('[GoogleCallback] Authorization code received, length:', body.code.length);
+    console.log('[GoogleCallback] Authorization code received', {
+      code_length: body.code.length
+    });
 
-    // Step 1: Exchange code with Google
+    // ===========================================================================
+    // STEP 1: Exchange code with Google
+    // ===========================================================================
+
     const googleOAuth = new GoogleOAuthService(c.env);
     const googleUser = await googleOAuth.completeOAuthFlow(body.code);
     
-    console.log('[GoogleCallback] Google user info received:', {
-      googleId: googleUser.id,
+    console.log('[GoogleCallback] ✓ Google user info received', {
+      google_id: googleUser.id,
       email: googleUser.email,
-      name: googleUser.name
+      name: googleUser.name,
+      has_picture: !!googleUser.picture
     });
 
-    // Step 2: Convert Google ID to UUID
+    // ===========================================================================
+    // STEP 2: Convert Google ID to UUID
+    // ===========================================================================
+
     const userId = await googleIdToUUID(googleUser.id);
     
-    console.log('[GoogleCallback] Converted Google ID to UUID', {
-      googleId: googleUser.id,
-      uuid: userId
+    console.log('[GoogleCallback] ✓ Google ID converted to UUID', {
+      google_id: googleUser.id,
+      user_uuid: userId
     });
 
-    // Step 3: Create/update user atomically
+    // ===========================================================================
+    // STEP 3: Create/update user atomically
+    // ===========================================================================
+
     const supabase = await SupabaseClientFactory.createAdminClient(c.env);
     
-    console.log('[GoogleCallback] Calling create_account_atomic');
+    console.log('[GoogleCallback] Calling create_account_atomic()');
     
     const { data: accountData, error: accountError } = await supabase
       .rpc('create_account_atomic', {
@@ -145,10 +153,10 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
       });
 
     if (accountError || !accountData) {
-      console.error('[GoogleCallback] Account creation failed:', {
-        error: accountError,
-        code: accountError?.code,
-        message: accountError?.message
+      console.error('[GoogleCallback] ✗ Account creation failed', {
+        error_code: accountError?.code,
+        error_message: accountError?.message,
+        error_details: accountError?.details
       });
       return c.json({ 
         error: 'Failed to create account',
@@ -156,13 +164,87 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
       }, 500);
     }
 
-    console.log('[GoogleCallback] Account created successfully', {
-      userId: accountData.user_id,
-      accountId: accountData.account_id,
-      isNewUser: accountData.is_new_user
+    console.log('[GoogleCallback] ✓ Account created successfully', {
+      user_id: accountData.user_id,
+      account_id: accountData.account_id,
+      is_new_user: accountData.is_new_user,
+      credit_balance: accountData.credit_balance
     });
 
-    // Step 4: Issue JWT access token
+    // ===========================================================================
+    // STEP 4: Create Stripe customer (NEW USERS ONLY)
+    // ===========================================================================
+
+    if (accountData.is_new_user) {
+      try {
+        console.log('[GoogleCallback] Creating Stripe customer (new user)');
+        
+        const { StripeService } = await import('@/infrastructure/billing/stripe.service');
+        const stripeService = new StripeService(c.env);
+        
+        const stripeCustomerId = await stripeService.createCustomer({
+          email: googleUser.email,
+          name: googleUser.name,
+          account_id: accountData.account_id,
+          user_id: accountData.user_id,
+          metadata: {
+            signup_method: 'google_oauth',
+            environment: c.env.APP_ENV
+          }
+        });
+
+        console.log('[GoogleCallback] ✓ Stripe customer created', {
+          stripe_customer_id: stripeCustomerId,
+          account_id: accountData.account_id
+        });
+
+        // Save stripe_customer_id to accounts table
+        const { error: updateError } = await supabase
+          .from('accounts')
+          .update({ stripe_customer_id: stripeCustomerId })
+          .eq('id', accountData.account_id);
+
+        if (updateError) {
+          console.error('[GoogleCallback] ✗ Failed to save stripe_customer_id to database', {
+            error_code: updateError.code,
+            error_message: updateError.message,
+            account_id: accountData.account_id,
+            stripe_customer_id: stripeCustomerId
+          });
+          
+          // DON'T fail OAuth flow - customer exists in Stripe
+          // Recovery strategy: Search Stripe by metadata['account_id']
+          console.warn('[GoogleCallback] ⚠ OAuth flow continuing despite DB save failure');
+          console.warn('[GoogleCallback] ⚠ Recovery: Use StripeService.searchCustomersByMetadata("account_id", "...")');
+          
+        } else {
+          console.log('[GoogleCallback] ✓ stripe_customer_id saved to database');
+        }
+
+      } catch (error: any) {
+        // Log error but DON'T fail entire OAuth flow
+        console.error('[GoogleCallback] ⚠ Stripe customer creation failed (NON-FATAL)', {
+          error_name: error.name,
+          error_message: error.message,
+          error_stack: error.stack?.split('\n')[0],
+          account_id: accountData.account_id,
+          email: googleUser.email
+        });
+        
+        // User can still sign up and use 25 free credits
+        // Stripe customer will be created on first purchase attempt
+        // Recovery strategy: Queue job to create missing customers nightly
+        console.warn('[GoogleCallback] ⚠ User can still complete OAuth');
+        console.warn('[GoogleCallback] ⚠ Stripe customer will be created on first purchase');
+      }
+    } else {
+      console.log('[GoogleCallback] Existing user login - skipping Stripe customer creation');
+    }
+
+    // ===========================================================================
+    // STEP 5: Issue JWT access token
+    // ===========================================================================
+
     const jwtService = new JWTService(c.env);
     const accessToken = await jwtService.sign({
       userId: accountData.user_id,
@@ -171,18 +253,24 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
       onboardingCompleted: accountData.onboarding_completed
     });
 
-    console.log('[GoogleCallback] JWT access token issued');
+    console.log('[GoogleCallback] ✓ JWT access token issued');
 
-    // Step 5: Create refresh token
+    // ===========================================================================
+    // STEP 6: Create refresh token
+    // ===========================================================================
+
     const tokenService = new TokenService(supabase);
     const refreshToken = await tokenService.create(
       accountData.user_id,
       accountData.account_id
     );
 
-    console.log('[GoogleCallback] Refresh token created');
+    console.log('[GoogleCallback] ✓ Refresh token created');
 
-    // Step 6: Return response
+    // ===========================================================================
+    // STEP 7: Return response
+    // ===========================================================================
+
     const response: AuthResponse = {
       accessToken,
       refreshToken,
@@ -202,15 +290,22 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
       isNewUser: accountData.is_new_user
     };
 
-    console.log('[GoogleCallback] Returning success response');
+    console.log('[GoogleCallback] ========== SUCCESS ==========', {
+      user_id: accountData.user_id,
+      account_id: accountData.account_id,
+      is_new_user: accountData.is_new_user,
+      onboarding_completed: accountData.onboarding_completed
+    });
+
     return c.json(response, 200);
 
   } catch (error: any) {
-    console.error('[GoogleCallback] Unexpected error:', {
-      message: error.message,
-      stack: error.stack,
-      name: error.name
+    console.error('[GoogleCallback] ========== FATAL ERROR ==========', {
+      error_name: error.name,
+      error_message: error.message,
+      error_stack: error.stack
     });
+    
     return c.json({ 
       error: 'Authentication failed',
       message: error.message 
@@ -222,19 +317,12 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
  * POST /api/auth/refresh
  * Rotate refresh token and issue new access token
  * 
- * THIS IS THE KEY ENDPOINT FOR SESSION PERSISTENCE
- * 
- * Called by:
- * - Frontend on app load (to rehydrate session)
- * - auth-manager when access token expires
- * - Never requires Bearer header (takes refresh token in body)
- * 
  * Flow:
  * 1. Validate refresh token (check DB, expiry, revoked status)
  * 2. Create NEW refresh token (token rotation)
  * 3. Invalidate old refresh token in DB
  * 4. Issue new JWT access token
- * 5. Return new tokens to frontend
+ * 5. Return new tokens
  */
 export async function handleRefresh(c: Context<{ Bindings: Env }>) {
   try {
@@ -284,10 +372,6 @@ export async function handleRefresh(c: Context<{ Bindings: Env }>) {
       expiresAt: jwtService.getExpiryTime()
     };
 
-    console.log('[Refresh] Token rotation successful', {
-      userId: tokenData.user_id
-    });
-
     return c.json(response, 200);
 
   } catch (error: any) {
@@ -316,7 +400,6 @@ export async function handleLogout(c: Context<{ Bindings: Env }>) {
 
     await tokenService.revoke(body.refreshToken);
 
-    console.log('[Logout] Refresh token revoked');
     return c.json({ success: true }, 200);
 
   } catch (error: any) {
@@ -330,18 +413,11 @@ export async function handleLogout(c: Context<{ Bindings: Env }>) {
 
 /**
  * GET /api/auth/session
- * Get current user session information
- * 
- * REQUIRES: JWT authentication (via middleware)
+ * Get current user session info
  */
 export async function handleGetSession(c: Context<{ Bindings: Env }>) {
   try {
     const auth = getAuthContext(c);
-
-    if (!auth) {
-      return c.json({ error: 'Unauthorized' }, 401);
-    }
-
     const supabase = await SupabaseClientFactory.createAdminClient(c.env);
 
     // Fetch user data
@@ -356,7 +432,7 @@ export async function handleGetSession(c: Context<{ Bindings: Env }>) {
       return c.json({ error: 'User not found' }, 404);
     }
 
-    // Fetch account data (WITHOUT credit_balance)
+    // Fetch account data
     const { data: account, error: accountError } = await supabase
       .from('accounts')
       .select('id, name')
@@ -368,7 +444,7 @@ export async function handleGetSession(c: Context<{ Bindings: Env }>) {
       return c.json({ error: 'Account not found' }, 404);
     }
 
-    // Fetch credit balance separately
+    // Fetch credit balance
     const { data: creditBalance } = await supabase
       .from('credit_balances')
       .select('current_balance')
