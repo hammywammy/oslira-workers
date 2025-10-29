@@ -351,20 +351,28 @@ export async function handleRefresh(c: Context<{ Bindings: Env }>) {
       tokenData.account_id
     );
 
-    // Fetch user's current onboarding status
-    const { data: user } = await supabase
-      .from('users')
-      .select('email, onboarding_completed')
-      .eq('id', tokenData.user_id)
-      .single();
+// Fetch user's email
+const { data: user } = await supabase
+  .from('users')
+  .select('email')
+  .eq('id', tokenData.user_id)
+  .single();
 
-    // Issue new access token
-    const newAccessToken = await jwtService.sign({
-      userId: tokenData.user_id,
-      accountId: tokenData.account_id,
-      email: user?.email || tokenData.user_id,
-      onboardingCompleted: user?.onboarding_completed || false
-    });
+// Check if user has any completed business profiles
+const { data: businesses } = await supabase
+  .from('business_profiles')
+  .select('onboarding_completed')
+  .eq('account_id', tokenData.account_id);
+
+const hasCompletedBusiness = businesses?.some(b => b.onboarding_completed) || false;
+
+// Issue new access token
+const newAccessToken = await jwtService.sign({
+  userId: tokenData.user_id,
+  accountId: tokenData.account_id,
+  email: user?.email || tokenData.user_id,
+  onboardingCompleted: hasCompletedBusiness
+});
 
     const response: RefreshResponse = {
       accessToken: newAccessToken,
@@ -420,52 +428,59 @@ export async function handleGetSession(c: Context<{ Bindings: Env }>) {
     const auth = getAuthContext(c);
     const supabase = await SupabaseClientFactory.createAdminClient(c.env);
 
-    // Fetch user data
-    const { data: user, error: userError } = await supabase
-      .from('users')
-      .select('id, email, full_name, avatar_url, onboarding_completed')
-      .eq('id', auth.userId)
-      .single();
+   // Fetch user data
+const { data: user, error: userError } = await supabase
+  .from('users')
+  .select('id, email, full_name, avatar_url')
+  .eq('id', auth.userId)
+  .single();
 
-    if (userError || !user) {
-      console.error('[GetSession] User not found:', auth.userId, userError);
-      return c.json({ error: 'User not found' }, 404);
-    }
+if (userError || !user) {
+  console.error('[GetSession] User not found:', auth.userId, userError);
+  return c.json({ error: 'User not found' }, 404);
+}
 
-    // Fetch account data
-    const { data: account, error: accountError } = await supabase
-      .from('accounts')
-      .select('id, name')
-      .eq('id', auth.accountId)
-      .single();
+// Fetch account data
+const { data: account, error: accountError } = await supabase
+  .from('accounts')
+  .select('id, name')
+  .eq('id', auth.accountId)
+  .single();
 
-    if (accountError || !account) {
-      console.error('[GetSession] Account not found:', auth.accountId, accountError);
-      return c.json({ error: 'Account not found' }, 404);
-    }
+if (accountError || !account) {
+  console.error('[GetSession] Account not found:', auth.accountId, accountError);
+  return c.json({ error: 'Account not found' }, 404);
+}
 
-    // Fetch credit balance
-    const { data: creditBalance } = await supabase
-      .from('credit_balances')
-      .select('current_balance')
-      .eq('account_id', auth.accountId)
-      .single();
+// Check if user has any completed business profiles
+const { data: businesses } = await supabase
+  .from('business_profiles')
+  .select('onboarding_completed')
+  .eq('account_id', auth.accountId);
 
-    const response: SessionResponse = {
-      user: {
-        id: user.id,
-        email: user.email,
-        full_name: user.full_name,
-        avatar_url: user.avatar_url,
-        onboarding_completed: user.onboarding_completed
-      },
-      account: {
-        id: account.id,
-        name: account.name,
-        credit_balance: creditBalance?.current_balance || 0
-      }
-    };
+const hasCompletedBusiness = businesses?.some(b => b.onboarding_completed) || false;
 
+// Fetch credit balance
+const { data: creditBalance } = await supabase
+  .from('credit_balances')
+  .select('current_balance')
+  .eq('account_id', auth.accountId)
+  .single();
+
+const response: SessionResponse = {
+  user: {
+    id: user.id,
+    email: user.email,
+    full_name: user.full_name,
+    avatar_url: user.avatar_url,
+    onboarding_completed: hasCompletedBusiness
+  },
+  account: {
+    id: account.id,
+    name: account.name,
+    credit_balance: creditBalance?.current_balance || 0
+  }
+};
     return c.json(response, 200);
 
   } catch (error: any) {
