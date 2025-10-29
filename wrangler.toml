@@ -77,12 +77,6 @@ queue = "business-context-jobs"
 
 
 
-[[queues.consumers]]
-queue = "analysis-jobs"
-max_batch_size = 1
-max_batch_timeout = 5
-max_retries = 3
-dead_letter_queue = "analysis-jobs-dlq"
 
 [[queues.consumers]]
 queue = "business-context-jobs"
