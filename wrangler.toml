@@ -75,12 +75,7 @@ queue = "analysis-jobs"
 binding = "BUSINESS_CONTEXT_QUEUE"
 queue = "business-context-jobs"
 
-[[queues.consumers]]
-queue = "stripe-webhooks"
-max_batch_size = 10
-max_batch_timeout = 30
-max_retries = 3
-dead_letter_queue = "stripe-webhooks-dlq"
+
 
 [[queues.consumers]]
 queue = "analysis-jobs"
