@@ -110,105 +110,38 @@ export class BusinessContextWorkflow extends WorkflowEntrypoint<Env, BusinessCon
       });
 
 // =========================================================================
-// STEP 4: Update Stripe Metadata & Database Onboarding Flag
+// STEP 4: Mark Business Profile as Onboarded
 // =========================================================================
-await step.do('update_stripe_and_database', async () => {
-  console.log('[Step4] ENTRY - Updating Stripe customer metadata & database');
-  const stripeStartTime = Date.now();
+await step.do('mark_business_onboarded', async () => {
+  console.log('[Step4] Marking business profile as onboarded');
+  
+  await this.updateProgress(progressDO, 90, 'Finalizing business profile');
 
-  try {
-    await this.updateProgress(progressDO, 85, 'Updating Stripe metadata');
+  const supabase = await SupabaseClientFactory.createAdminClient(this.env);
+  
+  const { error: dbUpdateError } = await supabase
+    .from('business_profiles')
+    .update({ 
+      onboarding_completed: true,
+      onboarding_completed_at: new Date().toISOString()
+    })
+    .eq('id', businessProfileId);
 
-    // Fetch stripe_customer_id from accounts table
-    const supabase = await SupabaseClientFactory.createAdminClient(this.env);
-    const { data: account, error: fetchError } = await supabase
-      .from('accounts')
-      .select('stripe_customer_id')
-      .eq('id', params.account_id)
-      .single();
-
-    if (fetchError) {
-      console.error('[Step4] ✗ Failed to fetch account', {
-        error: fetchError.message,
-        account_id: params.account_id
-      });
-      throw new Error(`Failed to fetch account: ${fetchError.message}`);
-    }
-
-    if (!account?.stripe_customer_id) {
-      console.warn('[Step4] ⚠ No stripe_customer_id found - skipping Stripe update', {
-        account_id: params.account_id,
-        has_account: !!account
-      });
-    } else {
-      // Update Stripe customer metadata
-      const stripeService = new StripeService(this.env);
-      
-      await stripeService.updateCustomerMetadata({
-        customer_id: account.stripe_customer_id,
-        metadata: {
-          business_profile_id: businessProfileId,
-          onboarding_completed: 'true',
-          onboarding_completed_at: new Date().toISOString(),
-        }
-      });
-
-      const stripeDuration = Date.now() - stripeStartTime;
-      console.log('[Step4] ✓ Stripe metadata update SUCCESS', {
-        duration_ms: stripeDuration,
-        customer_id: account.stripe_customer_id,
-        business_profile_id: businessProfileId,
-        metadata_keys: ['business_profile_id', 'onboarding_completed', 'onboarding_completed_at']
-      });
-    }
-
-    await this.updateProgress(progressDO, 90, 'Stripe metadata updated');
-
-    // =========================================================================
-    // UPDATE DATABASE: Set onboarding_completed = true
-    // =========================================================================
-    console.log('[Step4] Updating database onboarding_completed flag...');
-    
-    const { error: dbUpdateError } = await supabase
-      .from('accounts')
-      .update({ 
-        onboarding_completed: true,
-        onboarding_completed_at: new Date().toISOString()
-      })
-      .eq('id', params.account_id);
-
-    if (dbUpdateError) {
-      console.error('[Step4] ✗ Database onboarding_completed update FAILED', {
-        error_name: dbUpdateError.name,
-        error_message: dbUpdateError.message,
-        error_code: dbUpdateError.code,
-        account_id: params.account_id
-      });
-      // Don't throw - continue workflow even if DB update fails
-      console.warn('[Step4] ⚠ Continuing despite database update failure');
-    } else {
-      console.log('[Step4] ✓ Database onboarding_completed = true', {
-        account_id: params.account_id,
-        business_profile_id: businessProfileId
-      });
-    }
-
-    await this.updateProgress(progressDO, 95, 'Onboarding flags updated');
-
-  } catch (error: any) {
-    // Log error but DON'T fail entire workflow
-    // Stripe/DB updates are nice-to-have, not critical for workflow success
-    console.error('[Step4] ✗ Update process FAILED (NON-FATAL)', {
-      error_name: error.name,
-      error_message: error.message,
-      error_stack: error.stack?.split('\n').slice(0, 3).join('\n'),
-      account_id: params.account_id,
+  if (dbUpdateError) {
+    console.error('[Step4] ✗ Failed to mark business onboarded', {
+      error: dbUpdateError.message,
+      error_code: dbUpdateError.code,
       business_profile_id: businessProfileId
     });
-    console.warn('[Step4] ⚠ Continuing workflow despite update errors');
+    throw new Error(`Failed to mark business onboarded: ${dbUpdateError.message}`);
   }
-});
 
+  console.log('[Step4] ✓ Business marked as onboarded', {
+    business_profile_id: businessProfileId
+  });
+
+  await this.updateProgress(progressDO, 95, 'Business profile ready');
+});
 // STEP 5: Mark Complete
 await step.do('mark_complete', async () => {
   console.log('[Workflow] Calling /complete endpoint...');
