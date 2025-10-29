@@ -67,21 +67,34 @@ new_classes = ["BusinessContextProgressDO"]
 binding = "STRIPE_WEBHOOK_QUEUE"
 queue = "stripe-webhooks"
 
-[[queues.producers]]
-binding = "ANALYSIS_QUEUE"
-queue = "analysis-jobs"
+# COMMENT OUT ANALYSIS-JOBS PRODUCER
+# [[queues.producers]]
+# binding = "ANALYSIS_QUEUE"
+# queue = "analysis-jobs"
 
 [[queues.producers]]
 binding = "BUSINESS_CONTEXT_QUEUE"
 queue = "business-context-jobs"
 
+[[queues.consumers]]
+queue = "stripe-webhooks"
+max_batch_size = 10
+max_batch_timeout = 30
+max_retries = 3
+dead_letter_queue = "stripe-webhooks-dlq"
 
-
+# COMMENT OUT ANALYSIS-JOBS CONSUMER
+# [[queues.consumers]]
+# queue = "analysis-jobs"
+# max_batch_size = 1
+# max_batch_timeout = 5
+# max_retries = 3
+# dead_letter_queue = "analysis-jobs-dlq"
 
 [[queues.consumers]]
 queue = "business-context-jobs"
-max_batch_size = 1        # ✅ Process immediately (no batching needed for onboarding)
-max_batch_timeout = 5     # ✅ 5 seconds max wait (safety net)
+max_batch_size = 1
+max_batch_timeout = 5
 max_retries = 3
 dead_letter_queue = "business-context-jobs-dlq"
 
