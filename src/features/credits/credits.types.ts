@@ -37,6 +37,7 @@ export const PurchaseCreditsSchema = z.object({
 export interface CreditBalance {
   account_id: string;
   current_balance: number;
+  light_analyses_balance: number;  // ADD THIS
   last_transaction_at: string | null;
   created_at: string;
   updated_at: string;
