@@ -23,6 +23,13 @@ export class BusinessService {
     const { page, pageSize } = query;
     const offset = (page - 1) * pageSize;
 
+    console.log('[BusinessService] listProfiles ENTRY', {
+      accountId,
+      page,
+      pageSize,
+      offset
+    });
+
     // Query with ACTUAL database columns
     const { data, error, count } = await this.supabase
       .from('business_profiles')
@@ -39,7 +46,40 @@ export class BusinessService {
       .order('created_at', { ascending: false })
       .range(offset, offset + pageSize - 1);
 
-    if (error) throw error;
+    console.log('[BusinessService] Query executed', {
+      has_error: !!error,
+      data_length: data?.length || 0,
+      count,
+      error_code: error?.code,
+      error_message: error?.message,
+      error_details: error?.details,
+      error_hint: error?.hint
+    });
+
+    if (error) {
+      console.error('[BusinessService] listProfiles query error:', {
+        error_code: error.code,
+        error_message: error.message,
+        error_details: error.details,
+        error_hint: error.hint,
+        full_error: JSON.stringify(error)
+      });
+      throw error;
+    }
+
+    // Check if we got data
+    if (!data || data.length === 0) {
+      console.log('[BusinessService] No profiles found', {
+        accountId,
+        count
+      });
+      return { profiles: [], total: 0 };
+    }
+
+    console.log('[BusinessService] listProfiles query success', {
+      profiles_count: data?.length || 0,
+      total: count
+    });
 
     // Get leads and analyses counts for each profile
     const profiles: BusinessProfileListItem[] = await Promise.all(
