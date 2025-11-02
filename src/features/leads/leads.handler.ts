@@ -22,7 +22,7 @@ import { createUserClient } from '@/infrastructure/database/supabase.client';
 export async function listLeads(c: Context<{ Bindings: Env }>) {
   try {
     const auth = getAuthContext(c);
-    const accountId = auth.primaryAccountId;
+    const accountId = auth.accountId;
 
     // Validate query params
     const query = validateQuery(ListLeadsQuerySchema, {
@@ -64,7 +64,7 @@ export async function listLeads(c: Context<{ Bindings: Env }>) {
 export async function getLead(c: Context<{ Bindings: Env }>) {
   try {
     const auth = getAuthContext(c);
-    const accountId = auth.primaryAccountId;
+    const accountId = auth.accountId;
     const leadId = c.req.param('leadId');
 
     // Validate params
@@ -99,7 +99,7 @@ export async function getLead(c: Context<{ Bindings: Env }>) {
 export async function getLeadAnalyses(c: Context<{ Bindings: Env }>) {
   try {
     const auth = getAuthContext(c);
-    const accountId = auth.primaryAccountId;
+    const accountId = auth.accountId;
     const leadId = c.req.param('leadId');
 
     // Validate params
@@ -141,7 +141,7 @@ export async function getLeadAnalyses(c: Context<{ Bindings: Env }>) {
 export async function deleteLead(c: Context<{ Bindings: Env }>) {
   try {
     const auth = getAuthContext(c);
-    const accountId = auth.primaryAccountId;
+    const accountId = auth.accountId;
     const leadId = c.req.param('leadId');
 
     // Validate params
