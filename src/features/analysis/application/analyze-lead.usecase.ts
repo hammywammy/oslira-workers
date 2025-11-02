@@ -176,27 +176,37 @@ export class AnalyzeLeadUseCase {
   /**
    * Deduct credits atomically
    */
-  private async deductCredits(
-    accountId: string,
-    amount: number,
-    reason: string
-  ): Promise<void> {
-    this.perfTracker.startStep('deduct_credits');
+private async deductCreditsForAnalysis(
+  accountId: string,
+  analysisType: 'light' | 'deep' | 'xray',
+  reason: string
+): Promise<void> {
+  this.perfTracker.startStep('deduct_credits');
 
-    const supabase = await SupabaseClientFactory.createAdminClient(this.env);
-    const creditsRepo = new CreditsRepository(supabase);
+  const supabase = await SupabaseClientFactory.createAdminClient(this.env);
+  const creditsRepo = new CreditsRepository(supabase);
 
-    // Check balance first
+  if (analysisType === 'light') {
+    // Light analysis uses separate quota
+    const hasLight = await creditsRepo.hasSufficientLightAnalyses(accountId, 1);
+    if (!hasLight) {
+      throw new Error('Insufficient light analyses');
+    }
+
+    await creditsRepo.deductLightAnalyses(accountId, -1, 'light_analysis', reason);
+  } else {
+    // Deep/X-Ray use credits
+    const amount = analysisType === 'deep' ? 1 : 2;
     const hasCredits = await creditsRepo.hasSufficientCredits(accountId, amount);
     if (!hasCredits) {
       throw new Error('Insufficient credits');
     }
 
-    // Deduct atomically via RPC
-    await creditsRepo.deductCredits(accountId, amount, 'analysis', reason);
-
-    this.perfTracker.endStep('deduct_credits');
+    await creditsRepo.deductCredits(accountId, -amount, 'analysis', reason);
   }
+
+  this.perfTracker.endStep('deduct_credits');
+}
 
   /**
    * Refund credits on failure
