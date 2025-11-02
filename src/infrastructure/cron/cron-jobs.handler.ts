@@ -21,91 +21,103 @@ export class CronJobsHandler {
    * Monthly credit renewal (1st of month, 3 AM UTC)
    * Grants subscription credits to all active subscribers
    */
-  async monthlyRenewal(): Promise<void> {
-    console.log('[Cron] Starting monthly credit renewal...');
-    const sentry = await getSentryService(this.env);
+ async monthlyRenewal(): Promise<void> {
+  console.log('[Cron] Starting monthly credit renewal...');
+  const sentry = await getSentryService(this.env);
+  
+  sentry.addBreadcrumb('Monthly renewal started', 'cron', 'info');
+
+  try {
+    const supabase = await SupabaseClientFactory.createAdminClient(this.env);
     
-    sentry.addBreadcrumb('Monthly renewal started', 'cron', 'info');
+    // Get all active subscriptions with their plan details
+    const { data: subscriptions, error } = await supabase
+      .from('subscriptions')
+      .select(`
+        account_id,
+        plan_type,
+        plans!inner(
+          credits_per_month,
+          features
+        )
+      `)
+      .eq('status', 'active')
+      .is('deleted_at', null);
 
-    try {
-      const supabase = await SupabaseClientFactory.createAdminClient(this.env);
-      
-      // Get all active subscriptions
-      const { data: subscriptions, error } = await supabase
-        .from('subscriptions')
-        .select('id, account_id, plan_type, stripe_subscription_id')
-        .eq('status', 'active')
-        .is('deleted_at', null);
+    if (error) throw error;
 
-      if (error) throw error;
-
-      if (!subscriptions || subscriptions.length === 0) {
-        console.log('[Cron] No active subscriptions found');
-        return;
-      }
-
-      console.log(`[Cron] Processing ${subscriptions.length} active subscriptions`);
-
-      const creditsRepo = new CreditsRepository(supabase);
-      let successCount = 0;
-      let failCount = 0;
-
-      // Credit allocation by plan
-      const planCredits: Record<string, number> = {
-        starter: 50,
-        pro: 200,
-        enterprise: 1000
-      };
-
-      for (const sub of subscriptions) {
-        try {
-          const credits = planCredits[sub.plan_type] || 0;
-          
-          if (credits === 0) {
-            console.warn(`[Cron] Unknown plan type: ${sub.plan_type}`);
-            continue;
-          }
-
-          // Grant monthly credits
-          await creditsRepo.addCredits(
-            sub.account_id,
-            credits,
-            'subscription_renewal',
-            `Monthly ${sub.plan_type} subscription renewal`
-          );
-
-          successCount++;
-          console.log(`[Cron] Granted ${credits} credits to account ${sub.account_id} (${sub.plan_type})`);
-        } catch (subError: any) {
-          failCount++;
-          console.error(`[Cron] Failed to grant credits to ${sub.account_id}:`, subError);
-          
-          await sentry.captureException(subError, {
-            tags: {
-              cron_job: 'monthly_renewal',
-              account_id: sub.account_id
-            },
-            extra: { subscription: sub }
-          });
-        }
-      }
-
-      console.log(`[Cron] Monthly renewal complete: ${successCount} success, ${failCount} failed`);
-      
-      await sentry.captureMessage(
-        `Monthly renewal: ${successCount}/${subscriptions.length} successful`,
-        'info',
-        { tags: { cron_job: 'monthly_renewal' } }
-      );
-    } catch (error: any) {
-      console.error('[Cron] Monthly renewal error:', error);
-      await sentry.captureException(error, {
-        tags: { cron_job: 'monthly_renewal' }
-      });
-      throw error;
+    if (!subscriptions || subscriptions.length === 0) {
+      console.log('[Cron] No active subscriptions found');
+      return;
     }
-  }
 
+    console.log(`[Cron] Processing ${subscriptions.length} active subscriptions`);
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const sub of subscriptions) {
+      try {
+        const plan = sub.plans;
+        const creditsQuota = plan.credits_per_month;
+        const lightQuota = parseInt(plan.features.light_analyses);
+
+        // Reset both balances
+        const { error: updateError } = await supabase
+          .from('balances')
+          .update({
+            current_balance: creditsQuota,
+            light_analyses_balance: lightQuota,
+            last_transaction_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .eq('account_id', sub.account_id);
+
+        if (updateError) throw updateError;
+
+        // Update subscription period
+        await supabase
+          .from('subscriptions')
+          .update({
+            current_period_start: new Date().toISOString(),
+            current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+          })
+          .eq('account_id', sub.account_id);
+
+        successCount++;
+        console.log(
+          `[Cron] Reset balances for ${sub.account_id} (${sub.plan_type}): ` +
+          `${creditsQuota} credits + ${lightQuota} light analyses`
+        );
+      } catch (subError: any) {
+        failCount++;
+        console.error(`[Cron] Failed to reset ${sub.account_id}:`, subError);
+        
+        await sentry.captureException(subError, {
+          tags: {
+            cron_job: 'monthly_renewal',
+            account_id: sub.account_id
+          },
+          extra: { subscription: sub }
+        });
+      }
+    }
+
+    console.log(`[Cron] Monthly renewal complete: ${successCount} success, ${failCount} failed`);
+    
+    await sentry.captureMessage(
+      `Monthly renewal: ${successCount}/${subscriptions.length} successful`,
+      'info',
+      { tags: { cron_job: 'monthly_renewal' } }
+    );
+  } catch (error: any) {
+    console.error('[Cron] Monthly renewal error:', error);
+    await sentry.captureException(error, {
+      tags: { cron_job: 'monthly_renewal' }
+    });
+    throw error;
+  }
+}
   /**
    * Daily cleanup (2 AM UTC)
    * Removes old soft-deleted records and stale analyses
