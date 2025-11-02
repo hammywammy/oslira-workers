@@ -37,6 +37,7 @@ export class BusinessService {
         id,
         full_name,
         signature_name,
+        business_name,
         business_one_liner,
         created_at,
         updated_at
@@ -100,7 +101,7 @@ export class BusinessService {
 
         return {
           id: profile.id,
-          business_name: profile.full_name, // Map full_name to business_name for frontend
+          business_name: profile.business_name || profile.full_name, // Use business_name, fallback to full_name
           website: null, // Column doesn't exist in DB
           business_one_liner: profile.business_one_liner,
           leads_count: leadsCount || 0,
@@ -151,7 +152,7 @@ export class BusinessService {
     return {
       id: profile.id,
       account_id: profile.account_id,
-      business_name: profile.full_name, // Map full_name to business_name
+      business_name: profile.business_name || profile.full_name, // Use business_name, fallback to full_name
       website: null, // Column doesn't exist
       business_one_liner: profile.business_one_liner,
       business_context_pack: profile.business_context || {}, // Map business_context to business_context_pack
@@ -177,7 +178,8 @@ export class BusinessService {
       .from('business_profiles')
       .insert({
         account_id: accountId,
-        full_name: input.business_name, // Map business_name to full_name
+        business_name: input.business_name, // Use business_name directly
+        full_name: input.business_name, // Also set full_name for backwards compatibility
         signature_name: input.business_name.toLowerCase().replace(/\s+/g, '_'),
         business_one_liner: input.business_one_liner,
         business_context: input.business_context_pack, // Map business_context_pack to business_context
@@ -193,7 +195,7 @@ export class BusinessService {
     return {
       id: profile.id,
       account_id: profile.account_id,
-      business_name: profile.full_name,
+      business_name: profile.business_name || profile.full_name,
       website: null,
       business_one_liner: profile.business_one_liner,
       business_context_pack: profile.business_context || {},
@@ -227,7 +229,8 @@ export class BusinessService {
     };
 
     if (input.business_name !== undefined) {
-      updateData.full_name = input.business_name; // Map to full_name
+      updateData.business_name = input.business_name;
+      updateData.full_name = input.business_name; // Keep full_name in sync
     }
     if (input.business_one_liner !== undefined) {
       updateData.business_one_liner = input.business_one_liner;
@@ -275,7 +278,7 @@ export class BusinessService {
     return {
       id: profile.id,
       account_id: profile.account_id,
-      business_name: profile.full_name,
+      business_name: profile.business_name || profile.full_name,
       website: null,
       business_one_liner: profile.business_one_liner,
       business_context_pack: profile.business_context || {},
