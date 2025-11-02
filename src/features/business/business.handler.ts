@@ -21,7 +21,7 @@ import { createUserClient } from '@/infrastructure/database/supabase.client';
 export async function listBusinessProfiles(c: Context<{ Bindings: Env }>) {
   try {
     const auth = getAuthContext(c);
-    const accountId = auth.primaryAccountId;
+    const accountId = auth.accountId;
 
     // Validate query params
     const query = validateQuery(ListBusinessProfilesQuerySchema, {
@@ -59,7 +59,7 @@ export async function listBusinessProfiles(c: Context<{ Bindings: Env }>) {
 export async function getBusinessProfile(c: Context<{ Bindings: Env }>) {
   try {
     const auth = getAuthContext(c);
-    const accountId = auth.primaryAccountId;
+    const accountId = auth.accountId;
     const profileId = c.req.param('profileId');
 
     // Validate params
@@ -94,7 +94,7 @@ export async function getBusinessProfile(c: Context<{ Bindings: Env }>) {
 export async function createBusinessProfile(c: Context<{ Bindings: Env }>) {
   try {
     const auth = getAuthContext(c);
-    const accountId = auth.primaryAccountId;
+    const accountId = auth.accountId;
 
     // Validate body
     const body = await c.req.json();
@@ -125,7 +125,7 @@ export async function createBusinessProfile(c: Context<{ Bindings: Env }>) {
 export async function updateBusinessProfile(c: Context<{ Bindings: Env }>) {
   try {
     const auth = getAuthContext(c);
-    const accountId = auth.primaryAccountId;
+    const accountId = auth.accountId;
     const profileId = c.req.param('profileId');
 
     // Validate params
