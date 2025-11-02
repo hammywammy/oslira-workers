@@ -6,8 +6,7 @@ import { BaseRepository } from './base.repository';
 export interface CreditBalance {
   account_id: string;
   current_balance: number;
-  lifetime_earned: number;
-  lifetime_spent: number;
+  light_analyses_balance: number;
   last_transaction_at: string;
   created_at: string;
   updated_at: string;
@@ -26,25 +25,43 @@ export interface CreditTransaction {
 
 export class CreditsRepository extends BaseRepository<CreditBalance> {
   constructor(supabase: SupabaseClient) {
-    super(supabase, 'credit_balances');
+    super(supabase, 'balances');
   }
 
   /**
-   * Get current balance for account
+   * Get current credit balance for account
    */
   async getBalance(accountId: string): Promise<number> {
     const { data, error } = await this.supabase
-      .from('credit_balances')
+      .from('balances')
       .select('current_balance')
       .eq('account_id', accountId)
       .single();
 
     if (error) {
-      if (error.code === 'PGRST116') return 0;  // No balance record yet
+      if (error.code === 'PGRST116') return 0;
       throw error;
     }
 
     return data?.current_balance || 0;
+  }
+
+  /**
+   * Get light analyses balance for account
+   */
+  async getLightBalance(accountId: string): Promise<number> {
+    const { data, error } = await this.supabase
+      .from('balances')
+      .select('light_analyses_balance')
+      .eq('account_id', accountId)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') return 0;
+      throw error;
+    }
+
+    return data?.light_analyses_balance || 0;
   }
 
   /**
@@ -65,7 +82,68 @@ export class CreditsRepository extends BaseRepository<CreditBalance> {
       });
 
     if (error) throw error;
-    return data;  // Returns transaction ID
+    return data;
+  }
+
+  /**
+   * Deduct light analyses (uses RPC function)
+   */
+  async deductLightAnalyses(
+    accountId: string,
+    amount: number,
+    transactionType: string,
+    description: string
+  ): Promise<string> {
+    const { data, error } = await this.supabase
+      .rpc('deduct_light_analyses', {
+        p_account_id: accountId,
+        p_amount: amount,
+        p_transaction_type: transactionType,
+        p_description: description
+      });
+
+    if (error) throw error;
+    return data;
+  }
+
+  /**
+   * Add credits (for purchases/refunds)
+   */
+  async addCredits(
+    accountId: string,
+    amount: number,
+    transactionType: string,
+    description: string
+  ): Promise<string> {
+    return this.deductCredits(accountId, -amount, transactionType, description);
+  }
+
+  /**
+   * Add light analyses (for refunds)
+   */
+  async addLightAnalyses(
+    accountId: string,
+    amount: number,
+    transactionType: string,
+    description: string
+  ): Promise<string> {
+    return this.deductLightAnalyses(accountId, -amount, transactionType, description);
+  }
+
+  /**
+   * Check if account has sufficient credits
+   */
+  async hasSufficientCredits(accountId: string, required: number): Promise<boolean> {
+    const balance = await this.getBalance(accountId);
+    return balance >= required;
+  }
+
+  /**
+   * Check if account has sufficient light analyses
+   */
+  async hasSufficientLightAnalyses(accountId: string, required: number): Promise<boolean> {
+    const balance = await this.getLightBalance(accountId);
+    return balance >= required;
   }
 
   /**
@@ -95,13 +173,5 @@ export class CreditsRepository extends BaseRepository<CreditBalance> {
 
     if (error) throw error;
     return (data || []) as CreditTransaction[];
-  }
-
-  /**
-   * Check if account has sufficient credits
-   */
-  async hasSufficientCredits(accountId: string, required: number): Promise<boolean> {
-    const balance = await this.getBalance(accountId);
-    return balance >= required;
   }
 }
