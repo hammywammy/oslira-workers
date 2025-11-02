@@ -29,6 +29,7 @@ export interface CreateBusinessProfileData {
   account_id: string;
   full_name: string;
   signature_name: string;
+  business_name: string;
   business_one_liner: string;
   business_summary_generated: string;
   
@@ -171,6 +172,7 @@ export class BusinessRepository extends BaseRepository<BusinessProfile> {
         account_id: data.account_id,
         full_name: data.full_name,
         signature_name: data.signature_name,
+        business_name: data.business_name,
         business_one_liner: data.business_one_liner,
         business_summary_generated: data.business_summary_generated,
         business_context: business_context,
