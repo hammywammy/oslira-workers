@@ -5,7 +5,7 @@ import { z } from 'zod';
 /**
  * ONBOARDING VALIDATION - 4-STEP FLOW
  * 
- * Collects EXACTLY what the frontend sends, nothing more.
+ * UPDATED: Added business_name to Step 2
  */
 
 // ===============================================================================
@@ -17,6 +17,7 @@ const OnboardingFormSchema = z.object({
   full_name: z.string().min(2).max(100).trim(),
 
   // Step 2: Business Context
+  business_name: z.string().min(2).max(100).trim(),
   business_summary: z.string().min(50).max(750).trim(),
   communication_tone: z.enum(['professional', 'friendly', 'casual']),
 
@@ -67,6 +68,7 @@ export function transformToWorkflowParams(input: OnboardingFormInput) {
     signature_name: signature_name,  // Derived
     
     // Business context
+    business_name: input.business_name,
     business_summary: input.business_summary,
     communication_tone: input.communication_tone,
     
