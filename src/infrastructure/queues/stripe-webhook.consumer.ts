@@ -153,31 +153,46 @@ async function handleInvoicePaymentSucceeded(data: StripeWebhookMessage, env: En
   if (invoice.subscription) {
     const subscriptionId = invoice.subscription;
     
-    // Get subscription credits from metadata
     const supabase = await SupabaseClientFactory.createAdminClient(env);
-    const { data: subscription } = await supabase
+    
+    // Get subscription with plan details
+    const { data: subscription, error } = await supabase
       .from('subscriptions')
-      .select('plan_type')
+      .select(`
+        plan_type,
+        plans!inner(
+          credits_per_month,
+          features
+        )
+      `)
       .eq('stripe_subscription_id', subscriptionId)
       .eq('status', 'active')
       .single();
 
-    if (subscription) {
-      const creditsMap = { starter: 50, pro: 200, enterprise: 1000 };
-      const credits = creditsMap[subscription.plan_type as keyof typeof creditsMap] || 0;
-
-      if (credits > 0) {
-        const creditsRepo = new CreditsRepository(supabase);
-        await creditsRepo.addCredits(
-          accountId,
-          credits,
-          'subscription',
-          `Monthly ${subscription.plan_type} subscription renewal`
-        );
-
-        console.log(`[StripeWebhook] Granted ${credits} subscription credits to account ${accountId}`);
-      }
+    if (error || !subscription) {
+      console.error('[StripeWebhook] Subscription not found:', error);
+      return;
     }
+
+    const plan = subscription.plans;
+    const creditsQuota = plan.credits_per_month;
+    const lightQuota = parseInt(plan.features.light_analyses);
+
+    // Reset balances (monthly renewal via Stripe invoice)
+    await supabase
+      .from('balances')
+      .update({
+        current_balance: creditsQuota,
+        light_analyses_balance: lightQuota,
+        last_transaction_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq('account_id', accountId);
+
+    console.log(
+      `[StripeWebhook] Reset balances for ${accountId} (${subscription.plan_type}): ` +
+      `${creditsQuota} credits + ${lightQuota} light analyses`
+    );
   }
 }
 
