@@ -14,6 +14,7 @@ export class BusinessService {
 
   /**
    * List all business profiles for account
+   * FIXED: Uses actual database column names
    */
   async listProfiles(
     accountId: string,
@@ -22,13 +23,13 @@ export class BusinessService {
     const { page, pageSize } = query;
     const offset = (page - 1) * pageSize;
 
-    // Get profiles with counts
+    // Query with ACTUAL database columns
     const { data, error, count } = await this.supabase
       .from('business_profiles')
       .select(`
         id,
-        business_name,
-        website,
+        full_name,
+        signature_name,
         business_one_liner,
         created_at,
         updated_at
@@ -59,8 +60,8 @@ export class BusinessService {
 
         return {
           id: profile.id,
-          business_name: profile.business_name,
-          website: profile.website,
+          business_name: profile.full_name, // Map full_name to business_name for frontend
+          website: null, // Column doesn't exist in DB
           business_one_liner: profile.business_one_liner,
           leads_count: leadsCount || 0,
           analyses_count: analysesCount || 0,
@@ -75,6 +76,7 @@ export class BusinessService {
 
   /**
    * Get single business profile with full details
+   * FIXED: Uses actual database column names
    */
   async getProfileById(
     accountId: string,
@@ -109,10 +111,10 @@ export class BusinessService {
     return {
       id: profile.id,
       account_id: profile.account_id,
-      business_name: profile.business_name,
-      website: profile.website,
+      business_name: profile.full_name, // Map full_name to business_name
+      website: null, // Column doesn't exist
       business_one_liner: profile.business_one_liner,
-      business_context_pack: profile.business_context_pack || {},
+      business_context_pack: profile.business_context || {}, // Map business_context to business_context_pack
       context_version: profile.context_version,
       context_generated_at: profile.context_generated_at,
       context_manually_edited: profile.context_manually_edited,
@@ -135,10 +137,10 @@ export class BusinessService {
       .from('business_profiles')
       .insert({
         account_id: accountId,
-        business_name: input.business_name,
-        website: input.website,
+        full_name: input.business_name, // Map business_name to full_name
+        signature_name: input.business_name.toLowerCase().replace(/\s+/g, '_'),
         business_one_liner: input.business_one_liner,
-        business_context_pack: input.business_context_pack,
+        business_context: input.business_context_pack, // Map business_context_pack to business_context
         context_version: 'v1.0',
         context_manually_edited: true,
         context_updated_at: new Date().toISOString()
@@ -151,10 +153,10 @@ export class BusinessService {
     return {
       id: profile.id,
       account_id: profile.account_id,
-      business_name: profile.business_name,
-      website: profile.website,
+      business_name: profile.full_name,
+      website: null,
       business_one_liner: profile.business_one_liner,
-      business_context_pack: profile.business_context_pack || {},
+      business_context_pack: profile.business_context || {},
       context_version: profile.context_version,
       context_generated_at: profile.context_generated_at,
       context_manually_edited: profile.context_manually_edited,
@@ -185,24 +187,21 @@ export class BusinessService {
     };
 
     if (input.business_name !== undefined) {
-      updateData.business_name = input.business_name;
-    }
-    if (input.website !== undefined) {
-      updateData.website = input.website;
+      updateData.full_name = input.business_name; // Map to full_name
     }
     if (input.business_one_liner !== undefined) {
       updateData.business_one_liner = input.business_one_liner;
     }
     if (input.business_context_pack !== undefined) {
-      // Merge with existing context pack
+      // Merge with existing context
       const { data: current } = await this.supabase
         .from('business_profiles')
-        .select('business_context_pack')
+        .select('business_context')
         .eq('id', profileId)
         .single();
 
-      updateData.business_context_pack = {
-        ...(current?.business_context_pack || {}),
+      updateData.business_context = {
+        ...(current?.business_context || {}),
         ...input.business_context_pack
       };
       updateData.context_manually_edited = true;
@@ -236,10 +235,10 @@ export class BusinessService {
     return {
       id: profile.id,
       account_id: profile.account_id,
-      business_name: profile.business_name,
-      website: profile.website,
+      business_name: profile.full_name,
+      website: null,
       business_one_liner: profile.business_one_liner,
-      business_context_pack: profile.business_context_pack || {},
+      business_context_pack: profile.business_context || {},
       context_version: profile.context_version,
       context_generated_at: profile.context_generated_at,
       context_manually_edited: profile.context_manually_edited,
