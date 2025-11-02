@@ -20,7 +20,7 @@ import { createUserClient } from '@/infrastructure/database/supabase.client';
 export async function getCreditBalance(c: Context<{ Bindings: Env }>) {
   try {
     const auth = getAuthContext(c);
-    const accountId = auth.primaryAccountId;
+    const accountId = auth.accountId;
 
     // Get balance
     const supabase = await createUserClient(c.env);
@@ -42,7 +42,7 @@ export async function getCreditBalance(c: Context<{ Bindings: Env }>) {
 export async function getTransactions(c: Context<{ Bindings: Env }>) {
   try {
     const auth = getAuthContext(c);
-    const accountId = auth.primaryAccountId;
+    const accountId = auth.accountId;
 
     // Validate query params
     const query = validateQuery(ListTransactionsQuerySchema, {
@@ -81,7 +81,7 @@ export async function getTransactions(c: Context<{ Bindings: Env }>) {
 export async function purchaseCredits(c: Context<{ Bindings: Env }>) {
   try {
     const auth = getAuthContext(c);
-    const accountId = auth.primaryAccountId;
+    const accountId = auth.accountId;
     const userId = auth.userId;
 
     // Validate body
