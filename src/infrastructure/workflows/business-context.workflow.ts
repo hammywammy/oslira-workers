@@ -143,6 +143,95 @@ await step.do('mark_business_onboarded', async () => {
 
   await this.updateProgress(progressDO, 95, 'Business profile ready');
 });
+
+// =========================================================================
+// STEP 5: Link Stripe Customer to Subscription
+// =========================================================================
+await step.do('link_stripe_to_subscription', async () => {
+  console.log('[Step5] Linking Stripe customer to subscription');
+  
+  await this.updateProgress(progressDO, 93, 'Updating billing profile');
+
+  try {
+    const supabase = await SupabaseClientFactory.createAdminClient(this.env);
+    
+    // Get account's stripe_customer_id
+    const { data: account, error: accountError } = await supabase
+      .from('accounts')
+      .select('stripe_customer_id')
+      .eq('id', params.account_id)
+      .single();
+
+    if (accountError || !account?.stripe_customer_id) {
+      console.warn('[Step5] ⚠ No stripe_customer_id found - skipping subscription link', {
+        account_id: params.account_id,
+        has_account: !!account,
+        error: accountError?.message
+      });
+      return; // Non-fatal - continue workflow
+    }
+
+    // Update subscription with stripe_customer_id
+    const { error: updateError } = await supabase
+      .from('subscriptions')
+      .update({
+        stripe_customer_id: account.stripe_customer_id
+      })
+      .eq('account_id', params.account_id)
+      .is('stripe_customer_id', null); // Only update if not already set
+
+    if (updateError) {
+      console.error('[Step5] ⚠ Failed to update subscription with stripe_customer_id', {
+        error_code: updateError.code,
+        error_message: updateError.message,
+        account_id: params.account_id,
+        stripe_customer_id: account.stripe_customer_id
+      });
+      // Non-fatal - continue workflow
+    } else {
+      console.log('[Step5] ✓ Subscription linked to Stripe customer', {
+        account_id: params.account_id,
+        stripe_customer_id: account.stripe_customer_id
+      });
+    }
+
+    // Also update Stripe customer metadata with business context
+    const { StripeService } = await import('@/infrastructure/billing/stripe.service');
+    const stripeService = new StripeService(this.env);
+    
+    await stripeService.updateCustomerMetadata({
+      customer_id: account.stripe_customer_id,
+      metadata: {
+        business_profile_id: businessProfileId,
+        onboarding_completed: 'true',
+        onboarding_completed_at: new Date().toISOString(),
+        business_name: params.user_inputs.business_name,
+        signature_name: params.user_inputs.signature_name
+      }
+    });
+
+    console.log('[Step5] ✓ Stripe customer metadata updated', {
+      customer_id: account.stripe_customer_id,
+      business_profile_id: businessProfileId
+    });
+
+  } catch (error: any) {
+    // Log but don't fail workflow
+    console.error('[Step5] ⚠ Subscription/Stripe update failed (NON-FATAL)', {
+      error_message: error.message,
+      account_id: params.account_id
+    });
+  }
+
+  await this.updateProgress(progressDO, 95, 'Business profile ready');
+});
+
+// =========================================================================
+// STEP 6: Mark Complete  ← UPDATE FROM STEP 5 TO STEP 6
+// =========================================================================
+await step.do('mark_complete', async () => {
+  // ... existing code ...
+});      
 // STEP 5: Mark Complete
 await step.do('mark_complete', async () => {
   console.log('[Workflow] Calling /complete endpoint...');
