@@ -37,17 +37,18 @@ export interface BusinessContextWorkflowParams {
  */
 export interface OnboardingFormData {
   // Step 1: Identity
-  full_name: string;              // User's complete name (e.g., "Hamza Williams")
-  signature_name: string;         // Derived: First word of full_name (e.g., "Hamza")
+  full_name: string;              
+  signature_name: string;         
   
   // Step 2: Business Context
-  business_summary: string;       // 50-750 chars: User's raw business description
+  business_name: string;          // ← ADD THIS LINE
+  business_summary: string;       
   communication_tone: 'professional' | 'friendly' | 'casual';
   
   // Step 3: Target Customer
-  target_description: string;     // 50-750 chars: Who they want to reach
-  icp_min_followers: number;      // Minimum follower count for ideal customers
-  icp_max_followers: number;      // Maximum follower count for ideal customers
+  target_description: string;     
+  icp_min_followers: number;      
+  icp_max_followers: number;      
   target_company_sizes: ('startup' | 'smb' | 'enterprise')[];
 }
 
