@@ -69,24 +69,25 @@ export class BusinessContextWorkflow extends WorkflowEntrypoint<Env, BusinessCon
             has_business_summary_generated: !!contextResult.business_summary_generated
           });
 
-          const result = await businessRepo.createBusinessProfile({
-            account_id: params.account_id,
-            full_name: params.user_inputs.full_name,
-            signature_name: params.user_inputs.signature_name,
-            business_one_liner: contextResult.business_one_liner,
-            business_summary_generated: contextResult.business_summary_generated,
-            
-            // User inputs for manual JSON construction
-            business_summary: params.user_inputs.business_summary,
-            communication_tone: params.user_inputs.communication_tone,
-            target_description: params.user_inputs.target_description,
-            icp_min_followers: params.user_inputs.icp_min_followers,
-            icp_max_followers: params.user_inputs.icp_max_followers,
-            target_company_sizes: params.user_inputs.target_company_sizes,
-            
-            // AI generation metadata
-            ai_generation_metadata: contextResult.ai_metadata
-          });
+const result = await businessRepo.createBusinessProfile({
+  account_id: params.account_id,
+  full_name: params.user_inputs.full_name,
+  signature_name: params.user_inputs.signature_name,
+  business_name: params.user_inputs.business_name,  // ← ADD THIS LINE
+  business_one_liner: contextResult.business_one_liner,
+  business_summary_generated: contextResult.business_summary_generated,
+  
+  // User inputs for manual JSON construction
+  business_summary: params.user_inputs.business_summary,
+  communication_tone: params.user_inputs.communication_tone,
+  target_description: params.user_inputs.target_description,
+  icp_min_followers: params.user_inputs.icp_min_followers,
+  icp_max_followers: params.user_inputs.icp_max_followers,
+  target_company_sizes: params.user_inputs.target_company_sizes,
+  
+  // AI generation metadata
+  ai_generation_metadata: contextResult.ai_metadata
+});
 
           const saveDuration = Date.now() - saveStartTime;
           console.log('[Step3] ✓ Database save SUCCESS', {
