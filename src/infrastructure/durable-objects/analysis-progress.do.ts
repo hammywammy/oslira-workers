@@ -36,6 +36,15 @@ export class AnalysisProgressDO extends DurableObject {
     const method = request.method;
 
     try {
+      // POST /initialize - Initialize progress state (CRITICAL FIX: Added this route)
+      if (method === 'POST' && url.pathname === '/initialize') {
+        console.log('[AnalysisProgressDO] Initializing progress tracker');
+        const params = await request.json();
+        console.log('[AnalysisProgressDO] Initialize params:', params);
+        await this.initialize(params);
+        return Response.json({ success: true });
+      }
+
       // GET /progress - Get current progress
       if (method === 'GET' && url.pathname === '/progress') {
         const progress = await this.getProgress();
@@ -69,10 +78,16 @@ export class AnalysisProgressDO extends DurableObject {
         return Response.json({ success: true });
       }
 
+      console.warn('[AnalysisProgressDO] Unknown route:', method, url.pathname);
       return Response.json({ error: 'Not found' }, { status: 404 });
 
     } catch (error: any) {
-      console.error('[AnalysisProgressDO] Error:', error);
+      console.error('[AnalysisProgressDO] Error:', {
+        method,
+        path: url.pathname,
+        error: error.message,
+        stack: error.stack
+      });
       return Response.json({ error: error.message }, { status: 500 });
     }
   }
@@ -86,8 +101,13 @@ export class AnalysisProgressDO extends DurableObject {
     username: string;
     analysis_type: string;
   }): Promise<void> {
+    console.log('[AnalysisProgressDO] Creating initial state:', params);
+    
     const initialState: AnalysisProgressState = {
       run_id: params.run_id,
+      account_id: params.account_id,
+      username: params.username,
+      analysis_type: params.analysis_type,
       status: 'pending',
       progress: 0,
       current_step: 'Initializing analysis',
@@ -97,9 +117,11 @@ export class AnalysisProgressDO extends DurableObject {
     };
 
     await this.state.storage.put('progress', initialState);
+    console.log('[AnalysisProgressDO] Initial state saved to storage');
     
     // Set automatic cleanup alarm (24 hours)
     await this.state.storage.setAlarm(Date.now() + 24 * 60 * 60 * 1000);
+    console.log('[AnalysisProgressDO] Cleanup alarm set for 24 hours');
   }
 
   /**
