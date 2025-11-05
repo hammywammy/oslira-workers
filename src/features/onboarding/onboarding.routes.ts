@@ -21,14 +21,16 @@ import {
 
 export function registerOnboardingRoutes(app: Hono<{ Bindings: Env }>) {
   
+  console.log('[Routes] Registering onboarding routes');
+  
   // All onboarding routes require authentication
   app.use('/api/business/generate-context', authMiddleware);
   app.use('/api/business/generate-context/*', authMiddleware);
 
-  // Rate limiting (5 generations per hour per user)
+  // Rate limiting (50 generations per hour per user)
   app.use('/api/business/generate-context', rateLimitMiddleware({
     requests: 50,
-    window: 3600
+    windowSeconds: 3600 // FIXED: renamed from 'window'
   }));
 
   /**
@@ -51,4 +53,6 @@ export function registerOnboardingRoutes(app: Hono<{ Bindings: Env }>) {
    * Returns full business context data
    */
   app.get('/api/business/generate-context/:runId/result', getGenerationResult);
+  
+  console.log('[Routes] Onboarding routes registered successfully');
 }
