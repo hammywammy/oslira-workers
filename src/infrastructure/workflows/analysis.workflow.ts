@@ -226,20 +226,23 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         return analysis.id;
       });
 
-      // Step 10: Mark complete in progress tracker
-      await step.do('complete_progress', async () => {
-        await progressDO.fetch('http://do/complete', {
-          method: 'POST',
-          body: JSON.stringify({
-            overall_score: aiResult.overall_score,
-            niche_fit_score: aiResult.niche_fit_score,
-            engagement_score: aiResult.engagement_score,
-            confidence_level: aiResult.confidence_level,
-            summary_text: aiResult.summary_text,
-            outreach_message: aiResult.outreach_message
-          })
-        });
-      });
+// Step 10: Mark complete in progress tracker
+await step.do('complete_progress', async () => {
+  await progressDO.fetch('http://do/complete', {
+    method: 'POST',
+    body: JSON.stringify({
+      result: {
+        lead_id: leadId, // ← CRITICAL: Frontend needs this
+        overall_score: aiResult.overall_score,
+        niche_fit_score: aiResult.niche_fit_score,
+        engagement_score: aiResult.engagement_score,
+        confidence_level: aiResult.confidence_level,
+        summary_text: aiResult.summary_text,
+        outreach_message: aiResult.outreach_message
+      }
+    })
+  });
+});
 
       return {
         success: true,
