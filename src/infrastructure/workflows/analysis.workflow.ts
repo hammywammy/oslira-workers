@@ -15,14 +15,7 @@ import { getSecret } from '@/infrastructure/config/secrets';
 /**
  * ANALYSIS WORKFLOW
  * 
- * Async orchestration for Instagram profile analysis
- * 
- * Benefits over synchronous execution:
- * - No Worker timeout limits (can run 30+ minutes)
- * - Automatic retry on transient failures
- * - Progress tracking via Durable Object
- * - Cancellation support
- * - Cost-effective (only pay for execution time)
+ * Orchestrates async Instagram profile analysis
  * 
  * Flow:
  * 1. Initialize progress tracker
@@ -31,15 +24,22 @@ import { getSecret } from '@/infrastructure/config/secrets';
  * 4. Get/scrape profile
  * 5. Execute AI analysis
  * 6. Save results
- * 7. Update progress to 100%
+ * 7. Mark complete
  */
 
 export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowParams> {
   
   async run(event: WorkflowEvent<AnalysisWorkflowParams>, step: WorkflowStep) {
     const params = event.payload;
+    const creditsCost = this.getCreditCost(params.analysis_type); // FIXED: Defined at top level
     
     try {
+      console.log(`[Workflow][${params.run_id}] START`, {
+        username: params.username,
+        type: params.analysis_type,
+        credits: creditsCost
+      });
+
       // Step 1: Initialize progress tracker
       const progressDO = await step.do('initialize_progress', async () => {
         const id = this.env.ANALYSIS_PROGRESS.idFromName(params.run_id);
@@ -85,10 +85,8 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       });
 
       // Step 3: Verify & deduct credits
-      const creditsCost = this.getCreditCost(params.analysis_type);
-      
       await step.do('deduct_credits', async () => {
-        await this.updateProgress(progressDO, 10, 'Deducting credits');
+        await this.updateProgress(progressDO, 10, 'Verifying credits');
         
         const supabase = await SupabaseClientFactory.createAdminClient(this.env);
         const creditsRepo = new CreditsRepository(supabase);
@@ -226,23 +224,29 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         return analysis.id;
       });
 
-// Step 10: Mark complete in progress tracker
-await step.do('complete_progress', async () => {
-  await progressDO.fetch('http://do/complete', {
-    method: 'POST',
-    body: JSON.stringify({
-      result: {
-        lead_id: leadId, // ← CRITICAL: Frontend needs this
-        overall_score: aiResult.overall_score,
-        niche_fit_score: aiResult.niche_fit_score,
-        engagement_score: aiResult.engagement_score,
-        confidence_level: aiResult.confidence_level,
-        summary_text: aiResult.summary_text,
-        outreach_message: aiResult.outreach_message
-      }
-    })
-  });
-});
+      // Step 10: Mark complete in progress tracker
+      await step.do('complete_progress', async () => {
+        await progressDO.fetch('http://do/complete', {
+          method: 'POST',
+          body: JSON.stringify({
+            result: {
+              lead_id: leadId,
+              overall_score: aiResult.overall_score,
+              niche_fit_score: aiResult.niche_fit_score,
+              engagement_score: aiResult.engagement_score,
+              confidence_level: aiResult.confidence_level,
+              summary_text: aiResult.summary_text,
+              outreach_message: aiResult.outreach_message
+            }
+          })
+        });
+      });
+
+      console.log(`[Workflow][${params.run_id}] SUCCESS`, {
+        leadId,
+        analysisId,
+        score: aiResult.overall_score
+      });
 
       return {
         success: true,
@@ -252,6 +256,12 @@ await step.do('complete_progress', async () => {
       };
 
     } catch (error: any) {
+      console.error(`[Workflow][${params.run_id}] FAILED`, {
+        error: error.message,
+        step: error.step || 'unknown',
+        stack: error.stack?.split('\n')[0]
+      });
+
       // Refund credits on failure
       await step.do('refund_credits', async () => {
         try {
@@ -260,12 +270,16 @@ await step.do('complete_progress', async () => {
           
           await creditsRepo.addCredits(
             params.account_id,
-            creditsCost,
+            creditsCost, // FIXED: Now in scope
             'refund',
             `Analysis failed: ${error.message}`
           );
-        } catch (refundError) {
-          console.error('[Workflow] Refund failed:', refundError);
+          
+          console.log(`[Workflow][${params.run_id}] Credits refunded: ${creditsCost}`);
+        } catch (refundError: any) {
+          console.error(`[Workflow][${params.run_id}] Refund failed:`, {
+            error: refundError.message
+          });
         }
       });
 
