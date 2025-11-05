@@ -93,7 +93,7 @@ export async function analyzeInstagramLead(c: Context<{ Bindings: Env }>) {
     }
     console.log(`[AnalyzeInstagramLead][${requestId}] Environment bindings OK`);
 
-    // Step 6: Trigger workflow
+    // Step 6: Trigger workflow (workflow will handle progress initialization)
     console.log(`[AnalyzeInstagramLead][${requestId}] Step 6: Triggering ANALYSIS_WORKFLOW`);
     const workflowParams = {
       run_id: runId,
@@ -121,58 +121,14 @@ export async function analyzeInstagramLead(c: Context<{ Bindings: Env }>) {
       throw new Error(`Workflow creation failed: ${workflowError.message}`);
     }
 
-    // Step 7: Initialize progress tracker
-    console.log(`[AnalyzeInstagramLead][${requestId}] Step 7: Initializing progress tracker`);
-    try {
-      const progressId = c.env.ANALYSIS_PROGRESS.idFromName(runId);
-      console.log(`[AnalyzeInstagramLead][${requestId}] Progress ID generated:`, {
-        progressId: progressId.toString()
-      });
-      
-      const progressDO = c.env.ANALYSIS_PROGRESS.get(progressId);
-      console.log(`[AnalyzeInstagramLead][${requestId}] Progress DO instance obtained`);
-      
-      const progressPayload = {
-        run_id: runId,
-        account_id: auth.accountId,
-        username: input.username,
-        analysis_type: input.analysisType
-      };
-      console.log(`[AnalyzeInstagramLead][${requestId}] Progress payload:`, progressPayload);
-      
-      const progressResponse = await progressDO.fetch('http://do/initialize', {
-        method: 'POST',
-        body: JSON.stringify(progressPayload)
-      });
-      
-      console.log(`[AnalyzeInstagramLead][${requestId}] Progress tracker initialized:`, {
-        status: progressResponse.status,
-        statusText: progressResponse.statusText
-      });
-      
-      if (!progressResponse.ok) {
-        const errorText = await progressResponse.text();
-        console.error(`[AnalyzeInstagramLead][${requestId}] Progress init failed:`, {
-          status: progressResponse.status,
-          error: errorText
-        });
-        throw new Error(`Progress initialization failed: ${errorText}`);
-      }
-    } catch (progressError: any) {
-      console.error(`[AnalyzeInstagramLead][${requestId}] Progress tracker error:`, {
-        error: progressError.message,
-        stack: progressError.stack
-      });
-      throw new Error(`Progress tracker failed: ${progressError.message}`);
-    }
-
-    // Step 8: Success response
+    // Step 7: Return immediately - workflow handles progress initialization
     const elapsed = Date.now() - startTime;
     console.log(`[AnalyzeInstagramLead][${requestId}] SUCCESS - Analysis started`, {
       runId,
       elapsed: `${elapsed}ms`,
       username: input.username,
-      analysisType: input.analysisType
+      analysisType: input.analysisType,
+      note: 'Workflow will initialize progress tracker in its Step 1'
     });
 
     return successResponse(c, {
