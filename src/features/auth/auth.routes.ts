@@ -2,6 +2,7 @@
 
 import { Hono } from 'hono';
 import type { Env } from '@/shared/types/env.types';
+import { authMiddleware } from '@/shared/middleware/auth.middleware';
 import { rateLimitMiddleware, RATE_LIMITS } from '@/shared/middleware/rate-limit.middleware';
 import {
   handleGoogleCallback,
