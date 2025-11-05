@@ -21,6 +21,8 @@ import {
 
 export function registerBulkAnalysisRoutes(app: Hono<{ Bindings: Env }>) {
   
+  console.log('[Routes] Registering bulk analysis routes');
+  
   // All bulk analysis routes require authentication
   app.use('/api/leads/analyze/bulk', authMiddleware);
   app.use('/api/leads/analyze/bulk/*', authMiddleware);
@@ -28,7 +30,7 @@ export function registerBulkAnalysisRoutes(app: Hono<{ Bindings: Env }>) {
   // Stricter rate limiting for bulk operations
   app.use('/api/leads/analyze/bulk', rateLimitMiddleware({
     requests: 5,
-    window: 3600 // 5 requests per hour
+    windowSeconds: 3600 // 5 requests per hour (FIXED: renamed from 'window')
   }));
 
   /**
@@ -49,4 +51,6 @@ export function registerBulkAnalysisRoutes(app: Hono<{ Bindings: Env }>) {
    * Cancel all in-progress analyses in batch
    */
   app.post('/api/leads/analyze/bulk/:batchId/cancel', cancelBatch);
+  
+  console.log('[Routes] Bulk analysis routes registered successfully');
 }
