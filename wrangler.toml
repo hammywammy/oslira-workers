@@ -30,6 +30,7 @@ binding = "ANALYTICS_ENGINE"
 binding = "ANALYSIS_WORKFLOW"
 name = "analysis-workflow"
 class_name = "AnalysisWorkflow"
+retry_policy = "none"  # ← Add this line
 
 [[workflows]]
 binding = "BUSINESS_CONTEXT_WORKFLOW"
