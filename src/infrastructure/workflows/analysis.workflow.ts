@@ -15,23 +15,14 @@ import { getSecret } from '@/infrastructure/config/secrets';
 /**
  * ANALYSIS WORKFLOW
  * 
- * Orchestrates async Instagram profile analysis
- * 
- * Flow:
- * 1. Initialize progress tracker
- * 2. Check duplicate & credits
- * 3. Deduct credits
- * 4. Get/scrape profile
- * 5. Execute AI analysis
- * 6. Save results
- * 7. Mark complete
+ * CRITICAL: No step retries - fail fast on errors
  */
 
 export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowParams> {
   
   async run(event: WorkflowEvent<AnalysisWorkflowParams>, step: WorkflowStep) {
     const params = event.payload;
-    const creditsCost = this.getCreditCost(params.analysis_type); // FIXED: Defined at top level
+    const creditsCost = this.getCreditCost(params.analysis_type);
     
     try {
       console.log(`[Workflow][${params.run_id}] START`, {
@@ -41,26 +32,13 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       });
 
       // Step 1: Initialize progress tracker
-      const progressDO = await step.do('initialize_progress', async () => {
-        const id = this.env.ANALYSIS_PROGRESS.idFromName(params.run_id);
-        const stub = this.env.ANALYSIS_PROGRESS.get(id);
-        
-        await stub.fetch('http://do/initialize', {
-          method: 'POST',
-          body: JSON.stringify({
-            run_id: params.run_id,
-            account_id: params.account_id,
-            username: params.username,
-            analysis_type: params.analysis_type
-          })
-        });
-        
-        return stub;
+      await step.do('initialize_progress', async () => {
+        await this.updateProgress(params.run_id, 0, 'Initializing');
       });
 
       // Step 2: Check duplicate analysis
       await step.do('check_duplicate', async () => {
-        await this.updateProgress(progressDO, 5, 'Checking for duplicates');
+        await this.updateProgress(params.run_id, 5, 'Checking for duplicates');
         
         const supabase = await SupabaseClientFactory.createAdminClient(this.env);
         const leadsRepo = new LeadsRepository(supabase);
@@ -86,7 +64,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
       // Step 3: Verify & deduct credits
       await step.do('deduct_credits', async () => {
-        await this.updateProgress(progressDO, 10, 'Verifying credits');
+        await this.updateProgress(params.run_id, 10, 'Verifying credits');
         
         const supabase = await SupabaseClientFactory.createAdminClient(this.env);
         const creditsRepo = new CreditsRepository(supabase);
@@ -110,7 +88,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
       // Step 4: Get business profile
       const business = await step.do('get_business_profile', async () => {
-        await this.updateProgress(progressDO, 15, 'Loading business profile');
+        await this.updateProgress(params.run_id, 15, 'Loading business profile');
         
         const supabase = await SupabaseClientFactory.createAdminClient(this.env);
         const businessRepo = new BusinessRepository(supabase);
@@ -125,7 +103,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
       // Step 5: Check R2 cache
       let profile = await step.do('check_cache', async () => {
-        await this.updateProgress(progressDO, 20, 'Checking cache');
+        await this.updateProgress(params.run_id, 20, 'Checking cache');
         
         const cacheService = new R2CacheService(this.env.R2_CACHE_BUCKET);
         return await cacheService.get(params.username, params.analysis_type);
@@ -134,7 +112,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       // Step 6: Scrape profile if cache miss
       if (!profile) {
         profile = await step.do('scrape_profile', async () => {
-          await this.updateProgress(progressDO, 30, 'Scraping Instagram profile');
+          await this.updateProgress(params.run_id, 30, 'Scraping Instagram profile');
           
           const apifyToken = await getSecret('APIFY_API_TOKEN', this.env, this.env.APP_ENV);
           const apifyAdapter = new ApifyAdapter(apifyToken);
@@ -152,7 +130,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
       // Step 7: Execute AI analysis
       const aiResult = await step.do('ai_analysis', async () => {
-        await this.updateProgress(progressDO, 50, 'Running AI analysis');
+        await this.updateProgress(params.run_id, 50, 'Running AI analysis');
         
         const aiService = await AIAnalysisService.create(this.env);
         
@@ -168,7 +146,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
       // Step 8: Upsert lead
       const leadId = await step.do('upsert_lead', async () => {
-        await this.updateProgress(progressDO, 80, 'Saving lead data');
+        await this.updateProgress(params.run_id, 80, 'Saving lead data');
         
         const supabase = await SupabaseClientFactory.createAdminClient(this.env);
         const leadsRepo = new LeadsRepository(supabase);
@@ -194,7 +172,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
       // Step 9: Save analysis
       const analysisId = await step.do('save_analysis', async () => {
-        await this.updateProgress(progressDO, 90, 'Saving analysis results');
+        await this.updateProgress(params.run_id, 90, 'Saving analysis results');
         
         const supabase = await SupabaseClientFactory.createAdminClient(this.env);
         const analysisRepo = new AnalysisRepository(supabase);
@@ -224,8 +202,11 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         return analysis.id;
       });
 
-      // Step 10: Mark complete in progress tracker
+      // Step 10: Mark complete
       await step.do('complete_progress', async () => {
+        const id = this.env.ANALYSIS_PROGRESS.idFromName(params.run_id);
+        const progressDO = this.env.ANALYSIS_PROGRESS.get(id);
+        
         await progressDO.fetch('http://do/complete', {
           method: 'POST',
           body: JSON.stringify({
@@ -258,7 +239,6 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
     } catch (error: any) {
       console.error(`[Workflow][${params.run_id}] FAILED`, {
         error: error.message,
-        step: error.step || 'unknown',
         stack: error.stack?.split('\n')[0]
       });
 
@@ -270,7 +250,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           
           await creditsRepo.addCredits(
             params.account_id,
-            creditsCost, // FIXED: Now in scope
+            creditsCost,
             'refund',
             `Analysis failed: ${error.message}`
           );
@@ -283,34 +263,44 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         }
       });
 
-      // Mark as failed in progress tracker
-      const id = this.env.ANALYSIS_PROGRESS.idFromName(params.run_id);
-      const progressDO = this.env.ANALYSIS_PROGRESS.get(id);
-      
-      await progressDO.fetch('http://do/fail', {
-        method: 'POST',
-        body: JSON.stringify({ message: error.message })
-      });
+      // Mark as failed
+      await this.markFailed(params.run_id, error.message);
 
       throw error;
     }
   }
 
   /**
-   * Update progress in Durable Object
+   * Update progress - gets fresh stub each time (no serialization)
    */
   private async updateProgress(
-    progressDO: DurableObjectStub,
+    runId: string,
     progress: number,
     currentStep: string
   ): Promise<void> {
-    await progressDO.fetch('http://do/update', {
+    const id = this.env.ANALYSIS_PROGRESS.idFromName(runId);
+    const stub = this.env.ANALYSIS_PROGRESS.get(id);
+    
+    await stub.fetch('http://do/update', {
       method: 'POST',
       body: JSON.stringify({
         progress,
         current_step: currentStep,
         status: progress === 100 ? 'complete' : 'processing'
       })
+    });
+  }
+
+  /**
+   * Mark as failed
+   */
+  private async markFailed(runId: string, errorMessage: string): Promise<void> {
+    const id = this.env.ANALYSIS_PROGRESS.idFromName(runId);
+    const stub = this.env.ANALYSIS_PROGRESS.get(id);
+    
+    await stub.fetch('http://do/fail', {
+      method: 'POST',
+      body: JSON.stringify({ message: errorMessage })
     });
   }
 
