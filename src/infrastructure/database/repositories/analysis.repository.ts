@@ -12,8 +12,6 @@ export interface Analysis {
   analysis_type: 'light';
   overall_score: number;
   summary_text: string | null;
-  ai_model_used: string;
-  credits_used: number;
   actual_cost: number | null;
   status: 'pending' | 'processing' | 'complete' | 'failed' | 'cancelled';
   error_message: string | null;
@@ -30,8 +28,6 @@ export interface CreateAnalysisData {
   account_id: string;
   business_profile_id: string;
   analysis_type: 'light';
-  credits_used: number;
-  ai_model_used: string;
   status?: 'pending' | 'processing';
 }
 

@@ -223,7 +223,6 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           follower_count: profile.follower_count,
           following_count: profile.following_count,
           post_count: profile.post_count,
-          bio: profile.bio,
           external_url: profile.external_url,
           profile_pic_url: profile.profile_pic_url,
           is_verified: profile.is_verified,
@@ -249,8 +248,6 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           account_id: params.account_id,
           business_profile_id: params.business_profile_id,
           analysis_type: params.analysis_type,
-          credits_used: creditsCost,
-          ai_model_used: aiResult.model_used,
           status: 'complete'
         });
 

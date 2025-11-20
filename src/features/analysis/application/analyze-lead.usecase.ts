@@ -304,7 +304,6 @@ private async deductCreditsForAnalysis(
       follower_count: profile.follower_count,
       following_count: profile.following_count,
       post_count: profile.post_count,
-      bio: profile.bio,
       external_url: profile.external_url,
       profile_pic_url: profile.profile_pic_url,
       is_verified: profile.is_verified,
@@ -336,8 +335,6 @@ private async deductCreditsForAnalysis(
       account_id: data.accountId,
       business_profile_id: data.businessProfileId,
       analysis_type: data.analysisType,
-      credits_used: data.creditsCharged,
-      ai_model_used: data.result.model_used,
       status: 'complete'
     });
 

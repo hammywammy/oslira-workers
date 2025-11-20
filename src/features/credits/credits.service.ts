@@ -34,7 +34,8 @@ export class CreditsService {
         // No balance record yet - return zero balance
         return {
           account_id: accountId,
-          current_balance: 0,
+          credit_balance: 0,
+          light_analyses_balance: 0,
           last_transaction_at: null,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
@@ -142,7 +143,7 @@ export class CreditsService {
         return {
           transaction_id: transactionId,
           amount: input.amount,
-          balance_after: balance.current_balance,
+          balance_after: balance.credit_balance,
           stripe_payment_intent_id: paymentIntent.id,
           status: 'succeeded'
         };
@@ -175,6 +176,6 @@ export class CreditsService {
    */
   async hasSufficientCredits(accountId: string, required: number): Promise<boolean> {
     const balance = await this.getBalance(accountId);
-    return balance.current_balance >= required;
+    return balance.credit_balance >= required;
   }
 }
