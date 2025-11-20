@@ -101,8 +101,13 @@ export class AnalysisProgressDO extends DurableObject {
     username: string;
     analysis_type: string;
   }): Promise<void> {
-    console.log('[AnalysisProgressDO] Creating initial state:', params);
-    
+    console.log(`[AnalysisProgressDO][${params.run_id}] Initializing with params:`, {
+      run_id: params.run_id,
+      account_id: params.account_id,
+      username: params.username,
+      analysis_type: params.analysis_type
+    });
+
     const initialState: AnalysisProgressState = {
       run_id: params.run_id,
       account_id: params.account_id,
@@ -111,17 +116,17 @@ export class AnalysisProgressDO extends DurableObject {
       status: 'pending',
       progress: 0,
       current_step: 'Initializing analysis',
-      total_steps: 10, // Will vary by analysis type
+      total_steps: 10,
       started_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
 
     await this.state.storage.put('progress', initialState);
-    console.log('[AnalysisProgressDO] Initial state saved to storage');
-    
+    console.log(`[AnalysisProgressDO][${params.run_id}] State saved to storage successfully`);
+
     // Set automatic cleanup alarm (24 hours)
     await this.state.storage.setAlarm(Date.now() + 24 * 60 * 60 * 1000);
-    console.log('[AnalysisProgressDO] Cleanup alarm set for 24 hours');
+    console.log(`[AnalysisProgressDO][${params.run_id}] Cleanup alarm set for 24 hours`);
   }
 
   /**
@@ -140,13 +145,17 @@ export class AnalysisProgressDO extends DurableObject {
     status?: 'pending' | 'processing' | 'complete' | 'failed' | 'cancelled';
   }): Promise<void> {
     const current = await this.getProgress();
-    
+
     if (!current) {
+      console.error('[AnalysisProgressDO] Update called but progress not initialized!', update);
       throw new Error('Progress not initialized');
     }
 
+    console.log(`[AnalysisProgressDO][${current.run_id}] Updating progress: ${update.progress}% - ${update.current_step}`);
+
     // Check if cancelled
     if (current.status === 'cancelled') {
+      console.warn(`[AnalysisProgressDO][${current.run_id}] Analysis already cancelled`);
       throw new Error('Analysis cancelled by user');
     }
 
@@ -159,6 +168,7 @@ export class AnalysisProgressDO extends DurableObject {
     };
 
     await this.state.storage.put('progress', updated);
+    console.log(`[AnalysisProgressDO][${current.run_id}] Progress updated successfully`);
   }
 
   /**
