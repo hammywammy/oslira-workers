@@ -22,33 +22,15 @@ export interface ModelPricing {
 export const AI_PRICING: Record<string, ModelPricing> = {
 
   'gpt-5-nano': {
-  per_1m_input: 0.15,     // Assuming same as mini, confirm pricing
-  per_1m_output: 0.60,
-  provider: 'openai',
-  max_tokens: 16384,
-  supports_json_schema: true,
-  reasoning_effort: 'low'
-},
+    per_1m_input: 0.15,
+    per_1m_output: 0.60,
+    provider: 'openai',
+    max_tokens: 16384,
+    supports_json_schema: true,
+    reasoning_effort: 'low'
+  },
 
-'gpt-5-mini': {
-  per_1m_input: 0.30,
-  per_1m_output: 1.20,
-  provider: 'openai',
-  max_tokens: 16384,
-  supports_json_schema: true,
-  reasoning_effort: 'medium'
-},
-
-'gpt-5': {
-  per_1m_input: 0.60,
-  per_1m_output: 2.40,
-  provider: 'openai',
-  max_tokens: 16384,
-  supports_json_schema: true,
-  reasoning_effort: 'high'
-},
-  
-  // Anthropic Models
+  // Anthropic Models (kept for future use)
   'claude-3-5-sonnet-20241022': {
     per_1m_input: 3.00,
     per_1m_output: 15.00,
@@ -70,51 +52,9 @@ export interface AnalysisModelConfig {
 
 export const ANALYSIS_MODEL_MAPPING: Record<string, AnalysisModelConfig> = {
   'light': {
-    model: 'gpt-5-nano',  // ✅ CHANGED from gpt-4o-mini
+    model: 'gpt-5-nano',
     reasoning_effort: 'low',
-    max_tokens: 1000
-  },
-  
-  'deep_core': {
-    model: 'gpt-5-mini',  // ✅ Already correct
-    reasoning_effort: 'medium',
-    max_tokens: 2000
-  },
-  
-  'deep_outreach': {
-    model: 'gpt-5-mini',  // ✅ Already correct
-    reasoning_effort: 'low',
-    max_tokens: 800
-  },
-  
-  'deep_personality': {
-    model: 'gpt-5-mini',  // ✅ Already correct
-    reasoning_effort: 'low',
-    max_tokens: 600
-  },
-  
-  'xray_psychographic': {
-    model: 'gpt-5',  // ✅ Already correct
-    reasoning_effort: 'medium',
-    max_tokens: 2500
-  },
-  
-  'xray_commercial': {
-    model: 'gpt-5-mini',  // ✅ Already correct
-    reasoning_effort: 'medium',
-    max_tokens: 1500
-  },
-  
-  'xray_outreach': {
-    model: 'gpt-5-mini',  // ✅ Already correct
-    reasoning_effort: 'low',
-    max_tokens: 800
-  },
-  
-  'xray_personality': {
-    model: 'gpt-5-mini',  // ✅ Already correct
-    reasoning_effort: 'low',
-    max_tokens: 600
+    max_tokens: 400
   }
 };
 
@@ -131,10 +71,10 @@ export function calculateAICost(
     console.warn(`Unknown model: ${model}, cost set to 0`);
     return 0;
   }
-  
+
   const inputCost = (inputTokens / 1_000_000) * pricing.per_1m_input;
   const outputCost = (outputTokens / 1_000_000) * pricing.per_1m_output;
-  
+
   return parseFloat((inputCost + outputCost).toFixed(6));
 }
 
@@ -156,9 +96,9 @@ export function getModelConfig(analysisType: string): AnalysisModelConfig {
 export function estimateCost(analysisType: string): number {
   const config = getModelConfig(analysisType);
   const pricing = AI_PRICING[config.model];
-  
+
   const estimatedInput = 1000; // Rough estimate
   const estimatedOutput = config.max_tokens;
-  
+
   return calculateAICost(config.model, estimatedInput, estimatedOutput);
 }

@@ -131,17 +131,9 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       // Step 7: Execute AI analysis
       const aiResult = await step.do('ai_analysis', async () => {
         await this.updateProgress(params.run_id, 50, 'Running AI analysis');
-        
+
         const aiService = await AIAnalysisService.create(this.env);
-        
-        switch (params.analysis_type) {
-          case 'light':
-            return await aiService.executeLightAnalysis(business, profile);
-          case 'deep':
-            return await aiService.executeDeepAnalysis(business, profile);
-          case 'xray':
-            return await aiService.executeXRayAnalysis(business, profile);
-        }
+        return await aiService.executeLightAnalysis(business, profile);
       });
 
       // Step 8: Upsert lead
@@ -190,9 +182,6 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         
         await analysisRepo.updateAnalysis(params.run_id, {
           overall_score: aiResult.overall_score,
-          niche_fit_score: aiResult.niche_fit_score,
-          engagement_score: aiResult.engagement_score,
-          confidence_level: aiResult.confidence_level,
           summary_text: aiResult.summary_text,
           actual_cost: aiResult.total_cost,
           status: 'complete',
@@ -206,18 +195,14 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       await step.do('complete_progress', async () => {
         const id = this.env.ANALYSIS_PROGRESS.idFromName(params.run_id);
         const progressDO = this.env.ANALYSIS_PROGRESS.get(id);
-        
+
         await progressDO.fetch('http://do/complete', {
           method: 'POST',
           body: JSON.stringify({
             result: {
               lead_id: leadId,
               overall_score: aiResult.overall_score,
-              niche_fit_score: aiResult.niche_fit_score,
-              engagement_score: aiResult.engagement_score,
-              confidence_level: aiResult.confidence_level,
-              summary_text: aiResult.summary_text,
-              outreach_message: aiResult.outreach_message
+              summary_text: aiResult.summary_text
             }
           })
         });
@@ -307,17 +292,15 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
   /**
    * Get credit cost by analysis type
    */
-  private getCreditCost(type: 'light' | 'deep' | 'xray'): number {
-    const costs = { light: 1, deep: 3, xray: 5 };
-    return costs[type];
+  private getCreditCost(type: 'light'): number {
+    return 1;
   }
 
   /**
    * Get posts limit by analysis type
    */
-  private getPostsLimit(type: 'light' | 'deep' | 'xray'): number {
-    const limits = { light: 6, deep: 12, xray: 12 };
-    return limits[type];
+  private getPostsLimit(type: 'light'): number {
+    return 6;
   }
 }
 

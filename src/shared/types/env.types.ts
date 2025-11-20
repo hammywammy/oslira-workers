@@ -58,7 +58,7 @@ export interface AnalysisWorkflowParams {
   account_id: string;
   business_profile_id: string;
   username: string;
-  analysis_type: 'light' | 'deep' | 'xray';
+  analysis_type: 'light';
   requested_at: string;
 }
 
@@ -67,6 +67,9 @@ export interface AnalysisWorkflowParams {
  */
 export interface AnalysisProgressState {
   run_id: string;
+  account_id?: string;
+  username?: string;
+  analysis_type?: string;
   status: 'pending' | 'processing' | 'complete' | 'failed' | 'cancelled';
   progress: number; // 0-100
   current_step: string;
@@ -77,10 +80,6 @@ export interface AnalysisProgressState {
   error_message?: string;
   result?: {
     overall_score: number;
-    niche_fit_score: number;
-    engagement_score: number;
-    confidence_level: number;
     summary_text: string;
-    outreach_message?: string;
   };
 }

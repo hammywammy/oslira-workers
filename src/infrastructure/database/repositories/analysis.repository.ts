@@ -9,11 +9,8 @@ export interface Analysis {
   lead_id: string;
   account_id: string;
   business_profile_id: string;
-  analysis_type: 'light' | 'deep' | 'xray';
+  analysis_type: 'light';
   overall_score: number;
-  niche_fit_score: number;
-  engagement_score: number;
-  confidence_level: number;
   summary_text: string | null;
   ai_model_used: string;
   credits_used: number;
@@ -32,7 +29,7 @@ export interface CreateAnalysisData {
   lead_id: string;
   account_id: string;
   business_profile_id: string;
-  analysis_type: 'light' | 'deep' | 'xray';
+  analysis_type: 'light';
   credits_used: number;
   ai_model_used: string;
   status?: 'pending' | 'processing';
@@ -40,9 +37,6 @@ export interface CreateAnalysisData {
 
 export interface UpdateAnalysisData {
   overall_score?: number;
-  niche_fit_score?: number;
-  engagement_score?: number;
-  confidence_level?: number;
   summary_text?: string;
   actual_cost?: number;
   status?: 'complete' | 'failed' | 'cancelled';
@@ -135,7 +129,6 @@ export class AnalysisRepository extends BaseRepository<Analysis> {
     leadId: string,
     options?: {
       limit?: number;
-      analysisType?: 'light' | 'deep' | 'xray';
     }
   ): Promise<Analysis[]> {
     let query = this.supabase
@@ -144,10 +137,6 @@ export class AnalysisRepository extends BaseRepository<Analysis> {
       .eq('lead_id', leadId)
       .is('deleted_at', null)
       .order('created_at', { ascending: false });
-
-    if (options?.analysisType) {
-      query = query.eq('analysis_type', options.analysisType);
-    }
 
     if (options?.limit) {
       query = query.limit(options.limit);

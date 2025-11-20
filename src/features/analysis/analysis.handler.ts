@@ -26,7 +26,7 @@ import { z } from 'zod';
 const AnalyzeLeadSchema = z.object({
   username: z.string().min(1).max(50),
   businessProfileId: z.string().uuid(),
-  analysisType: z.enum(['light', 'deep', 'xray'])
+  analysisType: z.enum(['light'])
 });
 
 const GetProgressParamsSchema = z.object({
@@ -37,9 +37,8 @@ const GetProgressParamsSchema = z.object({
 // HELPERS
 // ===============================================================================
 
-function getCreditCost(type: 'light' | 'deep' | 'xray'): number {
-  const costs = { light: 1, deep: 3, xray: 5 };
-  return costs[type];
+function getCreditCost(type: 'light'): number {
+  return 1;
 }
 
 // ===============================================================================
