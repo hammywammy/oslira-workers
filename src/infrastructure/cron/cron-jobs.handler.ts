@@ -66,7 +66,7 @@ export class CronJobsHandler {
         const { error: updateError } = await supabase
           .from('balances')
           .update({
-            current_balance: creditsQuota,
+            credit_balance: creditsQuota,
             light_analyses_balance: lightQuota,
             last_transaction_at: new Date().toISOString(),
             updated_at: new Date().toISOString()

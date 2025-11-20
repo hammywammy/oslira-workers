@@ -11,8 +11,7 @@ export interface Lead {
   display_name: string | null;
   follower_count: number;
   following_count: number;
-  bio_text: string | null;
-  profile_picture_url: string | null;
+  profile_pic_url: string | null;
   external_url: string | null;
   is_verified_account: boolean;
   is_private_account: boolean;
@@ -31,8 +30,7 @@ export interface UpsertLeadData {
   display_name?: string;
   follower_count: number;
   following_count: number;
-  bio_text?: string;
-  profile_picture_url?: string;
+  profile_pic_url?: string;
   external_url?: string;
   is_verified_account: boolean;
   is_private_account: boolean;
@@ -61,8 +59,7 @@ export class LeadsRepository extends BaseRepository<Lead> {
         p_business_profile_id: data.business_profile_id,
         p_follower_count: data.follower_count,
         p_following_count: data.following_count,
-        p_bio_text: data.bio_text || null,
-        p_profile_picture_url: data.profile_picture_url || null,
+        p_profile_pic_url: data.profile_pic_url || null,
         p_external_url: data.external_url || null,
         p_is_verified_account: data.is_verified_account,
         p_is_private_account: data.is_private_account,

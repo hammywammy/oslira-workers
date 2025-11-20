@@ -5,7 +5,7 @@ import { BaseRepository } from './base.repository';
 
 export interface CreditBalance {
   account_id: string;
-  current_balance: number;
+  credit_balance: number;
   light_analyses_balance: number;
   last_transaction_at: string;
   created_at: string;
@@ -34,7 +34,7 @@ export class CreditsRepository extends BaseRepository<CreditBalance> {
   async getBalance(accountId: string): Promise<number> {
     const { data, error } = await this.supabase
       .from('balances')
-      .select('current_balance')
+      .select('credit_balance')
       .eq('account_id', accountId)
       .single();
 
@@ -43,7 +43,7 @@ export class CreditsRepository extends BaseRepository<CreditBalance> {
       throw error;
     }
 
-    return data?.current_balance || 0;
+    return data?.credit_balance || 0;
   }
 
   /**
