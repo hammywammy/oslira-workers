@@ -59,32 +59,43 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
       // Step 2: Check duplicate analysis
       await step.do('check_duplicate', async () => {
-        console.log(`[Workflow][${params.run_id}] Step 2: Checking for duplicates`);
-        await this.updateProgress(params.run_id, 5, 'Checking for duplicates');
+        try {
+          console.log(`[Workflow][${params.run_id}] Step 2: Checking for duplicates`);
+          await this.updateProgress(params.run_id, 5, 'Checking for duplicates');
 
-        const supabase = await SupabaseClientFactory.createAdminClient(this.env);
-        const leadsRepo = new LeadsRepository(supabase);
-        const analysisRepo = new AnalysisRepository(supabase);
+          const supabase = await SupabaseClientFactory.createAdminClient(this.env);
+          const leadsRepo = new LeadsRepository(supabase);
+          const analysisRepo = new AnalysisRepository(supabase);
 
-        const existingLead = await leadsRepo.findByUsername(
-          params.account_id,
-          params.business_profile_id,
-          params.username
-        );
-
-        if (existingLead) {
-          console.log(`[Workflow][${params.run_id}] Found existing lead:`, existingLead.id);
-          const duplicate = await analysisRepo.findInProgressAnalysis(
-            existingLead.id,
-            params.account_id
+          console.log(`[Workflow][${params.run_id}] Looking up existing lead for @${params.username}`);
+          const existingLead = await leadsRepo.findByUsername(
+            params.account_id,
+            params.business_profile_id,
+            params.username
           );
 
-          if (duplicate) {
-            console.error(`[Workflow][${params.run_id}] Duplicate analysis found:`, duplicate.id);
-            throw new Error('Analysis already in progress for this profile');
+          if (existingLead) {
+            console.log(`[Workflow][${params.run_id}] Found existing lead:`, existingLead.id);
+            const duplicate = await analysisRepo.findInProgressAnalysis(
+              existingLead.id,
+              params.account_id
+            );
+
+            if (duplicate) {
+              console.error(`[Workflow][${params.run_id}] Duplicate analysis found:`, duplicate.id);
+              throw new Error('Analysis already in progress for this profile');
+            }
           }
+          console.log(`[Workflow][${params.run_id}] No duplicates found`);
+        } catch (error: any) {
+          console.error(`[Workflow][${params.run_id}] Step 2 FAILED:`, {
+            message: error?.message || String(error),
+            code: error?.code,
+            detail: error?.detail,
+            stack: error?.stack
+          });
+          throw error;
         }
-        console.log(`[Workflow][${params.run_id}] No duplicates found`);
       });
 
       // Step 3: Verify & deduct credits
@@ -292,29 +303,46 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       };
 
     } catch (error: any) {
-      console.error(`[Workflow][${params.run_id}] FAILED`, {
-        error: error.message,
-        stack: error.stack?.split('\n')[0]
-      });
+      // Properly serialize error for logging
+      const errorDetails = {
+        message: error?.message || String(error),
+        name: error?.name,
+        stack: error?.stack,
+        cause: error?.cause,
+        // For database errors
+        code: error?.code,
+        detail: error?.detail,
+        hint: error?.hint,
+        // Full error object as fallback
+        rawError: JSON.stringify(error, Object.getOwnPropertyNames(error))
+      };
+
+      console.error(`[Workflow][${params.run_id}] FAILED`, errorDetails);
 
       // Refund credits on failure
       await step.do('refund_credits', async () => {
         try {
+          console.log(`[Workflow][${params.run_id}] Attempting to refund ${creditsCost} credits`);
           const supabase = await SupabaseClientFactory.createAdminClient(this.env);
           const creditsRepo = new CreditsRepository(supabase);
-          
+
           await creditsRepo.addCredits(
             params.account_id,
             creditsCost,
             'refund',
-            `Analysis failed: ${error.message}`
+            `Analysis failed: ${errorDetails.message}`
           );
-          
+
           console.log(`[Workflow][${params.run_id}] Credits refunded: ${creditsCost}`);
         } catch (refundError: any) {
           console.error(`[Workflow][${params.run_id}] Refund failed:`, {
-            error: refundError.message
+            message: refundError?.message || String(refundError),
+            code: refundError?.code,
+            detail: refundError?.detail,
+            hint: refundError?.hint,
+            stack: refundError?.stack
           });
+          // Don't throw - we still want to mark the analysis as failed even if refund fails
         }
       });
 
@@ -358,13 +386,22 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
    * Mark as failed
    */
   private async markFailed(runId: string, errorMessage: string): Promise<void> {
+    console.log(`[Workflow][${runId}] Marking analysis as failed: ${errorMessage}`);
+
     const id = this.env.ANALYSIS_PROGRESS.idFromName(runId);
     const stub = this.env.ANALYSIS_PROGRESS.get(id);
-    
-    await stub.fetch('http://do/fail', {
+
+    const response = await stub.fetch('http://do/fail', {
       method: 'POST',
       body: JSON.stringify({ message: errorMessage })
     });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error(`[Workflow][${runId}] Failed to mark as failed:`, error);
+    } else {
+      console.log(`[Workflow][${runId}] Successfully marked as failed`);
+    }
   }
 
   /**
