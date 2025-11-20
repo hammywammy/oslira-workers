@@ -207,11 +207,7 @@ export class AnalysisProgressDO extends DurableObject {
       completed_at: new Date().toISOString(),
       result: {
         overall_score: result.overall_score,
-        niche_fit_score: result.niche_fit_score,
-        engagement_score: result.engagement_score,
-        confidence_level: result.confidence_level,
-        summary_text: result.summary_text,
-        outreach_message: result.outreach_message
+        summary_text: result.summary_text
       }
     };
 

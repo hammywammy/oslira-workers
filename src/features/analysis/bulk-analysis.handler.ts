@@ -30,7 +30,7 @@ import { z } from 'zod';
 const BulkAnalyzeSchema = z.object({
   usernames: z.array(z.string().min(1).max(50)).min(1).max(50),
   businessProfileId: z.string().uuid(),
-  analysisType: z.enum(['light', 'deep', 'xray'])
+  analysisType: z.enum(['light'])
 });
 
 const BatchProgressSchema = z.object({
@@ -63,8 +63,8 @@ export async function bulkAnalyzeLeads(c: Context<{ Bindings: Env }>) {
     // TODO: Add business profile validation
 
     // Check credits (estimate)
-    const creditCosts = { light: 1, deep: 3, xray: 5 };
-    const totalCreditsNeeded = uniqueUsernames.length * creditCosts[input.analysisType];
+    const creditCost = 1; // Light analysis only
+    const totalCreditsNeeded = uniqueUsernames.length * creditCost;
 
     // TODO: Check if user has sufficient credits
     // For now, just validate

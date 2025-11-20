@@ -22,8 +22,7 @@ export const GetLeadParamsSchema = z.object({
 
 export const GetLeadAnalysesQuerySchema = z.object({
   leadId: CommonSchemas.uuid,
-  limit: z.coerce.number().int().min(1).max(50).default(10),
-  analysisType: z.enum(['light', 'deep', 'xray']).optional()
+  limit: z.coerce.number().int().min(1).max(50).default(10)
 });
 
 export const DeleteLeadParamsSchema = z.object({
@@ -45,7 +44,7 @@ export interface LeadListItem {
   last_analyzed_at: string;
   latest_analysis: {
     id: string;
-    analysis_type: 'light' | 'deep' | 'xray';
+    analysis_type: 'light';
     overall_score: number;
     completed_at: string;
   } | null;
@@ -73,22 +72,16 @@ export interface LeadDetail {
   analyses_count: number;
   latest_analysis: {
     id: string;
-    analysis_type: 'light' | 'deep' | 'xray';
+    analysis_type: 'light';
     overall_score: number;
-    niche_fit_score: number;
-    engagement_score: number;
-    confidence_level: number;
     completed_at: string;
   } | null;
 }
 
 export interface LeadAnalysis {
   id: string;
-  analysis_type: 'light' | 'deep' | 'xray';
+  analysis_type: 'light';
   overall_score: number;
-  niche_fit_score: number;
-  engagement_score: number;
-  confidence_level: number;
   status: string;
   credits_charged: number;
   model_used: string;
