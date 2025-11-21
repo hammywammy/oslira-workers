@@ -106,6 +106,7 @@ dead_letter_queue = "business-context-jobs-dlq"
 # ===========================
 [triggers]
 crons = [
+  "0 0 * * *",   # Daily free plan credit reset (midnight UTC)
   "0 3 1 * *",   # Monthly renewal (1st of month, 3 AM UTC)
   "0 2 * * *",   # Daily cleanup (2 AM UTC)
   "0 * * * *"    # Hourly failed analysis cleanup
@@ -162,7 +163,8 @@ queue = "business-context-jobs-staging"
 
 [env.staging.triggers]
 crons = [
-  "0 4 1 * *",
-  "0 3 * * *",
-  "0 * * * *"
+  "0 1 * * *",   # Daily free plan credit reset (1 AM UTC for staging)
+  "0 4 1 * *",   # Monthly renewal (1st of month, 4 AM UTC)
+  "0 3 * * *",   # Daily cleanup (3 AM UTC)
+  "0 * * * *"    # Hourly failed analysis cleanup
 ]
