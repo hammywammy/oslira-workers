@@ -24,7 +24,7 @@ export class CreditsService {
    */
   async getBalance(accountId: string): Promise<CreditBalance> {
     const { data, error } = await this.supabase
-      .from('credit_balances')
+      .from('balances')
       .select('*')
       .eq('account_id', accountId)
       .single();

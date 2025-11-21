@@ -462,7 +462,7 @@ const hasCompletedBusiness = businesses?.some(b => b.onboarding_completed) || fa
 
 // Fetch credit balance
 const { data: creditBalance } = await supabase
-  .from('credit_balances')
+  .from('balances')
   .select('credit_balance')
   .eq('account_id', auth.accountId)
   .single();

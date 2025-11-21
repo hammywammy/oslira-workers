@@ -56,7 +56,7 @@ export function registerTestDataEndpoints(app: Hono<{ Bindings: Env }>) {
         role: 'owner'
       });
 
-      await supabase.from('credit_balances').insert({
+      await supabase.from('balances').insert({
         account_id: account.id,
         credit_balance: 0,
         light_analyses_balance: 0,
@@ -183,7 +183,7 @@ export function registerTestDataEndpoints(app: Hono<{ Bindings: Env }>) {
       ]).select();
 
       const { data: finalBalance } = await supabase
-        .from('credit_balances')
+        .from('balances')
         .select('credit_balance')
         .eq('account_id', account.id)
         .single();
@@ -254,7 +254,7 @@ export function registerTestDataEndpoints(app: Hono<{ Bindings: Env }>) {
         await supabase.from('leads').delete().in('account_id', accountIds);
         await supabase.from('business_profiles').delete().in('account_id', accountIds);
         await supabase.from('credit_ledger').delete().in('account_id', accountIds);
-        await supabase.from('credit_balances').delete().in('account_id', accountIds);
+        await supabase.from('balances').delete().in('account_id', accountIds);
         await supabase.from('account_members').delete().in('account_id', accountIds);
         await supabase.from('accounts').delete().in('id', accountIds);
       }
