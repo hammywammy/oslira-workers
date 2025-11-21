@@ -11,7 +11,9 @@ export interface Lead {
   display_name: string | null;
   follower_count: number;
   following_count: number;
+  post_count: number;
   profile_pic_url: string | null;
+  profile_url: string;
   external_url: string | null;
   is_verified: boolean;
   is_private: boolean;
@@ -30,7 +32,9 @@ export interface UpsertLeadData {
   display_name?: string;
   follower_count: number;
   following_count: number;
+  post_count: number;
   profile_pic_url?: string;
+  profile_url?: string;
   external_url?: string;
   is_verified: boolean;
   is_private: boolean;
@@ -66,6 +70,7 @@ export class LeadsRepository extends BaseRepository<Lead> {
       ...data,
       display_name: data.display_name || null,
       profile_pic_url: data.profile_pic_url || null,
+      profile_url: data.profile_url || `https://instagram.com/${data.username}`,
       external_url: data.external_url || null,
       last_analyzed_at: now,
       ...(existing ? {} : {
