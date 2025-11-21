@@ -318,8 +318,8 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             is_business_account: aiProfile.is_business_account
           });
 
-          console.log(`[Workflow][${params.run_id}] Lead upserted:`, lead.id);
-          return lead.id;
+          console.log(`[Workflow][${params.run_id}] Lead upserted:`, lead.lead_id);
+          return lead.lead_id;
         } catch (error: any) {
           console.error(`[Workflow][${params.run_id}] Step 8 FAILED:`, this.serializeError(error));
           throw error;
