@@ -94,7 +94,7 @@ export class BusinessService {
 
         // Count analyses
         const { count: analysesCount } = await this.supabase
-          .from('analyses')
+          .from('lead_analyses')
           .select('id', { count: 'exact', head: true })
           .eq('business_profile_id', profile.id)
           .is('deleted_at', null);
@@ -144,7 +144,7 @@ export class BusinessService {
       .is('deleted_at', null);
 
     const { count: analysesCount } = await this.supabase
-      .from('analyses')
+      .from('lead_analyses')
       .select('id', { count: 'exact', head: true })
       .eq('business_profile_id', profileId)
       .is('deleted_at', null);
@@ -270,7 +270,7 @@ export class BusinessService {
       .is('deleted_at', null);
 
     const { count: analysesCount } = await this.supabase
-      .from('analyses')
+      .from('lead_analyses')
       .select('id', { count: 'exact', head: true })
       .eq('business_profile_id', profileId)
       .is('deleted_at', null);

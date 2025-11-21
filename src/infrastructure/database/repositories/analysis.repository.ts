@@ -40,7 +40,7 @@ export interface UpdateAnalysisData {
 
 export class AnalysisRepository extends BaseRepository<Analysis> {
   constructor(supabase: SupabaseClient) {
-    super(supabase, 'analyses');
+    super(supabase, 'lead_analyses');
   }
 
   /**
@@ -59,7 +59,7 @@ export class AnalysisRepository extends BaseRepository<Analysis> {
    */
   async updateAnalysis(runId: string, data: UpdateAnalysisData): Promise<Analysis> {
     const { data: result, error } = await this.supabase
-      .from('analyses')
+      .from('lead_analyses')
       .update({
         ...data,
         updated_at: new Date().toISOString()
@@ -77,7 +77,7 @@ export class AnalysisRepository extends BaseRepository<Analysis> {
    */
   async getByRunId(runId: string): Promise<Analysis | null> {
     const { data, error } = await this.supabase
-      .from('analyses')
+      .from('lead_analyses')
       .select('*')
       .eq('run_id', runId)
       .is('deleted_at', null)
@@ -101,7 +101,7 @@ export class AnalysisRepository extends BaseRepository<Analysis> {
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
 
     const { data, error } = await this.supabase
-      .from('analyses')
+      .from('lead_analyses')
       .select('*')
       .eq('lead_id', leadId)
       .eq('account_id', accountId)
@@ -126,7 +126,7 @@ export class AnalysisRepository extends BaseRepository<Analysis> {
     }
   ): Promise<Analysis[]> {
     let query = this.supabase
-      .from('analyses')
+      .from('lead_analyses')
       .select('*')
       .eq('lead_id', leadId)
       .is('deleted_at', null)
