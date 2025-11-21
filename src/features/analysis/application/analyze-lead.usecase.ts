@@ -56,7 +56,6 @@ export interface AnalyzeLeadResult {
   confidence_level: number;
   summary_text: string;
   outreach_message?: string; // Only for deep/xray
-  credits_charged: number;
   actual_cost: number;
   processing_time_ms: number;
   cache_hit: boolean;
@@ -132,7 +131,6 @@ export class AnalyzeLeadUseCase {
         confidence_level: analysisResult.aiResult.confidence_level,
         summary_text: analysisResult.aiResult.summary_text,
         outreach_message: analysisResult.aiResult.outreach_message,
-        credits_charged: creditsCost,
         actual_cost: analysisResult.apifyCost + analysisResult.aiResult.total_cost,
         processing_time_ms: processingTime,
         cache_hit: analysisResult.cacheHit

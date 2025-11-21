@@ -206,8 +206,6 @@ export class LeadsService {
       engagement_score: analysis.engagement_score,
       confidence_level: analysis.confidence_level,
       status: analysis.status,
-      credits_charged: analysis.credits_charged,
-      model_used: analysis.model_used,
       processing_duration_ms: analysis.processing_duration_ms,
       completed_at: analysis.completed_at,
       created_at: analysis.created_at
