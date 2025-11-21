@@ -230,12 +230,13 @@ export class CronJobsHandler {
 
   /**
    * Hourly failed analysis cleanup
-   * Refunds credits for failed analyses older than 1 hour
+   * Soft-deletes failed analyses older than 1 hour for audit purposes
+   * Note: Credit refunds are handled automatically by the workflow error handler
    */
   async hourlyFailedAnalysisCleanup(): Promise<void> {
     console.log('[Cron] Starting failed analysis cleanup...');
     const sentry = await getSentryService(this.env);
-    
+
     sentry.addBreadcrumb('Failed analysis cleanup started', 'cron', 'info');
 
     try {
@@ -245,7 +246,7 @@ export class CronJobsHandler {
       // Get failed analyses older than 1 hour that haven't been soft-deleted
       const { data: failedAnalyses, error } = await supabase
         .from('analyses')
-        .select('id, account_id, credits_charged, created_at')
+        .select('id, account_id, created_at')
         .eq('status', 'failed')
         .lt('created_at', oneHourAgo)
         .is('deleted_at', null);
@@ -259,33 +260,22 @@ export class CronJobsHandler {
 
       console.log(`[Cron] Processing ${failedAnalyses.length} failed analyses`);
 
-      const creditsRepo = new CreditsRepository(supabase);
-      let refundedCount = 0;
+      let cleanedCount = 0;
 
       for (const analysis of failedAnalyses) {
         try {
-          // Refund credits if charged
-          if (analysis.credits_charged && analysis.credits_charged > 0) {
-            await creditsRepo.addCredits(
-              analysis.account_id,
-              analysis.credits_charged,
-              'refund',
-              `Automatic refund for failed analysis ${analysis.id}`
-            );
-
-            refundedCount++;
-            console.log(`[Cron] Refunded ${analysis.credits_charged} credits for analysis ${analysis.id}`);
-          }
-
           // Soft delete the failed analysis (keep for audit)
           await supabase
             .from('analyses')
             .update({ deleted_at: new Date().toISOString() })
             .eq('id', analysis.id);
-            
+
+          cleanedCount++;
+          console.log(`[Cron] Soft-deleted failed analysis ${analysis.id}`);
+
         } catch (analysisError: any) {
           console.error(`[Cron] Failed to process analysis ${analysis.id}:`, analysisError);
-          
+
           await sentry.captureException(analysisError, {
             tags: {
               cron_job: 'failed_analysis_cleanup',
@@ -295,10 +285,10 @@ export class CronJobsHandler {
         }
       }
 
-      console.log(`[Cron] Failed analysis cleanup complete: ${refundedCount} refunded`);
-      
+      console.log(`[Cron] Failed analysis cleanup complete: ${cleanedCount} analyses soft-deleted`);
+
       await sentry.captureMessage(
-        `Failed analysis cleanup: ${refundedCount} credits refunded`,
+        `Failed analysis cleanup: ${cleanedCount} analyses cleaned`,
         'info',
         { tags: { cron_job: 'failed_analysis_cleanup' } }
       );

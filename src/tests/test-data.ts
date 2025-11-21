@@ -58,7 +58,8 @@ export function registerTestDataEndpoints(app: Hono<{ Bindings: Env }>) {
 
       await supabase.from('credit_balances').insert({
         account_id: account.id,
-        current_balance: 0,
+        credit_balance: 0,
+        light_analyses_balance: 0,
         last_transaction_at: new Date().toISOString()
       });
 
@@ -164,8 +165,6 @@ export function registerTestDataEndpoints(app: Hono<{ Bindings: Env }>) {
           niche_fit_score: 90,
           engagement_score: 88,
           confidence_level: 0.92,
-          credits_charged: 2,
-          model_used: 'gpt-5-mini',
           completed_at: new Date().toISOString()
         },
         {
@@ -179,15 +178,13 @@ export function registerTestDataEndpoints(app: Hono<{ Bindings: Env }>) {
           niche_fit_score: 75,
           engagement_score: 70,
           confidence_level: 0.85,
-          credits_charged: 1,
-          model_used: 'gpt-5-nano',
           completed_at: new Date().toISOString()
         }
       ]).select();
 
       const { data: finalBalance } = await supabase
         .from('credit_balances')
-        .select('current_balance')
+        .select('credit_balance')
         .eq('account_id', account.id)
         .single();
 
@@ -213,7 +210,7 @@ export function registerTestDataEndpoints(app: Hono<{ Bindings: Env }>) {
             score: a.overall_score,
             status: a.status
           })),
-          credits_balance: finalBalance.current_balance,
+          credits_balance: finalBalance.credit_balance,
           credits_flow: '100 (initial) - 2 (nike) - 1 (adidas) + 50 (bonus) = 147'
         }
       });

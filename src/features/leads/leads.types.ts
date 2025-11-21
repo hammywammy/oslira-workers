@@ -83,8 +83,6 @@ export interface LeadAnalysis {
   analysis_type: 'light';
   overall_score: number;
   status: string;
-  credits_charged: number;
-  model_used: string;
   processing_duration_ms: number | null;
   completed_at: string | null;
   created_at: string;

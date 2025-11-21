@@ -24,24 +24,17 @@ export interface AnalysisCostMetric {
   business_profile_id: string;
   analysis_type: 'light' | 'deep' | 'xray';
   username: string;
-  
+
   // Costs
   apify_cost: number;
   total_ai_cost: number;
   total_cost: number;
   openai_cost: number;
   anthropic_cost: number;
-  
-  // Credits
-  credits_charged: number;
-  credit_price: number;
-  revenue: number;
-  gross_profit: number;
-  margin_percentage: number;
-  
+
   // Cache
   cache_hit: boolean;
-  
+
   // Status
   status: 'complete' | 'failed' | 'cancelled';
 }
@@ -104,16 +97,10 @@ export class AnalyticsService {
     analysis_type: 'light' | 'deep' | 'xray';
     username: string;
     cost_breakdown: CostBreakdown;
-    credits_charged: number;
     cache_hit: boolean;
     status: 'complete' | 'failed' | 'cancelled';
   }): Promise<void> {
     try {
-      const CREDIT_PRICE = 0.97;
-      const revenue = data.credits_charged * CREDIT_PRICE;
-      const grossProfit = revenue - data.cost_breakdown.total_cost;
-      const marginPercentage = revenue > 0 ? (grossProfit / revenue) * 100 : 0;
-
       const metric: AnalysisCostMetric = {
         timestamp: new Date(),
         run_id: data.run_id,
@@ -126,21 +113,15 @@ export class AnalyticsService {
         total_cost: data.cost_breakdown.total_cost,
         openai_cost: data.cost_breakdown.cost_by_provider.openai,
         anthropic_cost: data.cost_breakdown.cost_by_provider.anthropic,
-        credits_charged: data.credits_charged,
-        credit_price: CREDIT_PRICE,
-        revenue,
-        gross_profit: grossProfit,
-        margin_percentage: parseFloat(marginPercentage.toFixed(2)),
         cache_hit: data.cache_hit,
         status: data.status
       };
 
       await this.writeDataPoint('analysis_costs', metric);
-      
+
       console.log('[Analytics] Analysis cost written:', {
         run_id: data.run_id,
-        total_cost: data.cost_breakdown.total_cost,
-        margin: marginPercentage.toFixed(2) + '%'
+        total_cost: data.cost_breakdown.total_cost
       });
     } catch (error) {
       console.error('[Analytics] Failed to write analysis cost:', error);
