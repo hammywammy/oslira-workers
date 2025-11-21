@@ -12,7 +12,6 @@ export interface Analysis {
   analysis_type: 'light';
   overall_score: number;
   ai_response: any;
-  total_cost_cents: number | null;
   status: 'pending' | 'processing' | 'complete' | 'failed' | 'cancelled';
   error_message: string | null;
   started_at: string | null;
@@ -34,7 +33,6 @@ export interface CreateAnalysisData {
 export interface UpdateAnalysisData {
   overall_score?: number;
   ai_response?: any;
-  total_cost_cents?: number;
   status?: 'complete' | 'failed' | 'cancelled';
   error_message?: string;
   completed_at?: string;

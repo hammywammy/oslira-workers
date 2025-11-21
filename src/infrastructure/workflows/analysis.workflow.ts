@@ -7,6 +7,7 @@ import { CreditsRepository } from '@/infrastructure/database/repositories/credit
 import { LeadsRepository } from '@/infrastructure/database/repositories/leads.repository';
 import { AnalysisRepository } from '@/infrastructure/database/repositories/analysis.repository';
 import { BusinessRepository } from '@/infrastructure/database/repositories/business.repository';
+import { OperationsLedgerRepository } from '@/infrastructure/database/repositories/operations-ledger.repository';
 import { R2CacheService, type ProfileData as CacheProfileData } from '@/infrastructure/cache/r2-cache.service';
 import { ApifyAdapter } from '@/infrastructure/scraping/apify.adapter';
 import { AIAnalysisService } from '@/infrastructure/ai/ai-analysis.service';
@@ -67,7 +68,17 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
   async run(event: WorkflowEvent<AnalysisWorkflowParams>, step: WorkflowStep) {
     const params = event.payload;
     const creditsCost = this.getCreditCost(params.analysis_type);
-    
+    const workflowStartTime = Date.now();
+
+    // Timing tracker
+    const timing = {
+      cache_check: 0,
+      scraping: 0,
+      ai_analysis: 0,
+      db_upsert: 0,
+      cache_hit: false
+    };
+
     try {
       console.log(`[Workflow][${params.run_id}] START`, {
         username: params.username,
@@ -211,11 +222,14 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           console.log(`[Workflow][${params.run_id}] Step 5: Checking R2 cache for @${params.username}`);
           await this.updateProgress(params.run_id, 20, 'Checking cache');
 
+          const cacheStart = Date.now();
           const cacheService = new R2CacheService(this.env.R2_CACHE_BUCKET);
           const cached = await cacheService.get(params.username, params.analysis_type);
+          timing.cache_check = Date.now() - cacheStart;
 
           if (cached) {
             console.log(`[Workflow][${params.run_id}] Cache HIT for @${params.username}`);
+            timing.cache_hit = true;
           } else {
             console.log(`[Workflow][${params.run_id}] Cache MISS for @${params.username}`);
           }
@@ -236,12 +250,14 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             console.log(`[Workflow][${params.run_id}] Step 6: Scraping Instagram profile @${params.username}`);
             await this.updateProgress(params.run_id, 30, 'Scraping Instagram profile');
 
+            const scrapeStart = Date.now();
             const apifyToken = await getSecret('APIFY_API_TOKEN', this.env, this.env.APP_ENV);
             const apifyAdapter = new ApifyAdapter(apifyToken);
 
             const postsLimit = this.getPostsLimit(params.analysis_type);
             console.log(`[Workflow][${params.run_id}] Scraping ${postsLimit} posts`);
             const scraped = await apifyAdapter.scrapeProfile(params.username, postsLimit);
+            timing.scraping = Date.now() - scrapeStart;
 
             console.log(`[Workflow][${params.run_id}] Scraped profile:`, {
               username: scraped.username,
@@ -270,11 +286,13 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           console.log(`[Workflow][${params.run_id}] Step 7: Executing AI analysis`);
           await this.updateProgress(params.run_id, 50, 'Running AI analysis');
 
+          const aiStart = Date.now();
           // Transform camelCase cache profile to snake_case AI profile
           const aiProfile = this.transformToAIProfile(profile);
 
           const aiService = await AIAnalysisService.create(this.env);
           const result = await aiService.executeLightAnalysis(business, aiProfile);
+          timing.ai_analysis = Date.now() - aiStart;
 
           console.log(`[Workflow][${params.run_id}] AI analysis complete:`, {
             score: result.overall_score,
@@ -298,6 +316,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           console.log(`[Workflow][${params.run_id}] Step 8: Upserting lead data`);
           await this.updateProgress(params.run_id, 80, 'Saving lead data');
 
+          const upsertStart = Date.now();
           const supabase = await SupabaseClientFactory.createAdminClient(this.env);
           const leadsRepo = new LeadsRepository(supabase);
 
@@ -318,6 +337,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             is_private: aiProfile.is_private,
             is_business_account: aiProfile.is_business_account
           });
+          timing.db_upsert = Date.now() - upsertStart;
 
           console.log(`[Workflow][${params.run_id}] Lead upserted:`, lead.lead_id);
           return lead.lead_id;
@@ -365,7 +385,6 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           await analysisRepo.updateAnalysis(params.run_id, {
             overall_score: aiResult.overall_score,
             ai_response: aiResponse,
-            total_cost_cents: Math.round(aiResult.total_cost * 100),
             status: 'complete',
             completed_at: new Date().toISOString()
           });
@@ -403,6 +422,64 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         } catch (error: any) {
           console.error(`[Workflow][${params.run_id}] Step 10 FAILED:`, this.serializeError(error));
           throw error;
+        }
+      });
+
+      // Step 11: Log to operations ledger
+      await step.do('log_operations', {
+        retries: { limit: 2, delay: '500 milliseconds' }
+      }, async () => {
+        try {
+          console.log(`[Workflow][${params.run_id}] Step 11: Logging to operations ledger`);
+
+          const supabase = await SupabaseClientFactory.createAdminClient(this.env);
+          const operationsRepo = new OperationsLedgerRepository(supabase);
+
+          const totalDuration = Date.now() - workflowStartTime;
+          const apifyCost = timing.cache_hit ? 0 : ApifyAdapter.estimateCost(this.getPostsLimit(params.analysis_type));
+
+          await operationsRepo.logOperation({
+            account_id: params.account_id,
+            operation_type: 'analysis',
+            operation_id: params.run_id,
+            analysis_type: params.analysis_type,
+            username: params.username,
+            metrics: {
+              cost: {
+                total_usd: apifyCost + aiResult.total_cost,
+                items: {
+                  ai: {
+                    vendor: 'openai',
+                    usd: aiResult.total_cost,
+                    model: aiResult.model_used,
+                    tokens_in: aiResult.input_tokens,
+                    tokens_out: aiResult.output_tokens
+                  },
+                  scraping: {
+                    vendor: 'apify',
+                    usd: apifyCost,
+                    cached: timing.cache_hit,
+                    actor: 'dSCLg0C3YEZ83HzYX'
+                  }
+                }
+              },
+              duration: {
+                total_ms: totalDuration,
+                steps: {
+                  cache_check: timing.cache_check,
+                  cache_hit: timing.cache_hit,
+                  ...(timing.scraping > 0 ? { scraping: timing.scraping } : {}),
+                  ai_analysis: timing.ai_analysis,
+                  db_upsert: timing.db_upsert
+                }
+              }
+            }
+          });
+
+          console.log(`[Workflow][${params.run_id}] Operations logged`);
+        } catch (error: any) {
+          console.error(`[Workflow][${params.run_id}] Step 11 FAILED (non-fatal):`, this.serializeError(error));
+          // Don't throw - logging failures shouldn't break the workflow
         }
       });
 
