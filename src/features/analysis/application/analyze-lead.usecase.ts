@@ -346,7 +346,6 @@ export class AnalyzeLeadUseCase {
     await analysisRepo.updateAnalysis(data.runId, {
       overall_score: data.result.overall_score,
       ai_response: aiResponse,
-      total_cost_cents: Math.round(data.result.total_cost * 100),
       status: 'complete',
       completed_at: new Date().toISOString()
     });
