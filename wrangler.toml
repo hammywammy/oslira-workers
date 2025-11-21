@@ -102,8 +102,11 @@ dead_letter_queue = "business-context-jobs-dlq"
 
 
 # ===========================
-# CRON TRIGGERS
+# CRON TRIGGERS (PRODUCTION ONLY)
 # ===========================
+# NOTE: Cron triggers run ONLY in production because prod and staging
+# share the same database. Running crons in both would cause duplicate
+# operations (double credit resets, double cleanups, etc).
 [triggers]
 crons = [
   "0 0 * * *",   # Daily free plan credit reset (midnight UTC)
@@ -161,10 +164,11 @@ queue = "analysis-jobs-staging"
 binding = "BUSINESS_CONTEXT_QUEUE"
 queue = "business-context-jobs-staging"
 
-[env.staging.triggers]
-crons = [
-  "0 1 * * *",   # Daily free plan credit reset (1 AM UTC for staging)
-  "0 4 1 * *",   # Monthly renewal (1st of month, 4 AM UTC)
-  "0 3 * * *",   # Daily cleanup (3 AM UTC)
-  "0 * * * *"    # Hourly failed analysis cleanup
-]
+# NOTE: Cron triggers are DISABLED in staging because production and staging
+# share the same database. Running crons in both environments would cause:
+# - Duplicate credit resets for free plan users
+# - Duplicate monthly renewals
+# - Conflicting cleanup operations
+# All cron jobs run only in production.
+# [env.staging.triggers]
+# crons = []
