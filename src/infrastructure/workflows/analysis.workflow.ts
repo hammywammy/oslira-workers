@@ -369,17 +369,11 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
           console.log(`[Workflow][${params.run_id}] Analysis created:`, analysis.id);
 
-          // Structure ai_response JSONB with all AI result data
+          // Structure ai_response JSONB with only analysis results
+          // (cost/timing metadata goes to operations_ledger)
           const aiResponse = {
             score: aiResult.overall_score,
-            summary: aiResult.summary_text,
-            model_used: aiResult.model_used,
-            tokens: {
-              input: aiResult.input_tokens,
-              output: aiResult.output_tokens
-            },
-            cost_usd: aiResult.total_cost,
-            generated_at: new Date().toISOString()
+            summary: aiResult.summary_text
           };
 
           await analysisRepo.updateAnalysis(params.run_id, {

@@ -330,17 +330,11 @@ export class AnalyzeLeadUseCase {
     });
 
     // Update with results
-    // Structure ai_response JSONB with all AI result data
+    // Structure ai_response JSONB with only analysis results
+    // (cost/timing metadata goes to operations_ledger)
     const aiResponse = {
       score: data.result.overall_score,
-      summary: data.result.summary_text,
-      model_used: data.result.model_used,
-      tokens: {
-        input: data.result.input_tokens,
-        output: data.result.output_tokens
-      },
-      cost_usd: data.result.total_cost,
-      generated_at: new Date().toISOString()
+      summary: data.result.summary_text
     };
 
     await analysisRepo.updateAnalysis(data.runId, {
