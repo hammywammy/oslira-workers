@@ -1,24 +1,26 @@
 // infrastructure/scraping/apify.adapter.ts
 
-import type { Env } from '@/shared/types/env.types';
 import type { ProfileData, PostData } from '@/infrastructure/ai/prompt-builder.service';
+import { SCRAPER_CONFIG } from './apify.config';
 
 /**
  * APIFY ADAPTER
- * 
- * Scrapes Instagram profiles using Apify's Instagram Profile Scraper
- * Actor ID: apify/instagram-profile-scraper
- * 
+ *
+ * Scrapes Instagram profiles using configured Apify actor
+ *
  * Features:
- * - Automatic retry on infrastructure failures (3 attempts)
+ * - Configurable actor ID (no hardcoded values)
+ * - Automatic retry on infrastructure failures
  * - Response transformation to ProfileData format
  * - Error handling for private/deleted profiles
  * - Cost tracking per scrape
+ *
+ * Future: Extensible for multi-channel support (Brightdata, etc)
  */
 
 export interface ApifyScraperInput {
-  username: string[];
-  resultsLimit: number;  // Number of posts to scrape
+  usernames: string[];
+  resultsLimit?: number;  // Number of posts to scrape
 }
 
 export interface ApifyRawPost {
@@ -56,10 +58,11 @@ export interface ApifyRunResult {
 export class ApifyAdapter {
   private apiToken: string;
   private baseURL = 'https://api.apify.com/v2';
-  private actorId = 'apify/instagram-profile-scraper';
+  private actorId: string;
 
-  constructor(apiToken: string) {
+  constructor(apiToken: string, actorId?: string) {
     this.apiToken = apiToken;
+    this.actorId = actorId || SCRAPER_CONFIG.actor_id;
   }
 
   /**
@@ -67,17 +70,17 @@ export class ApifyAdapter {
    */
   async scrapeProfile(
     username: string,
-    postsLimit: number = 12,
-    maxRetries: number = 3
+    postsLimit: number = 12
   ): Promise<ProfileData> {
+    const maxRetries = SCRAPER_CONFIG.max_retries;
     let lastError: Error | null = null;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        console.log(`[Apify] Attempt ${attempt}/${maxRetries} for @${username}`);
-        
+        console.log(`[Apify] Attempt ${attempt}/${maxRetries} for @${username} (actor: ${this.actorId})`);
+
         const profile = await this.executeScrape(username, postsLimit);
-        
+
         console.log(`[Apify] Success on attempt ${attempt} for @${username}`);
         return profile;
 
@@ -91,7 +94,7 @@ export class ApifyAdapter {
 
         // Retry on infrastructure errors
         if (attempt < maxRetries) {
-          const backoffMs = attempt * 2000; // 2s, 4s, 6s
+          const backoffMs = attempt * SCRAPER_CONFIG.retry_delay;
           console.warn(
             `[Apify] Attempt ${attempt} failed for @${username}, retrying in ${backoffMs}ms...`,
             error.message
@@ -115,7 +118,7 @@ export class ApifyAdapter {
     const runResult = await this.startActorRun(username, postsLimit);
 
     // Step 2: Wait for completion (with timeout)
-    await this.waitForCompletion(runResult.id, 60000); // 60s timeout
+    await this.waitForCompletion(runResult.id, SCRAPER_CONFIG.timeout);
 
     // Step 3: Fetch results from dataset
     const rawProfile = await this.fetchDatasetResults(runResult.defaultDatasetId);
@@ -129,8 +132,7 @@ export class ApifyAdapter {
    */
   private async startActorRun(username: string, postsLimit: number): Promise<ApifyRunResult> {
     const input: ApifyScraperInput = {
-      username: [username],
-      resultsLimit: postsLimit
+      usernames: [username]
     };
 
     const response = await fetch(`${this.baseURL}/acts/${this.actorId}/runs`, {
