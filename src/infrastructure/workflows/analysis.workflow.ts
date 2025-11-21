@@ -13,6 +13,11 @@ import { ApifyAdapter } from '@/infrastructure/scraping/apify.adapter';
 import { AIAnalysisService } from '@/infrastructure/ai/ai-analysis.service';
 import { getSecret } from '@/infrastructure/config/secrets';
 import type { ProfileData as AIProfileData } from '@/infrastructure/ai/prompt-builder.service';
+import {
+  getStepProgress,
+  getCreditCost,
+  getPostsLimit
+} from './workflow-progress.config';
 
 /**
  * ANALYSIS WORKFLOW
@@ -67,7 +72,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
   async run(event: WorkflowEvent<AnalysisWorkflowParams>, step: WorkflowStep) {
     const params = event.payload;
-    const creditsCost = this.getCreditCost(params.analysis_type);
+    const creditsCost = getCreditCost(params.analysis_type);
     const workflowStartTime = Date.now();
 
     // Timing tracker
@@ -123,7 +128,8 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       await step.do('check_duplicate', async () => {
         try {
           console.log(`[Workflow][${params.run_id}] Step 2: Checking for duplicates`);
-          await this.updateProgress(params.run_id, 5, 'Checking for duplicates');
+          const stepInfo = getStepProgress(params.analysis_type, 'check_duplicate');
+          await this.updateProgress(params.run_id, stepInfo.percentage, stepInfo.description);
 
           const supabase = await SupabaseClientFactory.createAdminClient(this.env);
           const leadsRepo = new LeadsRepository(supabase);
@@ -159,7 +165,8 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       await step.do('deduct_credits', async () => {
         try {
           console.log(`[Workflow][${params.run_id}] Step 3: Verifying credits (cost: ${creditsCost})`);
-          await this.updateProgress(params.run_id, 10, 'Verifying credits');
+          const stepInfo = getStepProgress(params.analysis_type, 'deduct_credits');
+          await this.updateProgress(params.run_id, stepInfo.percentage, stepInfo.description);
 
           const supabase = await SupabaseClientFactory.createAdminClient(this.env);
           const creditsRepo = new CreditsRepository(supabase);
@@ -195,7 +202,8 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       }, async () => {
         try {
           console.log(`[Workflow][${params.run_id}] Step 4: Loading business profile`);
-          await this.updateProgress(params.run_id, 15, 'Loading business profile');
+          const stepInfo = getStepProgress(params.analysis_type, 'get_business_profile');
+          await this.updateProgress(params.run_id, stepInfo.percentage, stepInfo.description);
 
           const supabase = await SupabaseClientFactory.createAdminClient(this.env);
           const businessRepo = new BusinessRepository(supabase);
@@ -220,7 +228,8 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       }, async () => {
         try {
           console.log(`[Workflow][${params.run_id}] Step 5: Checking R2 cache for @${params.username}`);
-          await this.updateProgress(params.run_id, 20, 'Checking cache');
+          const stepInfo = getStepProgress(params.analysis_type, 'check_cache');
+          await this.updateProgress(params.run_id, stepInfo.percentage, stepInfo.description);
 
           const cacheStart = Date.now();
           const cacheService = new R2CacheService(this.env.R2_CACHE_BUCKET);
@@ -248,13 +257,14 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         }, async () => {
           try {
             console.log(`[Workflow][${params.run_id}] Step 6: Scraping Instagram profile @${params.username}`);
-            await this.updateProgress(params.run_id, 30, 'Scraping Instagram profile');
+            const stepInfo = getStepProgress(params.analysis_type, 'scrape_profile');
+            await this.updateProgress(params.run_id, stepInfo.percentage, stepInfo.description);
 
             const scrapeStart = Date.now();
             const apifyToken = await getSecret('APIFY_API_TOKEN', this.env, this.env.APP_ENV);
             const apifyAdapter = new ApifyAdapter(apifyToken);
 
-            const postsLimit = this.getPostsLimit(params.analysis_type);
+            const postsLimit = getPostsLimit(params.analysis_type);
             console.log(`[Workflow][${params.run_id}] Scraping ${postsLimit} posts`);
             const scraped = await apifyAdapter.scrapeProfile(params.username, postsLimit);
             timing.scraping = Date.now() - scrapeStart;
@@ -284,7 +294,8 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       }, async () => {
         try {
           console.log(`[Workflow][${params.run_id}] Step 7: Executing AI analysis`);
-          await this.updateProgress(params.run_id, 50, 'Running AI analysis');
+          const stepInfo = getStepProgress(params.analysis_type, 'ai_analysis');
+          await this.updateProgress(params.run_id, stepInfo.percentage, stepInfo.description);
 
           const aiStart = Date.now();
           // Transform camelCase cache profile to snake_case AI profile
@@ -314,7 +325,8 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       }, async () => {
         try {
           console.log(`[Workflow][${params.run_id}] Step 8: Upserting lead data`);
-          await this.updateProgress(params.run_id, 80, 'Saving lead data');
+          const stepInfo = getStepProgress(params.analysis_type, 'upsert_lead');
+          await this.updateProgress(params.run_id, stepInfo.percentage, stepInfo.description);
 
           const upsertStart = Date.now();
           const supabase = await SupabaseClientFactory.createAdminClient(this.env);
@@ -353,7 +365,8 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       }, async () => {
         try {
           console.log(`[Workflow][${params.run_id}] Step 9: Saving analysis results`);
-          await this.updateProgress(params.run_id, 90, 'Saving analysis results');
+          const stepInfo = getStepProgress(params.analysis_type, 'save_analysis');
+          await this.updateProgress(params.run_id, stepInfo.percentage, stepInfo.description);
 
           const supabase = await SupabaseClientFactory.createAdminClient(this.env);
           const analysisRepo = new AnalysisRepository(supabase);
@@ -430,7 +443,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           const operationsRepo = new OperationsLedgerRepository(supabase);
 
           const totalDuration = Date.now() - workflowStartTime;
-          const apifyCost = timing.cache_hit ? 0 : ApifyAdapter.estimateCost(this.getPostsLimit(params.analysis_type));
+          const apifyCost = timing.cache_hit ? 0 : ApifyAdapter.estimateCost(getPostsLimit(params.analysis_type));
 
           await operationsRepo.logOperation({
             account_id: params.account_id,
@@ -577,19 +590,6 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
     }
   }
 
-  /**
-   * Get credit cost by analysis type
-   */
-  private getCreditCost(type: 'light'): number {
-    return 1;
-  }
-
-  /**
-   * Get posts limit by analysis type
-   */
-  private getPostsLimit(type: 'light'): number {
-    return 6;
-  }
 }
 
 // Export the workflow
