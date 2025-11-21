@@ -307,15 +307,14 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           const lead = await leadsRepo.upsertLead({
             account_id: params.account_id,
             business_profile_id: params.business_profile_id,
-            instagram_username: params.username,
+            username: params.username,
             display_name: aiProfile.display_name,
             follower_count: aiProfile.follower_count,
             following_count: aiProfile.following_count,
-            post_count: aiProfile.post_count,
             external_url: aiProfile.external_url,
             profile_pic_url: aiProfile.profile_pic_url,
-            is_verified: aiProfile.is_verified,
-            is_private: aiProfile.is_private,
+            is_verified_account: aiProfile.is_verified,
+            is_private_account: aiProfile.is_private,
             is_business_account: aiProfile.is_business_account
           });
 
