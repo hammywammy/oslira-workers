@@ -204,11 +204,4 @@ export class BusinessRepository extends BaseRepository<BusinessProfile> {
       was_created: true
     };
   }
-
-  /**
-   * Find business profile by ID
-   */
-  async findById(id: string): Promise<BusinessProfile | null> {
-    return this.findOne({ id });
-  }
 }
