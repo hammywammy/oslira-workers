@@ -11,6 +11,7 @@ export interface Lead {
   display_name: string | null;
   follower_count: number;
   following_count: number;
+  post_count: number;
   profile_pic_url: string | null;
   external_url: string | null;
   is_verified: boolean;
@@ -30,6 +31,7 @@ export interface UpsertLeadData {
   display_name?: string;
   follower_count: number;
   following_count: number;
+  post_count: number;
   profile_pic_url?: string;
   external_url?: string;
   is_verified: boolean;

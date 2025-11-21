@@ -311,6 +311,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             display_name: aiProfile.display_name,
             follower_count: aiProfile.follower_count,
             following_count: aiProfile.following_count,
+            post_count: aiProfile.post_count,
             external_url: aiProfile.external_url,
             profile_pic_url: aiProfile.profile_pic_url,
             is_verified: aiProfile.is_verified,

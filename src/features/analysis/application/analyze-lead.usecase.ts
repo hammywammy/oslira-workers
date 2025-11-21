@@ -294,6 +294,7 @@ export class AnalyzeLeadUseCase {
       display_name: profile.display_name,
       follower_count: profile.follower_count,
       following_count: profile.following_count,
+      post_count: profile.post_count,
       external_url: profile.external_url,
       profile_pic_url: profile.profile_pic_url,
       is_verified: profile.is_verified,
