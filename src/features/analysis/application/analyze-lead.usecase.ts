@@ -296,8 +296,8 @@ export class AnalyzeLeadUseCase {
       following_count: profile.following_count,
       external_url: profile.external_url,
       profile_pic_url: profile.profile_pic_url,
-      is_verified_account: profile.is_verified,
-      is_private_account: profile.is_private,
+      is_verified: profile.is_verified,
+      is_private: profile.is_private,
       is_business_account: profile.is_business_account
     });
 
@@ -329,13 +329,23 @@ export class AnalyzeLeadUseCase {
     });
 
     // Update with results
+    // Structure ai_response JSONB with all AI result data
+    const aiResponse = {
+      score: data.result.overall_score,
+      summary: data.result.summary_text,
+      model_used: data.result.model_used,
+      tokens: {
+        input: data.result.input_tokens,
+        output: data.result.output_tokens
+      },
+      cost_usd: data.result.total_cost,
+      generated_at: new Date().toISOString()
+    };
+
     await analysisRepo.updateAnalysis(data.runId, {
       overall_score: data.result.overall_score,
-      niche_fit_score: data.result.niche_fit_score,
-      engagement_score: data.result.engagement_score,
-      confidence_level: data.result.confidence_level,
-      summary_text: data.result.summary_text,
-      actual_cost: data.result.total_cost,
+      ai_response: aiResponse,
+      total_cost_cents: Math.round(data.result.total_cost * 100),
       status: 'complete',
       completed_at: new Date().toISOString()
     });

@@ -13,8 +13,8 @@ export interface Lead {
   following_count: number;
   profile_pic_url: string | null;
   external_url: string | null;
-  is_verified_account: boolean;
-  is_private_account: boolean;
+  is_verified: boolean;
+  is_private: boolean;
   is_business_account: boolean;
   first_analyzed_at: string;
   last_analyzed_at: string;
@@ -32,8 +32,8 @@ export interface UpsertLeadData {
   following_count: number;
   profile_pic_url?: string;
   external_url?: string;
-  is_verified_account: boolean;
-  is_private_account: boolean;
+  is_verified: boolean;
+  is_private: boolean;
   is_business_account: boolean;
 }
 
@@ -49,29 +49,45 @@ export class LeadsRepository extends BaseRepository<Lead> {
 
   /**
    * Upsert lead (insert or update if exists)
-   * Uses Supabase RPC function for atomic operation
+   * Uses native Supabase upsert with conflict resolution
    */
   async upsertLead(data: UpsertLeadData): Promise<UpsertLeadResult> {
+    // Check if lead exists
+    const existing = await this.findByUsername(
+      data.account_id,
+      data.business_profile_id,
+      data.username
+    );
+
+    const now = new Date().toISOString();
+
+    // Build payload with timestamps
+    const payload = {
+      ...data,
+      display_name: data.display_name || null,
+      profile_pic_url: data.profile_pic_url || null,
+      external_url: data.external_url || null,
+      last_analyzed_at: now,
+      ...(existing ? {} : {
+        first_analyzed_at: now,
+        created_at: now
+      })
+    };
+
     const { data: result, error } = await this.supabase
-      .rpc('upsert_lead', {
-        p_username: data.username,
-        p_account_id: data.account_id,
-        p_business_profile_id: data.business_profile_id,
-        p_follower_count: data.follower_count,
-        p_following_count: data.following_count,
-        p_profile_pic_url: data.profile_pic_url || null,
-        p_external_url: data.external_url || null,
-        p_is_verified_account: data.is_verified_account,
-        p_is_private_account: data.is_private_account,
-        p_is_business_account: data.is_business_account,
-        p_display_name: data.display_name || null
-      });
+      .from('leads')
+      .upsert(payload, {
+        onConflict: 'account_id,username',
+        ignoreDuplicates: false
+      })
+      .select()
+      .single();
 
     if (error) throw error;
 
     return {
       lead_id: result.id,
-      is_new: result.is_new
+      is_new: !existing
     };
   }
 

@@ -313,8 +313,8 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             following_count: aiProfile.following_count,
             external_url: aiProfile.external_url,
             profile_pic_url: aiProfile.profile_pic_url,
-            is_verified_account: aiProfile.is_verified,
-            is_private_account: aiProfile.is_private,
+            is_verified: aiProfile.is_verified,
+            is_private: aiProfile.is_private,
             is_business_account: aiProfile.is_business_account
           });
 
@@ -348,10 +348,23 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
           console.log(`[Workflow][${params.run_id}] Analysis created:`, analysis.id);
 
+          // Structure ai_response JSONB with all AI result data
+          const aiResponse = {
+            score: aiResult.overall_score,
+            summary: aiResult.summary_text,
+            model_used: aiResult.model_used,
+            tokens: {
+              input: aiResult.input_tokens,
+              output: aiResult.output_tokens
+            },
+            cost_usd: aiResult.total_cost,
+            generated_at: new Date().toISOString()
+          };
+
           await analysisRepo.updateAnalysis(params.run_id, {
             overall_score: aiResult.overall_score,
-            summary_text: aiResult.summary_text,
-            actual_cost: aiResult.total_cost,
+            ai_response: aiResponse,
+            total_cost_cents: Math.round(aiResult.total_cost * 100),
             status: 'complete',
             completed_at: new Date().toISOString()
           });
