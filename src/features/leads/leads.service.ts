@@ -25,23 +25,7 @@ export class LeadsService {
     // Build base query
     let queryBuilder = this.supabase
       .from('leads')
-      .select(`
-        id,
-        instagram_username,
-        display_name,
-        follower_count,
-        is_verified,
-        is_business_account,
-        profile_pic_url,
-        last_analyzed_at,
-        created_at,
-        analyses!inner (
-          id,
-          analysis_type,
-          overall_score,
-          completed_at
-        )
-      `, { count: 'exact' })
+      .select('*', { count: 'exact' })
       .eq('account_id', accountId)
       .is('deleted_at', null);
 
@@ -52,7 +36,7 @@ export class LeadsService {
 
     // Search by username
     if (search) {
-      queryBuilder = queryBuilder.ilike('instagram_username', `%${search}%`);
+      queryBuilder = queryBuilder.ilike('username', `%${search}%`);
     }
 
     // Sort
@@ -61,60 +45,75 @@ export class LeadsService {
     // Paginate
     queryBuilder = queryBuilder.range(offset, offset + pageSize - 1);
 
-    const { data, error, count } = await queryBuilder;
+    const { data: leads, error, count } = await queryBuilder;
 
     if (error) throw error;
 
-    // Transform results - get latest analysis per lead
-    const leads: LeadListItem[] = (data || []).map((lead: any) => {
-      const analyses = Array.isArray(lead.analyses) ? lead.analyses : [lead.analyses];
-      const latestAnalysis = analyses
-        .filter((a: any) => a.completed_at)
-        .sort((a: any, b: any) => 
-          new Date(b.completed_at).getTime() - new Date(a.completed_at).getTime()
-        )[0] || null;
+    // Get latest analysis for each lead
+    const leadIds = (leads || []).map((l: any) => l.id);
+
+    let latestAnalyses: any[] = [];
+    if (leadIds.length > 0) {
+      // Get most recent completed analysis for each lead
+      const { data: analysesData } = await this.supabase
+        .from('lead_analyses')
+        .select('lead_id, analysis_type, status, completed_at, overall_score, ai_response')
+        .in('lead_id', leadIds)
+        .eq('account_id', accountId)
+        .eq('status', 'complete')
+        .is('deleted_at', null)
+        .order('completed_at', { ascending: false });
+
+      // Group by lead_id and take first (most recent) for each
+      const analysisMap = new Map();
+      (analysesData || []).forEach((a: any) => {
+        if (!analysisMap.has(a.lead_id)) {
+          analysisMap.set(a.lead_id, a);
+        }
+      });
+      latestAnalyses = Array.from(analysisMap.values());
+    }
+
+    // Merge lead data with analysis data
+    const leadsWithAnalysis: LeadListItem[] = (leads || []).map((lead: any) => {
+      const analysis = latestAnalyses.find((a: any) => a.lead_id === lead.id);
 
       return {
         id: lead.id,
-        instagram_username: lead.instagram_username,
+        username: lead.username,
         display_name: lead.display_name,
         follower_count: lead.follower_count,
+        following_count: lead.following_count,
+        post_count: lead.post_count,
         is_verified: lead.is_verified,
+        is_private: lead.is_private,
         is_business_account: lead.is_business_account,
+        platform: lead.platform,
         profile_pic_url: lead.profile_pic_url,
+        profile_url: lead.profile_url,
+        external_url: lead.external_url,
         last_analyzed_at: lead.last_analyzed_at,
-        latest_analysis: latestAnalysis ? {
-          id: latestAnalysis.id,
-          analysis_type: latestAnalysis.analysis_type,
-          overall_score: latestAnalysis.overall_score,
-          completed_at: latestAnalysis.completed_at
-        } : null,
-        created_at: lead.created_at
+        created_at: lead.created_at,
+        analysis_type: analysis?.analysis_type || null,
+        analysis_status: analysis?.status || null,
+        analysis_completed_at: analysis?.completed_at || null,
+        overall_score: analysis?.overall_score || null,
+        summary: analysis?.ai_response?.summary || null,
+        confidence: analysis?.ai_response?.confidence || null
       };
     });
 
-    return { leads, total: count || 0 };
+    return { leads: leadsWithAnalysis, total: count || 0 };
   }
 
   /**
    * Get single lead with full details
    */
   async getLeadById(accountId: string, leadId: string): Promise<LeadDetail | null> {
-    // Get lead with latest analysis
+    // Get lead
     const { data: lead, error } = await this.supabase
       .from('leads')
-      .select(`
-        *,
-        analyses!inner (
-          id,
-          analysis_type,
-          overall_score,
-          niche_fit_score,
-          engagement_score,
-          confidence_level,
-          completed_at
-        )
-      `)
+      .select('*')
       .eq('id', leadId)
       .eq('account_id', accountId)
       .is('deleted_at', null)
@@ -127,48 +126,50 @@ export class LeadsService {
 
     // Get analyses count
     const { count } = await this.supabase
-      .from('analyses')
+      .from('lead_analyses')
       .select('id', { count: 'exact', head: true })
       .eq('lead_id', leadId)
       .eq('account_id', accountId)
       .is('deleted_at', null);
 
     // Get latest analysis
-    const analyses = Array.isArray(lead.analyses) ? lead.analyses : [lead.analyses];
-    const latestAnalysis = analyses
-      .filter((a: any) => a.completed_at)
-      .sort((a: any, b: any) => 
-        new Date(b.completed_at).getTime() - new Date(a.completed_at).getTime()
-      )[0] || null;
+    const { data: latestAnalysisData } = await this.supabase
+      .from('lead_analyses')
+      .select('analysis_type, status, completed_at, overall_score, ai_response')
+      .eq('lead_id', leadId)
+      .eq('account_id', accountId)
+      .eq('status', 'complete')
+      .is('deleted_at', null)
+      .order('completed_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     return {
       id: lead.id,
       account_id: lead.account_id,
       business_profile_id: lead.business_profile_id,
-      instagram_username: lead.instagram_username,
+      username: lead.username,
       display_name: lead.display_name,
       follower_count: lead.follower_count,
       following_count: lead.following_count,
       post_count: lead.post_count,
-      bio: lead.bio,
       external_url: lead.external_url,
       profile_pic_url: lead.profile_pic_url,
+      profile_url: lead.profile_url,
       is_verified: lead.is_verified,
       is_private: lead.is_private,
       is_business_account: lead.is_business_account,
+      platform: lead.platform,
       first_analyzed_at: lead.first_analyzed_at,
       last_analyzed_at: lead.last_analyzed_at,
       created_at: lead.created_at,
       analyses_count: count || 0,
-      latest_analysis: latestAnalysis ? {
-        id: latestAnalysis.id,
-        analysis_type: latestAnalysis.analysis_type,
-        overall_score: latestAnalysis.overall_score,
-        niche_fit_score: latestAnalysis.niche_fit_score,
-        engagement_score: latestAnalysis.engagement_score,
-        confidence_level: latestAnalysis.confidence_level,
-        completed_at: latestAnalysis.completed_at
-      } : null
+      analysis_type: latestAnalysisData?.analysis_type || null,
+      analysis_status: latestAnalysisData?.status || null,
+      analysis_completed_at: latestAnalysisData?.completed_at || null,
+      overall_score: latestAnalysisData?.overall_score || null,
+      summary: latestAnalysisData?.ai_response?.summary || null,
+      confidence: latestAnalysisData?.ai_response?.confidence || null
     };
   }
 
@@ -182,7 +183,7 @@ export class LeadsService {
     const { leadId, limit, analysisType } = query;
 
     let queryBuilder = this.supabase
-      .from('analyses')
+      .from('lead_analyses')
       .select('*')
       .eq('lead_id', leadId)
       .eq('account_id', accountId)
@@ -200,13 +201,14 @@ export class LeadsService {
 
     return (data || []).map(analysis => ({
       id: analysis.id,
+      run_id: analysis.run_id,
       analysis_type: analysis.analysis_type,
       overall_score: analysis.overall_score,
-      niche_fit_score: analysis.niche_fit_score,
-      engagement_score: analysis.engagement_score,
-      confidence_level: analysis.confidence_level,
+      summary: analysis.ai_response?.summary || null,
+      confidence: analysis.ai_response?.confidence || null,
       status: analysis.status,
-      processing_duration_ms: analysis.processing_duration_ms,
+      error_message: analysis.error_message,
+      started_at: analysis.started_at,
       completed_at: analysis.completed_at,
       created_at: analysis.created_at
     }));

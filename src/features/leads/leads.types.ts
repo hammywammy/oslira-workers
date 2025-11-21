@@ -35,55 +35,68 @@ export const DeleteLeadParamsSchema = z.object({
 
 export interface LeadListItem {
   id: string;
-  instagram_username: string;
+  username: string;
   display_name: string | null;
   follower_count: number;
+  following_count: number;
+  post_count: number;
   is_verified: boolean;
+  is_private: boolean;
   is_business_account: boolean;
+  platform: string;
   profile_pic_url: string | null;
+  profile_url: string;
+  external_url: string | null;
   last_analyzed_at: string;
-  latest_analysis: {
-    id: string;
-    analysis_type: 'light';
-    overall_score: number;
-    completed_at: string;
-  } | null;
   created_at: string;
+  // Latest analysis fields (null if no analysis)
+  analysis_type: 'light' | null;
+  analysis_status: string | null;
+  analysis_completed_at: string | null;
+  overall_score: number | null;
+  summary: string | null;
+  confidence: number | null;
 }
 
 export interface LeadDetail {
   id: string;
   account_id: string;
-  business_profile_id: string | null;
-  instagram_username: string;
+  business_profile_id: string;
+  username: string;
   display_name: string | null;
   follower_count: number;
   following_count: number;
   post_count: number;
-  bio: string | null;
   external_url: string | null;
   profile_pic_url: string | null;
+  profile_url: string;
   is_verified: boolean;
   is_private: boolean;
   is_business_account: boolean;
+  platform: string;
   first_analyzed_at: string;
   last_analyzed_at: string;
   created_at: string;
   analyses_count: number;
-  latest_analysis: {
-    id: string;
-    analysis_type: 'light';
-    overall_score: number;
-    completed_at: string;
-  } | null;
+  // Latest analysis fields (null if no analysis)
+  analysis_type: 'light' | null;
+  analysis_status: string | null;
+  analysis_completed_at: string | null;
+  overall_score: number | null;
+  summary: string | null;
+  confidence: number | null;
 }
 
 export interface LeadAnalysis {
   id: string;
+  run_id: string;
   analysis_type: 'light';
   overall_score: number;
+  summary: string | null;
+  confidence: number | null;
   status: string;
-  processing_duration_ms: number | null;
+  error_message: string | null;
+  started_at: string | null;
   completed_at: string | null;
   created_at: string;
 }
