@@ -2,16 +2,38 @@
 
 import type { R2Bucket } from '@cloudflare/workers-types';
 import { CacheStrategyService, type CachedProfile } from './cache-strategy.service';
-import type { ProfileData } from '@/infrastructure/ai/prompt-builder.service';
 
 /**
  * R2 CACHE SERVICE (Facade)
  *
  * Wrapper around CacheStrategyService for backward compatibility
  * Now includes Phase 7 smart caching with TTL and invalidation
- *
- * Uses canonical ProfileData from prompt-builder.service.ts
  */
+
+export interface ProfileData {
+  username: string;
+  displayName: string;
+  bio: string;
+  followersCount: number;
+  followingCount: number;
+  postsCount: number;
+  isVerified: boolean;
+  isPrivate: boolean;
+  profilePicUrl: string;
+  externalUrl: string | null;
+  isBusinessAccount: boolean;
+  latestPosts: Array<{
+    id: string;
+    caption: string;
+    likeCount: number;
+    commentCount: number;
+    timestamp: string;
+    mediaType: 'photo' | 'video' | 'carousel';
+    mediaUrl: string;
+  }>;
+  scraperUsed: string;
+  dataQuality: 'high' | 'medium' | 'low';
+}
 
 export class R2CacheService {
   private strategy: CacheStrategyService;
@@ -30,28 +52,30 @@ export class R2CacheService {
       return null;
     }
 
-    // Transform CachedProfile to canonical ProfileData format
+    // Transform CachedProfile to ProfileData format
     return {
       username: cached.username,
-      display_name: cached.display_name,
+      displayName: cached.display_name,
       bio: cached.bio,
-      follower_count: cached.follower_count,
-      following_count: cached.following_count,
-      post_count: cached.post_count,
-      is_verified: cached.is_verified,
-      is_private: cached.is_private,
-      profile_pic_url: cached.profile_pic_url,
-      external_url: cached.external_url || null,
-      is_business_account: cached.is_business_account,
-      posts: cached.latest_posts.map(post => ({
+      followersCount: cached.follower_count,
+      followingCount: cached.following_count,
+      postsCount: cached.post_count,
+      isVerified: cached.is_verified,
+      isPrivate: cached.is_private,
+      profilePicUrl: cached.profile_pic_url,
+      externalUrl: cached.external_url || null,
+      isBusinessAccount: cached.is_business_account,
+      latestPosts: cached.latest_posts.map(post => ({
         id: post.id,
         caption: post.caption,
-        like_count: post.like_count,
-        comment_count: post.comment_count,
+        likeCount: post.like_count,
+        commentCount: post.comment_count,
         timestamp: post.timestamp,
-        media_type: 'photo' as const,
-        media_url: ''
-      }))
+        mediaType: 'photo' as const,
+        mediaUrl: ''
+      })),
+      scraperUsed: cached.scraper_used,
+      dataQuality: cached.data_quality
     };
   }
 
@@ -61,26 +85,26 @@ export class R2CacheService {
   async set(username: string, profile: ProfileData, analysisType: 'light' | 'deep' | 'xray' = 'light'): Promise<void> {
     const cachedProfile: CachedProfile = {
       username: profile.username,
-      display_name: profile.display_name,
+      display_name: profile.displayName,
       bio: profile.bio,
-      follower_count: profile.follower_count,
-      following_count: profile.following_count,
-      post_count: profile.post_count,
-      is_verified: profile.is_verified,
-      is_private: profile.is_private,
-      profile_pic_url: profile.profile_pic_url,
-      external_url: profile.external_url || null,
-      is_business_account: profile.is_business_account,
-      latest_posts: (profile.posts || []).map(post => ({
+      follower_count: profile.followersCount,
+      following_count: profile.followingCount,
+      post_count: profile.postsCount,
+      is_verified: profile.isVerified,
+      is_private: profile.isPrivate,
+      profile_pic_url: profile.profilePicUrl,
+      external_url: profile.externalUrl || null,
+      is_business_account: profile.isBusinessAccount,
+      latest_posts: (profile.latestPosts || []).map(post => ({
         id: post.id,
         caption: post.caption,
-        like_count: post.like_count,
-        comment_count: post.comment_count,
+        like_count: post.likeCount,
+        comment_count: post.commentCount,
         timestamp: post.timestamp
       })),
       cached_at: new Date().toISOString(),
-      scraper_used: 'apify',  // Default scraper identifier
-      data_quality: 'high'     // Default quality
+      scraper_used: profile.scraperUsed,
+      data_quality: profile.dataQuality
     };
 
     await this.strategy.set(username, cachedProfile, analysisType);
@@ -99,20 +123,20 @@ export class R2CacheService {
   async shouldInvalidate(username: string, newProfile: ProfileData, analysisType: 'light' | 'deep' | 'xray') {
     const cachedProfile: CachedProfile = {
       username: newProfile.username,
-      display_name: newProfile.display_name,
+      display_name: newProfile.displayName,
       bio: newProfile.bio,
-      follower_count: newProfile.follower_count,
-      following_count: newProfile.following_count,
-      post_count: newProfile.post_count,
-      is_verified: newProfile.is_verified,
-      is_private: newProfile.is_private,
-      profile_pic_url: newProfile.profile_pic_url,
-      external_url: newProfile.external_url || null,
-      is_business_account: newProfile.is_business_account,
+      follower_count: newProfile.followersCount,
+      following_count: newProfile.followingCount,
+      post_count: newProfile.postsCount,
+      is_verified: newProfile.isVerified,
+      is_private: newProfile.isPrivate,
+      profile_pic_url: newProfile.profilePicUrl,
+      external_url: newProfile.externalUrl || null,
+      is_business_account: newProfile.isBusinessAccount,
       latest_posts: [],
       cached_at: new Date().toISOString(),
-      scraper_used: 'apify',
-      data_quality: 'high'
+      scraper_used: newProfile.scraperUsed,
+      data_quality: newProfile.dataQuality
     };
 
     return await this.strategy.shouldInvalidate(username, cachedProfile, analysisType);

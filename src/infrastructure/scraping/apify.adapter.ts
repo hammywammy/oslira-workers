@@ -1,6 +1,6 @@
 // infrastructure/scraping/apify.adapter.ts
 
-import type { ProfileData, PostData } from '@/infrastructure/ai/prompt-builder.service';
+import type { ProfileData } from '@/infrastructure/cache/r2-cache.service';
 import { SCRAPER_CONFIG } from './apify.config';
 
 /**
@@ -223,37 +223,41 @@ export class ApifyAdapter {
   }
 
   /**
-   * Transform Apify response to ProfileData format
+   * Transform Apify response to ProfileData format (camelCase for R2CacheService)
    */
   private transformProfile(raw: ApifyRawProfile): ProfileData {
+    const latestPosts = this.transformPosts(raw.latestPosts || []);
+
     return {
       username: raw.username,
-      display_name: raw.fullName || raw.username,
-      follower_count: raw.followersCount,
-      following_count: raw.followsCount,
-      post_count: raw.postsCount,
+      displayName: raw.fullName || raw.username,
+      followersCount: raw.followersCount,
+      followingCount: raw.followsCount,
+      postsCount: raw.postsCount,
       bio: raw.biography || '',
-      external_url: raw.externalUrl,
-      is_verified: raw.verified,
-      is_private: raw.private,
-      is_business_account: !!raw.businessCategoryName,
-      profile_pic_url: raw.profilePicUrl,
-      posts: this.transformPosts(raw.latestPosts || [])
+      externalUrl: raw.externalUrl,
+      isVerified: raw.verified,
+      isPrivate: raw.private,
+      isBusinessAccount: !!raw.businessCategoryName,
+      profilePicUrl: raw.profilePicUrl,
+      latestPosts: latestPosts,
+      scraperUsed: this.actorId,
+      dataQuality: this.determineDataQuality(latestPosts.length)
     };
   }
 
   /**
-   * Transform posts array
+   * Transform posts array (camelCase for R2CacheService)
    */
-  private transformPosts(rawPosts: ApifyRawPost[]): PostData[] {
+  private transformPosts(rawPosts: ApifyRawPost[]): ProfileData['latestPosts'] {
     return rawPosts.map(post => ({
       id: post.id,
       caption: post.caption || '',
-      like_count: post.likesCount,
-      comment_count: post.commentsCount,
+      likeCount: post.likesCount,
+      commentCount: post.commentsCount,
       timestamp: post.timestamp,
-      media_type: this.mapMediaType(post.type),
-      media_url: post.displayUrl
+      mediaType: this.mapMediaType(post.type),
+      mediaUrl: post.displayUrl
     }));
   }
 
@@ -274,11 +278,20 @@ export class ApifyAdapter {
   }
 
   /**
+   * Determine data quality based on posts count
+   */
+  private determineDataQuality(postsCount: number): 'high' | 'medium' | 'low' {
+    if (postsCount > 3) return 'high';
+    if (postsCount >= 1) return 'medium';
+    return 'low';
+  }
+
+  /**
    * Check if error is user error (don't retry) vs infrastructure error (retry)
    */
   private isUserError(error: Error): boolean {
     const message = error.message.toLowerCase();
-    
+
     const userErrorPatterns = [
       'profile not found',
       'is private',
