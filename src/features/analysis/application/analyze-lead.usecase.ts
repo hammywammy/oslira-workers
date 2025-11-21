@@ -174,37 +174,30 @@ export class AnalyzeLeadUseCase {
   /**
    * Deduct credits atomically
    */
-private async deductCreditsForAnalysis(
-  accountId: string,
-  analysisType: 'light' | 'deep' | 'xray',
-  reason: string
-): Promise<void> {
-  this.perfTracker.startStep('deduct_credits');
+  private async deductCredits(
+    accountId: string,
+    amount: number,
+    analysisType: 'light' | 'deep' | 'xray'
+  ): Promise<void> {
+    this.perfTracker.startStep('deduct_credits');
 
-  const supabase = await SupabaseClientFactory.createAdminClient(this.env);
-  const creditsRepo = new CreditsRepository(supabase);
+    const supabase = await SupabaseClientFactory.createAdminClient(this.env);
+    const creditsRepo = new CreditsRepository(supabase);
 
-  if (analysisType === 'light') {
-    // Light analysis uses separate quota
-    const hasLight = await creditsRepo.hasSufficientLightAnalyses(accountId, 1);
-    if (!hasLight) {
-      throw new Error('Insufficient light analyses');
-    }
-
-    await creditsRepo.deductLightAnalyses(accountId, -1, 'light_analysis', reason);
-  } else {
-    // Deep/X-Ray use credits
-    const amount = analysisType === 'deep' ? 1 : 2;
     const hasCredits = await creditsRepo.hasSufficientCredits(accountId, amount);
     if (!hasCredits) {
       throw new Error('Insufficient credits');
     }
 
-    await creditsRepo.deductCredits(accountId, -amount, 'analysis', reason);
-  }
+    await creditsRepo.deductCredits(
+      accountId,
+      amount,
+      'analysis',
+      `${analysisType} analysis for @${accountId}`
+    );
 
-  this.perfTracker.endStep('deduct_credits');
-}
+    this.perfTracker.endStep('deduct_credits');
+  }
 
   /**
    * Refund credits on failure
@@ -297,19 +290,18 @@ private async deductCreditsForAnalysis(
     const lead = await leadsRepo.upsertLead({
       account_id: params.accountId,
       business_profile_id: params.businessProfileId,
-      instagram_username: params.username,
+      username: params.username,
       display_name: profile.display_name,
       follower_count: profile.follower_count,
       following_count: profile.following_count,
-      post_count: profile.post_count,
       external_url: profile.external_url,
       profile_pic_url: profile.profile_pic_url,
-      is_verified: profile.is_verified,
-      is_private: profile.is_private,
+      is_verified_account: profile.is_verified,
+      is_private_account: profile.is_private,
       is_business_account: profile.is_business_account
     });
 
-    return lead.id;
+    return lead.lead_id;
   }
 
   /**
