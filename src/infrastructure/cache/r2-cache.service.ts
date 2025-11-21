@@ -5,7 +5,7 @@ import { CacheStrategyService, type CachedProfile } from './cache-strategy.servi
 
 /**
  * R2 CACHE SERVICE (Facade)
- * 
+ *
  * Wrapper around CacheStrategyService for backward compatibility
  * Now includes Phase 7 smart caching with TTL and invalidation
  */
@@ -20,7 +20,7 @@ export interface ProfileData {
   isVerified: boolean;
   isPrivate: boolean;
   profilePicUrl: string;
-  externalUrl: string;
+  externalUrl: string | null;
   isBusinessAccount: boolean;
   latestPosts: Array<{
     id: string;
@@ -47,12 +47,12 @@ export class R2CacheService {
    */
   async get(username: string, analysisType: 'light' | 'deep' | 'xray'): Promise<ProfileData | null> {
     const cached = await this.strategy.get(username, analysisType);
-    
+
     if (!cached) {
       return null;
     }
 
-    // Transform to ProfileData format
+    // Transform CachedProfile to ProfileData format
     return {
       username: cached.username,
       displayName: cached.display_name,
@@ -63,7 +63,7 @@ export class R2CacheService {
       isVerified: cached.is_verified,
       isPrivate: cached.is_private,
       profilePicUrl: cached.profile_pic_url,
-      externalUrl: cached.external_url || '',
+      externalUrl: cached.external_url || null,
       isBusinessAccount: cached.is_business_account,
       latestPosts: cached.latest_posts.map(post => ({
         id: post.id,
@@ -95,7 +95,7 @@ export class R2CacheService {
       profile_pic_url: profile.profilePicUrl,
       external_url: profile.externalUrl || null,
       is_business_account: profile.isBusinessAccount,
-      latest_posts: profile.latestPosts.map(post => ({
+      latest_posts: (profile.latestPosts || []).map(post => ({
         id: post.id,
         caption: post.caption,
         like_count: post.likeCount,

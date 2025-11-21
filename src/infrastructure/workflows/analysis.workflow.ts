@@ -7,10 +7,11 @@ import { CreditsRepository } from '@/infrastructure/database/repositories/credit
 import { LeadsRepository } from '@/infrastructure/database/repositories/leads.repository';
 import { AnalysisRepository } from '@/infrastructure/database/repositories/analysis.repository';
 import { BusinessRepository } from '@/infrastructure/database/repositories/business.repository';
-import { R2CacheService } from '@/infrastructure/cache/r2-cache.service';
+import { R2CacheService, type ProfileData as CacheProfileData } from '@/infrastructure/cache/r2-cache.service';
 import { ApifyAdapter } from '@/infrastructure/scraping/apify.adapter';
 import { AIAnalysisService } from '@/infrastructure/ai/ai-analysis.service';
 import { getSecret } from '@/infrastructure/config/secrets';
+import type { ProfileData as AIProfileData } from '@/infrastructure/ai/prompt-builder.service';
 
 /**
  * ANALYSIS WORKFLOW
@@ -32,6 +33,34 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       hint: error?.hint,
       stack: error?.stack,
       cause: error?.cause ? String(error.cause) : undefined
+    };
+  }
+
+  /**
+   * Transform camelCase cache ProfileData to snake_case AI ProfileData
+   */
+  private transformToAIProfile(cacheProfile: CacheProfileData): AIProfileData {
+    return {
+      username: cacheProfile.username,
+      display_name: cacheProfile.displayName,
+      follower_count: cacheProfile.followersCount,
+      following_count: cacheProfile.followingCount,
+      post_count: cacheProfile.postsCount,
+      bio: cacheProfile.bio,
+      external_url: cacheProfile.externalUrl,
+      is_verified: cacheProfile.isVerified,
+      is_private: cacheProfile.isPrivate,
+      is_business_account: cacheProfile.isBusinessAccount,
+      profile_pic_url: cacheProfile.profilePicUrl,
+      posts: cacheProfile.latestPosts.map(post => ({
+        id: post.id,
+        caption: post.caption,
+        like_count: post.likeCount,
+        comment_count: post.commentCount,
+        timestamp: post.timestamp,
+        media_type: post.mediaType,
+        media_url: post.mediaUrl
+      }))
     };
   }
 
@@ -216,8 +245,8 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
             console.log(`[Workflow][${params.run_id}] Scraped profile:`, {
               username: scraped.username,
-              followers: scraped.follower_count,
-              posts: scraped.posts.length
+              followers: scraped.followersCount,
+              posts: scraped.latestPosts.length
             });
 
             // Store in cache
@@ -241,8 +270,11 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           console.log(`[Workflow][${params.run_id}] Step 7: Executing AI analysis`);
           await this.updateProgress(params.run_id, 50, 'Running AI analysis');
 
+          // Transform camelCase cache profile to snake_case AI profile
+          const aiProfile = this.transformToAIProfile(profile);
+
           const aiService = await AIAnalysisService.create(this.env);
-          const result = await aiService.executeLightAnalysis(business, profile);
+          const result = await aiService.executeLightAnalysis(business, aiProfile);
 
           console.log(`[Workflow][${params.run_id}] AI analysis complete:`, {
             score: result.overall_score,
@@ -269,19 +301,22 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           const supabase = await SupabaseClientFactory.createAdminClient(this.env);
           const leadsRepo = new LeadsRepository(supabase);
 
+          // Transform to AI profile format for database (snake_case)
+          const aiProfile = this.transformToAIProfile(profile);
+
           const lead = await leadsRepo.upsertLead({
             account_id: params.account_id,
             business_profile_id: params.business_profile_id,
             instagram_username: params.username,
-            display_name: profile.display_name,
-            follower_count: profile.follower_count,
-            following_count: profile.following_count,
-            post_count: profile.post_count,
-            external_url: profile.external_url,
-            profile_pic_url: profile.profile_pic_url,
-            is_verified: profile.is_verified,
-            is_private: profile.is_private,
-            is_business_account: profile.is_business_account
+            display_name: aiProfile.display_name,
+            follower_count: aiProfile.follower_count,
+            following_count: aiProfile.following_count,
+            post_count: aiProfile.post_count,
+            external_url: aiProfile.external_url,
+            profile_pic_url: aiProfile.profile_pic_url,
+            is_verified: aiProfile.is_verified,
+            is_private: aiProfile.is_private,
+            is_business_account: aiProfile.is_business_account
           });
 
           console.log(`[Workflow][${params.run_id}] Lead upserted:`, lead.id);
