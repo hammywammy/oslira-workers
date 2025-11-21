@@ -79,10 +79,8 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         }
       });
 
-      // Step 2: Check duplicate analysis (no retries - should fail fast)
-      await step.do('check_duplicate', {
-        retries: { limit: 0 }
-      }, async () => {
+      // Step 2: Check duplicate analysis (no retries - fail fast)
+      await step.do('check_duplicate', async () => {
         try {
           console.log(`[Workflow][${params.run_id}] Step 2: Checking for duplicates`);
           await this.updateProgress(params.run_id, 5, 'Checking for duplicates');
@@ -118,9 +116,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       });
 
       // Step 3: Verify & deduct credits (no retries - fail fast on insufficient credits)
-      await step.do('deduct_credits', {
-        retries: { limit: 0 }
-      }, async () => {
+      await step.do('deduct_credits', async () => {
         try {
           console.log(`[Workflow][${params.run_id}] Step 3: Verifying credits (cost: ${creditsCost})`);
           await this.updateProgress(params.run_id, 10, 'Verifying credits');
