@@ -167,7 +167,7 @@ export class CronJobsHandler {
 
       // 3. Hard delete old completed analyses (>90 days)
       const { data: analysesDeleted, error: analysesError } = await supabase
-        .from('analyses')
+        .from('lead_analyses')
         .delete()
         .eq('status', 'complete')
         .lt('completed_at', ninetyDaysAgo)
@@ -182,7 +182,7 @@ export class CronJobsHandler {
 
       // 4. Hard delete failed analyses (>30 days)
       const { data: failedDeleted, error: failedError } = await supabase
-        .from('analyses')
+        .from('lead_analyses')
         .delete()
         .eq('status', 'failed')
         .lt('created_at', thirtyDaysAgo)
@@ -197,9 +197,9 @@ export class CronJobsHandler {
 
       // 5. Delete abandoned pending analyses (>24 hours)
       const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-      
+
       const { data: pendingDeleted, error: pendingError } = await supabase
-        .from('analyses')
+        .from('lead_analyses')
         .delete()
         .eq('status', 'pending')
         .lt('created_at', twentyFourHoursAgo)
@@ -245,7 +245,7 @@ export class CronJobsHandler {
 
       // Get failed analyses older than 1 hour that haven't been soft-deleted
       const { data: failedAnalyses, error } = await supabase
-        .from('analyses')
+        .from('lead_analyses')
         .select('id, account_id, created_at')
         .eq('status', 'failed')
         .lt('created_at', oneHourAgo)
@@ -266,7 +266,7 @@ export class CronJobsHandler {
         try {
           // Soft delete the failed analysis (keep for audit)
           await supabase
-            .from('analyses')
+            .from('lead_analyses')
             .update({ deleted_at: new Date().toISOString() })
             .eq('id', analysis.id);
 

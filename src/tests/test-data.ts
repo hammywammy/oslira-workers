@@ -153,7 +153,7 @@ export function registerTestDataEndpoints(app: Hono<{ Bindings: Env }>) {
         p_description: 'Referral bonus'
       });
 
-      const { data: analyses } = await supabase.from('analyses').insert([
+      const { data: analyses } = await supabase.from('lead_analyses').insert([
         {
           lead_id: leads[0].id,
           account_id: account.id,
@@ -242,7 +242,7 @@ export function registerTestDataEndpoints(app: Hono<{ Bindings: Env }>) {
       }
 
       const testUserId = testUser.id;
-      await supabase.from('analyses').delete().eq('requested_by', testUserId);
+      await supabase.from('lead_analyses').delete().eq('requested_by', testUserId);
 
       const { data: accounts } = await supabase
         .from('accounts')
