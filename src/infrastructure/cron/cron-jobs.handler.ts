@@ -7,15 +7,99 @@ import { getSentryService } from '@/infrastructure/monitoring/sentry.service';
 
 /**
  * CRON JOBS HANDLER
- * 
+ *
  * Handles all scheduled tasks:
- * 1. Monthly credit renewal (subscriptions)
- * 2. Daily cleanup (old analyses, soft deleted records)
- * 3. Hourly failed analysis refunds
+ * 1. Daily free plan credit reset (midnight UTC)
+ * 2. Monthly credit renewal (subscriptions)
+ * 3. Daily cleanup (old analyses, soft deleted records)
+ * 4. Hourly failed analysis refunds
  */
 
 export class CronJobsHandler {
   constructor(private env: Env) {}
+
+  /**
+   * Daily free plan credit reset (midnight UTC)
+   * Atomically resets credits for free-tier accounts whose billing cycle has ended
+   * Uses Supabase RPC function for transaction safety and idempotency
+   */
+  async resetFreePlanCredits(): Promise<void> {
+    console.log('[Cron] Starting free plan credit reset...');
+    const sentry = await getSentryService(this.env);
+
+    sentry.addBreadcrumb('Free plan credit reset started', 'cron', 'info');
+
+    try {
+      const supabase = await SupabaseClientFactory.createAdminClient(this.env);
+
+      // Call Supabase RPC function that handles the entire reset atomically
+      const { data, error } = await supabase.rpc('reset_free_plan_credits');
+
+      if (error) {
+        throw new Error(`RPC call failed: ${error.message}`);
+      }
+
+      const result = data as {
+        success: boolean;
+        processed: number;
+        skipped: number;
+        errors: string[];
+        plan_credits: number;
+        plan_light_analyses: number;
+        executed_at: string;
+      };
+
+      if (!result.success) {
+        throw new Error(`Reset failed: ${JSON.stringify(result)}`);
+      }
+
+      console.log('[Cron] Free plan credit reset complete:', {
+        processed: result.processed,
+        skipped: result.skipped,
+        errors: result.errors.length,
+        plan_credits: result.plan_credits,
+        plan_light_analyses: result.plan_light_analyses
+      });
+
+      // Log errors if any accounts failed
+      if (result.errors.length > 0) {
+        console.warn('[Cron] Some accounts failed to reset:', result.errors);
+
+        await sentry.captureMessage(
+          `Free plan reset: ${result.errors.length} accounts failed`,
+          'warning',
+          {
+            tags: { cron_job: 'free_plan_reset' },
+            extra: { errors: result.errors }
+          }
+        );
+      }
+
+      // Track success metrics in Analytics Engine
+      if (this.env.ANALYTICS_ENGINE) {
+        this.env.ANALYTICS_ENGINE.writeDataPoint({
+          blobs: ['free_plan_reset', 'success'],
+          doubles: [result.processed, result.skipped],
+          indexes: [new Date().toISOString().split('T')[0]]
+        });
+      }
+
+      await sentry.captureMessage(
+        `Free plan reset: ${result.processed} accounts processed, ${result.skipped} skipped`,
+        'info',
+        { tags: { cron_job: 'free_plan_reset' } }
+      );
+
+    } catch (error: any) {
+      console.error('[Cron] Free plan credit reset error:', error);
+
+      await sentry.captureException(error, {
+        tags: { cron_job: 'free_plan_reset' }
+      });
+
+      throw error;
+    }
+  }
 
   /**
    * Monthly credit renewal (1st of month, 3 AM UTC)
@@ -310,18 +394,25 @@ export async function executeCronJob(cronExpression: string, env: Env): Promise<
 
   try {
     switch (cronExpression) {
-      case '0 3 1 * *': // Monthly renewal (1st of month, 3 AM UTC)
+      case '0 0 * * *': // Daily free plan credit reset (midnight UTC - production)
+      case '0 1 * * *': // Daily free plan credit reset (1 AM UTC - staging)
+        await handler.resetFreePlanCredits();
+        break;
+
+      case '0 3 1 * *': // Monthly renewal (1st of month, 3 AM UTC - production)
+      case '0 4 1 * *': // Monthly renewal (1st of month, 4 AM UTC - staging)
         await handler.monthlyRenewal();
         break;
-      
-      case '0 2 * * *': // Daily cleanup (2 AM UTC)
+
+      case '0 2 * * *': // Daily cleanup (2 AM UTC - production)
+      case '0 3 * * *': // Daily cleanup (3 AM UTC - staging)
         await handler.dailyCleanup();
         break;
-      
+
       case '0 * * * *': // Hourly failed analysis cleanup
         await handler.hourlyFailedAnalysisCleanup();
         break;
-      
+
       default:
         console.warn('[Cron] Unknown cron expression:', cronExpression);
     }
