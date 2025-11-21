@@ -388,24 +388,25 @@ export class CronJobsHandler {
 
 /**
  * Execute cron job based on schedule
+ *
+ * NOTE: Cron triggers only run in PRODUCTION environment.
+ * Staging and production share the same database, so running crons in both
+ * would cause duplicate operations (double credit resets, double cleanups, etc).
  */
 export async function executeCronJob(cronExpression: string, env: Env): Promise<void> {
   const handler = new CronJobsHandler(env);
 
   try {
     switch (cronExpression) {
-      case '0 0 * * *': // Daily free plan credit reset (midnight UTC - production)
-      case '0 1 * * *': // Daily free plan credit reset (1 AM UTC - staging)
+      case '0 0 * * *': // Daily free plan credit reset (midnight UTC)
         await handler.resetFreePlanCredits();
         break;
 
-      case '0 3 1 * *': // Monthly renewal (1st of month, 3 AM UTC - production)
-      case '0 4 1 * *': // Monthly renewal (1st of month, 4 AM UTC - staging)
+      case '0 3 1 * *': // Monthly renewal (1st of month, 3 AM UTC)
         await handler.monthlyRenewal();
         break;
 
-      case '0 2 * * *': // Daily cleanup (2 AM UTC - production)
-      case '0 3 * * *': // Daily cleanup (3 AM UTC - staging)
+      case '0 2 * * *': // Daily cleanup (2 AM UTC)
         await handler.dailyCleanup();
         break;
 
