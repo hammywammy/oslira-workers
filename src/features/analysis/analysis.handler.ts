@@ -338,7 +338,8 @@ export async function getActiveAnalyses(c: Context<{ Bindings: Env }>) {
     if (activeAnalyses.length === 0) {
       return successResponse(c, {
         active_count: 0,
-        analyses: []
+        analyses: [],
+        server_time: new Date().toISOString()
       });
     }
 
@@ -400,7 +401,8 @@ export async function getActiveAnalyses(c: Context<{ Bindings: Env }>) {
 
     return successResponse(c, {
       active_count: analysesWithProgress.length,
-      analyses: analysesWithProgress
+      analyses: analysesWithProgress,
+      server_time: new Date().toISOString()
     });
 
   } catch (error: any) {
