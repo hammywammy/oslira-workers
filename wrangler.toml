@@ -136,7 +136,7 @@ APP_ENV = "staging"
 # STAGING: CUSTOM DOMAIN
 # ===========================
 [[env.staging.routes]]
-pattern = "api-staging.oslira.com/*"
+pattern = "api-staging.oslira.com"
 custom_domain = true
 
 # ===========================
