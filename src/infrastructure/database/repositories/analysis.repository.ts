@@ -169,14 +169,18 @@ export class AnalysisRepository extends BaseRepository<Analysis> {
 
   /**
    * Get all active analyses for an account (pending or processing)
+   * Also includes recently-completed jobs (within 10 seconds) so frontend receives final status
    */
   async getActiveAnalyses(accountId: string): Promise<Analysis[]> {
+    // Include recently-completed jobs (within 10 seconds) so frontend receives final status
+    const tenSecondsAgo = new Date(Date.now() - 10000).toISOString();
+
     const { data, error } = await this.supabase
       .from('lead_analyses')
       .select('*')
       .eq('account_id', accountId)
-      .in('status', ['pending', 'processing'])
       .is('deleted_at', null)
+      .or(`status.in.(pending,processing),and(status.eq.complete,completed_at.gte.${tenSecondsAgo}),and(status.eq.failed,completed_at.gte.${tenSecondsAgo})`)
       .order('created_at', { ascending: false });
 
     if (error) throw error;
