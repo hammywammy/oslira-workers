@@ -3,17 +3,18 @@
 import type { Context } from 'hono';
 import type { Env } from '@/shared/types/env.types';
 import { LeadsService } from './leads.service';
-import { 
-  ListLeadsQuerySchema, 
+import {
+  ListLeadsQuerySchema,
   GetLeadParamsSchema,
   GetLeadAnalysesQuerySchema,
-  DeleteLeadParamsSchema 
+  DeleteLeadParamsSchema
 } from './leads.types';
 import { validateQuery } from '@/shared/utils/validation.util';
 import { successResponse, errorResponse, paginatedResponse, noContentResponse } from '@/shared/utils/response.util';
 import { getAuthContext } from '@/shared/middleware/auth.middleware';
 import { AppError } from '@/shared/middleware/error.middleware';
 import { SupabaseClientFactory } from '@/infrastructure/database/supabase.client';
+import { AvatarCacheService } from '@/infrastructure/cache/avatar-cache.service';
 
 /**
  * GET /api/leads
@@ -136,7 +137,7 @@ export async function getLeadAnalyses(c: Context<{ Bindings: Env }>) {
 
 /**
  * DELETE /api/leads/:leadId
- * Soft delete lead
+ * Soft delete lead and clean up R2 avatar
  */
 export async function deleteLead(c: Context<{ Bindings: Env }>) {
   try {
@@ -147,27 +148,39 @@ export async function deleteLead(c: Context<{ Bindings: Env }>) {
     // Validate params
     validateQuery(DeleteLeadParamsSchema, { leadId });
 
-    // Verify lead ownership
+    // Get supabase client
     const supabase = await SupabaseClientFactory.createAdminClient(c.env);
     const service = new LeadsService(supabase);
-    const hasAccess = await service.verifyLeadOwnership(accountId, leadId);
 
+    // Verify lead exists and user has access
+    const hasAccess = await service.verifyLeadOwnership(accountId, leadId);
     if (!hasAccess) {
       return errorResponse(c, 'Lead not found', 'NOT_FOUND', 404);
     }
 
-    // Delete lead
+    // Delete avatar from R2 (per-lead key means always safe to delete)
+    try {
+      const avatarService = new AvatarCacheService(c.env.R2_CACHE_BUCKET);
+      await avatarService.deleteAvatar(leadId);
+      console.log(`[DeleteLead] Deleted R2 avatar for lead ${leadId}`);
+    } catch (avatarError) {
+      // Non-critical - log and continue with lead deletion
+      console.error(`[DeleteLead] Failed to delete R2 avatar for lead ${leadId}:`, avatarError);
+    }
+
+    // Soft delete lead from database
     await service.deleteLead(accountId, leadId);
+    console.log(`[DeleteLead] Lead ${leadId} soft deleted`);
 
     return noContentResponse(c);
 
   } catch (error: any) {
     console.error('[DeleteLead] Error:', error);
-    
+
     if (error.name === 'ZodError') {
       return errorResponse(c, 'Invalid lead ID', 'VALIDATION_ERROR', 400);
     }
-    
+
     return errorResponse(c, 'Failed to delete lead', 'INTERNAL_ERROR', 500);
   }
 }
