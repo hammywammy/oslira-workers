@@ -164,10 +164,13 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
       }, 500);
     }
 
+    // Ensure is_new_user has a default value if undefined
+    const isNewUser = accountData.is_new_user ?? false;
+
     console.log('[GoogleCallback] ✓ Account created successfully', {
       user_id: accountData.user_id,
       account_id: accountData.account_id,
-      is_new_user: accountData.is_new_user,
+      is_new_user: isNewUser,
       credit_balance: accountData.credit_balance
     });
 
@@ -175,7 +178,7 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
     // STEP 4: Create Stripe customer (NEW USERS ONLY)
     // ===========================================================================
 
-    if (accountData.is_new_user) {
+    if (isNewUser) {
       try {
         console.log('[GoogleCallback] Creating Stripe customer (new user)');
         
@@ -287,13 +290,13 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
         name: accountData.full_name + "'s Account",
         credit_balance: accountData.credit_balance
       },
-      isNewUser: accountData.is_new_user
+      isNewUser: isNewUser
     };
 
     console.log('[GoogleCallback] ========== SUCCESS ==========', {
       user_id: accountData.user_id,
       account_id: accountData.account_id,
-      is_new_user: accountData.is_new_user,
+      is_new_user: isNewUser,
       onboarding_completed: accountData.onboarding_completed
     });
 
