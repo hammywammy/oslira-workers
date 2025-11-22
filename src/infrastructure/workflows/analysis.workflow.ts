@@ -364,23 +364,12 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         retries: { limit: 3, delay: '1 second' }
       }, async () => {
         try {
-          console.log(`[Workflow][${params.run_id}] Step 9: Saving analysis results`);
+          console.log(`[Workflow][${params.run_id}] Step 9: Updating existing analysis record with results`);
           const stepInfo = getStepProgress(params.analysis_type, 'save_analysis');
           await this.updateProgress(params.run_id, stepInfo.percentage, stepInfo.description);
 
           const supabase = await SupabaseClientFactory.createAdminClient(this.env);
           const analysisRepo = new AnalysisRepository(supabase);
-
-          const analysis = await analysisRepo.createAnalysis({
-            run_id: params.run_id,
-            lead_id: leadId,
-            account_id: params.account_id,
-            business_profile_id: params.business_profile_id,
-            analysis_type: params.analysis_type,
-            status: 'complete'
-          });
-
-          console.log(`[Workflow][${params.run_id}] Analysis created:`, analysis.id);
 
           // Structure ai_response JSONB with only analysis results
           // (cost/timing metadata goes to operations_ledger)
@@ -389,14 +378,15 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             summary: aiResult.summary_text
           };
 
-          await analysisRepo.updateAnalysis(params.run_id, {
+          // UPDATE existing analysis record (created in handler before workflow started)
+          const analysis = await analysisRepo.updateAnalysis(params.run_id, {
             overall_score: aiResult.overall_score,
             ai_response: aiResponse,
             status: 'complete',
             completed_at: new Date().toISOString()
           });
 
-          console.log(`[Workflow][${params.run_id}] Analysis updated with results`);
+          console.log(`[Workflow][${params.run_id}] Analysis updated with results:`, analysis.id);
           return analysis.id;
         } catch (error: any) {
           console.error(`[Workflow][${params.run_id}] Step 9 FAILED:`, this.serializeError(error));
@@ -569,11 +559,12 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
   }
 
   /**
-   * Mark as failed
+   * Mark as failed - updates both DO and database
    */
   private async markFailed(runId: string, errorMessage: string): Promise<void> {
     console.log(`[Workflow][${runId}] Marking analysis as failed: ${errorMessage}`);
 
+    // Update Durable Object
     const id = this.env.ANALYSIS_PROGRESS.idFromName(runId);
     const stub = this.env.ANALYSIS_PROGRESS.get(id);
 
@@ -584,9 +575,26 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
     if (!response.ok) {
       const error = await response.text();
-      console.error(`[Workflow][${runId}] Failed to mark as failed:`, error);
+      console.error(`[Workflow][${runId}] Failed to mark DO as failed:`, error);
     } else {
-      console.log(`[Workflow][${runId}] Successfully marked as failed`);
+      console.log(`[Workflow][${runId}] Successfully marked DO as failed`);
+    }
+
+    // Update database record so getActiveAnalyses stops returning this job
+    try {
+      const supabase = await SupabaseClientFactory.createAdminClient(this.env);
+      const analysisRepo = new AnalysisRepository(supabase);
+
+      await analysisRepo.updateAnalysis(runId, {
+        status: 'failed',
+        error_message: errorMessage,
+        completed_at: new Date().toISOString()
+      });
+
+      console.log(`[Workflow][${runId}] Successfully updated database analysis status to failed`);
+    } catch (dbError: any) {
+      console.error(`[Workflow][${runId}] Failed to update database:`, this.serializeError(dbError));
+      // Don't throw - we still want the workflow to complete even if DB update fails
     }
   }
 
