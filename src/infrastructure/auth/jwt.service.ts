@@ -54,15 +54,19 @@ export class JWTService {
    * @returns JWT string
    */
   async sign(payload: Omit<JWTPayload, 'iat' | 'exp'>): Promise<string> {
+    console.log(`[AUTH-TRACE-301][${Date.now()}] JWTService.signStart: Starting JWT signing {userId: '${payload.userId}', accountId: '${payload.accountId}', email: '${payload.email}'}`);
+
     const secret = await this.getJWTSecret();
-    
+
     const now = Math.floor(Date.now() / 1000);
-    
+
     const fullPayload: JWTPayload = {
       ...payload,
       iat: now,
       exp: now + this.TOKEN_EXPIRY
     };
+
+    console.log(`[AUTH-TRACE-302][${Date.now()}] JWTService.payloadCreated: JWT payload created {iat: ${now}, exp: ${now + this.TOKEN_EXPIRY}, expiresInSeconds: ${this.TOKEN_EXPIRY}}`);
 
     // Create JWT manually (Cloudflare Workers don't have jsonwebtoken package)
     const header = {
@@ -72,13 +76,18 @@ export class JWTService {
 
     const encodedHeader = this.base64UrlEncode(JSON.stringify(header));
     const encodedPayload = this.base64UrlEncode(JSON.stringify(fullPayload));
-    
+
+    console.log(`[AUTH-TRACE-303][${Date.now()}] JWTService.encodingComplete: Header and payload encoded {headerLength: ${encodedHeader.length}, payloadLength: ${encodedPayload.length}}`);
+
     const signature = await this.createSignature(
       `${encodedHeader}.${encodedPayload}`,
       secret
     );
 
-    return `${encodedHeader}.${encodedPayload}.${signature}`;
+    const jwt = `${encodedHeader}.${encodedPayload}.${signature}`;
+    console.log(`[AUTH-TRACE-304][${Date.now()}] JWTService.signComplete: JWT signed successfully {jwtLength: ${jwt.length}, userId: '${payload.userId}'}`);
+
+    return jwt;
   }
 
   /**
@@ -89,15 +98,20 @@ export class JWTService {
    */
   async verify(token: string): Promise<JWTPayload | null> {
     try {
+      console.log(`[AUTH-TRACE-311][${Date.now()}] JWTService.verifyStart: Starting JWT verification {tokenLength: ${token.length}}`);
+
       const secret = await this.getJWTSecret();
-      
+
       // Split token into parts
       const parts = token.split('.');
       if (parts.length !== 3) {
+        console.warn(`[AUTH-TRACE-312][${Date.now()}] JWTService.verifyMalformed: JWT malformed - invalid parts count {partsCount: ${parts.length}}`);
         return null;
       }
 
       const [encodedHeader, encodedPayload, signature] = parts;
+
+      console.log(`[AUTH-TRACE-313][${Date.now()}] JWTService.verifyParsed: JWT split into parts {headerLength: ${encodedHeader.length}, payloadLength: ${encodedPayload.length}, signatureLength: ${signature.length}}`);
 
       // Verify signature
       const expectedSignature = await this.createSignature(
@@ -106,23 +120,32 @@ export class JWTService {
       );
 
       if (signature !== expectedSignature) {
+        console.warn(`[AUTH-TRACE-314][${Date.now()}] JWTService.verifySignatureFailed: Invalid JWT signature`);
         console.warn('[JWT] Invalid signature');
         return null;
       }
 
+      console.log(`[AUTH-TRACE-315][${Date.now()}] JWTService.verifySignatureValid: JWT signature valid`);
+
       // Decode payload
       const payload = JSON.parse(this.base64UrlDecode(encodedPayload)) as JWTPayload;
+
+      console.log(`[AUTH-TRACE-316][${Date.now()}] JWTService.verifyPayloadDecoded: JWT payload decoded {userId: '${payload.userId}', accountId: '${payload.accountId}', exp: ${payload.exp}}`);
 
       // Check expiry
       const now = Math.floor(Date.now() / 1000);
       if (payload.exp < now) {
+        console.warn(`[AUTH-TRACE-317][${Date.now()}] JWTService.verifyExpired: JWT expired {exp: ${payload.exp}, now: ${now}, expiredBySeconds: ${now - payload.exp}}`);
         console.warn('[JWT] Token expired');
         return null;
       }
 
+      console.log(`[AUTH-TRACE-318][${Date.now()}] JWTService.verifySuccess: JWT verified successfully {userId: '${payload.userId}', accountId: '${payload.accountId}'}`);
+
       return payload;
 
     } catch (error) {
+      console.error(`[AUTH-TRACE-319][${Date.now()}] JWTService.verifyError: JWT verification failed {error: '${error}'}`);
       console.error('[JWT] Verification failed:', error);
       return null;
     }

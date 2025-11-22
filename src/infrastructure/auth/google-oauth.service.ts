@@ -73,16 +73,22 @@ export class GoogleOAuthService {
    * @returns Access token response
    */
   async exchangeCodeForToken(code: string): Promise<GoogleTokenResponse> {
+    console.log(`[AUTH-TRACE-401][${Date.now()}] GoogleOAuth.exchangeStart: Starting OAuth code exchange {codeLength: ${code.length}}`);
+
     const credentials = await this.getCredentials();
+
+    const redirectUri = `${this.env.FRONTEND_URL || 'https://app.oslira.com'}/auth/callback`;
+    console.log(`[AUTH-TRACE-402][${Date.now()}] GoogleOAuth.exchangeParams: Prepared exchange parameters {redirectUri: '${redirectUri}'}`);
 
     const params = new URLSearchParams({
       code,
       client_id: credentials.clientId,
       client_secret: credentials.clientSecret,
-      redirect_uri: `${this.env.FRONTEND_URL || 'https://app.oslira.com'}/auth/callback`,
+      redirect_uri: redirectUri,
       grant_type: 'authorization_code'
     });
 
+    console.log(`[AUTH-TRACE-403][${Date.now()}] GoogleOAuth.exchangeRequest: Sending token exchange request to Google`);
     const response = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: {
@@ -93,11 +99,14 @@ export class GoogleOAuthService {
 
     if (!response.ok) {
       const error = await response.text();
+      console.error(`[AUTH-TRACE-404][${Date.now()}] GoogleOAuth.exchangeFailed: Token exchange failed {status: ${response.status}, error: '${error}'}`);
       console.error('[GoogleOAuth] Token exchange failed:', error);
       throw new Error(`Google token exchange failed: ${response.status}`);
     }
 
     const data = await response.json() as GoogleTokenResponse;
+    console.log(`[AUTH-TRACE-405][${Date.now()}] GoogleOAuth.exchangeSuccess: Token exchange successful {hasAccessToken: ${!!data.access_token}, hasRefreshToken: ${!!data.refresh_token}}`);
+
     return data;
   }
 
@@ -108,6 +117,8 @@ export class GoogleOAuthService {
    * @returns User information
    */
   async getUserInfo(accessToken: string): Promise<GoogleUserInfo> {
+    console.log(`[AUTH-TRACE-406][${Date.now()}] GoogleOAuth.userInfoRequest: Fetching user info from Google {accessTokenLength: ${accessToken.length}}`);
+
     const response = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
       headers: {
         'Authorization': `Bearer ${accessToken}`
@@ -116,16 +127,20 @@ export class GoogleOAuthService {
 
     if (!response.ok) {
       const error = await response.text();
+      console.error(`[AUTH-TRACE-407][${Date.now()}] GoogleOAuth.userInfoFailed: Failed to get user info {status: ${response.status}, error: '${error}'}`);
       console.error('[GoogleOAuth] Get user info failed:', error);
       throw new Error(`Failed to get user info: ${response.status}`);
     }
 
     const data = await response.json() as GoogleUserInfo;
-    
+
     // Validate required fields
     if (!data.id || !data.email) {
+      console.error(`[AUTH-TRACE-408][${Date.now()}] GoogleOAuth.userInfoInvalid: Invalid user info response {hasId: ${!!data.id}, hasEmail: ${!!data.email}}`);
       throw new Error('Invalid user info response from Google');
     }
+
+    console.log(`[AUTH-TRACE-409][${Date.now()}] GoogleOAuth.userInfoSuccess: User info retrieved {googleId: '${data.id}', email: '${data.email}', name: '${data.name}'}`);
 
     return data;
   }
@@ -138,8 +153,13 @@ export class GoogleOAuthService {
    * @returns User information
    */
   async completeOAuthFlow(code: string): Promise<GoogleUserInfo> {
+    console.log(`[AUTH-TRACE-410][${Date.now()}] GoogleOAuth.flowStart: Starting complete OAuth flow {codeLength: ${code.length}}`);
+
     const tokenResponse = await this.exchangeCodeForToken(code);
     const userInfo = await this.getUserInfo(tokenResponse.access_token);
+
+    console.log(`[AUTH-TRACE-411][${Date.now()}] GoogleOAuth.flowComplete: OAuth flow complete {googleId: '${userInfo.id}', email: '${userInfo.email}'}`);
+
     return userInfo;
   }
 }
