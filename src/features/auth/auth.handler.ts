@@ -43,6 +43,7 @@ import { JWTService } from '@/infrastructure/auth/jwt.service';
 import { TokenService } from '@/infrastructure/auth/token.service';
 import { GoogleOAuthService } from '@/infrastructure/auth/google-oauth.service';
 import { getAuthContext } from '@/shared/middleware/auth.middleware';
+import { successResponse, errorResponse } from '@/shared/utils/response.util';
 
 /**
  * Convert Google User ID (string number) to deterministic UUID v5
@@ -300,7 +301,7 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
       onboarding_completed: accountData.onboarding_completed
     });
 
-    return c.json(response, 200);
+    return successResponse(c, response);
 
   } catch (error: any) {
     console.error('[GoogleCallback] ========== FATAL ERROR ==========', {
@@ -463,10 +464,10 @@ const { data: businesses } = await supabase
 
 const hasCompletedBusiness = businesses?.some(b => b.onboarding_completed) || false;
 
-// Fetch credit balance
-const { data: creditBalance } = await supabase
+// Fetch credit balance and light analyses balance
+const { data: balances } = await supabase
   .from('balances')
-  .select('credit_balance')
+  .select('credit_balance, light_analyses_balance')
   .eq('account_id', auth.accountId)
   .single();
 
@@ -481,10 +482,11 @@ const response: SessionResponse = {
   account: {
     id: account.id,
     name: account.name,
-    credit_balance: creditBalance?.credit_balance || 0
+    credit_balance: balances?.credit_balance || 0,
+    light_analyses_balance: balances?.light_analyses_balance || 0
   }
 };
-    return c.json(response, 200);
+    return successResponse(c, response);
 
   } catch (error: any) {
     console.error('[GetSession] Error:', error);
