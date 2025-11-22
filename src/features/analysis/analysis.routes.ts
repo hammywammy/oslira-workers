@@ -4,11 +4,12 @@ import { Hono } from 'hono';
 import type { Env } from '@/shared/types/env.types';
 import { authMiddleware } from '@/shared/middleware/auth.middleware';
 import { rateLimitMiddleware, RATE_LIMITS } from '@/shared/middleware/rate-limit.middleware';
-import { 
+import {
   analyzeInstagramLead,
   getAnalysisProgress,
   cancelAnalysis,
-  getAnalysisResult
+  getAnalysisResult,
+  getActiveAnalyses
 } from './analysis.handler';
 
 /**
@@ -39,6 +40,13 @@ export function registerAnalysisRoutes(app: Hono<{ Bindings: Env }>) {
    * Returns immediately with run_id for tracking
    */
   app.post('/api/leads/analyze', analyzeInstagramLead);
+
+  /**
+   * GET /api/analysis/active
+   * Get all active analyses for the authenticated user
+   * Returns aggregated progress for all pending/processing analyses
+   */
+  app.get('/api/analysis/active', getActiveAnalyses);
 
   /**
    * GET /api/analysis/:runId/progress

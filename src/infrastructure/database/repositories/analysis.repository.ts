@@ -160,4 +160,20 @@ export class AnalysisRepository extends BaseRepository<Analysis> {
       completed_at: new Date().toISOString()
     });
   }
+
+  /**
+   * Get all active analyses for an account (pending or processing)
+   */
+  async getActiveAnalyses(accountId: string): Promise<Analysis[]> {
+    const { data, error } = await this.supabase
+      .from('lead_analyses')
+      .select('*')
+      .eq('account_id', accountId)
+      .in('status', ['pending', 'processing'])
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return (data || []) as Analysis[];
+  }
 }
