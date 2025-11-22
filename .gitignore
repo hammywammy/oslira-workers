@@ -43,3 +43,4 @@ coverage/
 *secret*
 *key*
 *password*
+package-lock.json
