@@ -4,6 +4,12 @@ compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
 # ===========================
+# PRODUCTION ENVIRONMENT VARIABLE
+# ===========================
+[vars]
+APP_ENV = "production"
+
+# ===========================
 # KV NAMESPACE
 # ===========================
 [[kv_namespaces]]
@@ -34,7 +40,6 @@ binding = "ANALYTICS_ENGINE"
 binding = "ANALYSIS_WORKFLOW"
 name = "analysis-workflow"
 class_name = "AnalysisWorkflow"
-
 
 [[workflows]]
 binding = "BUSINESS_CONTEXT_WORKFLOW"
@@ -104,7 +109,6 @@ max_batch_timeout = 5
 max_retries = 3
 dead_letter_queue = "business-context-jobs-dlq"
 
-
 # ===========================
 # CRON TRIGGERS (PRODUCTION ONLY)
 # ===========================
@@ -125,10 +129,26 @@ crons = [
 [env.staging]
 name = "oslira-workers-staging"
 
+[env.staging.vars]
+APP_ENV = "staging"
+
+# ===========================
+# STAGING: CUSTOM DOMAIN
+# ===========================
+[[env.staging.routes]]
+pattern = "api-staging.oslira.com/*"
+custom_domain = true
+
+# ===========================
+# STAGING: KV NAMESPACE
+# ===========================
 [[env.staging.kv_namespaces]]
 binding = "OSLIRA_KV"
 id = "dd86f413c4374811ac253bb9a6567182"
 
+# ===========================
+# STAGING: R2 BUCKETS
+# ===========================
 [[env.staging.r2_buckets]]
 binding = "R2_CACHE_BUCKET"
 bucket_name = "oslira-cache"
@@ -137,9 +157,15 @@ bucket_name = "oslira-cache"
 binding = "R2_MEDIA_BUCKET"
 bucket_name = "oslira-media"
 
+# ===========================
+# STAGING: ANALYTICS ENGINE
+# ===========================
 [[env.staging.analytics_engine_datasets]]
 binding = "ANALYTICS_ENGINE"
 
+# ===========================
+# STAGING: WORKFLOWS
+# ===========================
 [[env.staging.workflows]]
 binding = "ANALYSIS_WORKFLOW"
 name = "analysis-workflow-staging"
@@ -150,6 +176,9 @@ binding = "BUSINESS_CONTEXT_WORKFLOW"
 name = "business-context-workflow-staging"
 class_name = "BusinessContextWorkflow"
 
+# ===========================
+# STAGING: DURABLE OBJECTS
+# ===========================
 [[env.staging.durable_objects.bindings]]
 name = "ANALYSIS_PROGRESS"
 class_name = "AnalysisProgressDO"
@@ -160,6 +189,9 @@ name = "BUSINESS_CONTEXT_PROGRESS"
 class_name = "BusinessContextProgressDO"
 script_name = "oslira-workers-staging"
 
+# ===========================
+# STAGING: QUEUE PRODUCERS
+# ===========================
 [[env.staging.queues.producers]]
 binding = "STRIPE_WEBHOOK_QUEUE"
 queue = "stripe-webhooks-staging"
@@ -171,6 +203,30 @@ queue = "analysis-jobs-staging"
 [[env.staging.queues.producers]]
 binding = "BUSINESS_CONTEXT_QUEUE"
 queue = "business-context-jobs-staging"
+
+# ===========================
+# STAGING: QUEUE CONSUMERS
+# ===========================
+[[env.staging.queues.consumers]]
+queue = "stripe-webhooks-staging"
+max_batch_size = 10
+max_batch_timeout = 30
+max_retries = 3
+dead_letter_queue = "stripe-webhooks-dlq-staging"
+
+[[env.staging.queues.consumers]]
+queue = "analysis-jobs-staging"
+max_batch_size = 1
+max_batch_timeout = 5
+max_retries = 3
+dead_letter_queue = "analysis-jobs-dlq-staging"
+
+[[env.staging.queues.consumers]]
+queue = "business-context-jobs-staging"
+max_batch_size = 1
+max_batch_timeout = 5
+max_retries = 3
+dead_letter_queue = "business-context-jobs-dlq-staging"
 
 # NOTE: Cron triggers are DISABLED in staging because production and staging
 # share the same database. Running crons in both environments would cause:
