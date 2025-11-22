@@ -30,6 +30,15 @@ export const AI_PRICING: Record<string, ModelPricing> = {
     reasoning_effort: 'low'
   },
 
+  'gpt-5-mini': {
+    per_1m_input: 0.30,
+    per_1m_output: 1.20,
+    provider: 'openai',
+    max_tokens: 16384,
+    supports_json_schema: true,
+    reasoning_effort: 'medium'
+  },
+
   // Anthropic Models (kept for future use)
   'claude-3-5-sonnet-20241022': {
     per_1m_input: 3.00,
