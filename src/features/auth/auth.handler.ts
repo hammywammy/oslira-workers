@@ -141,9 +141,20 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
     // ===========================================================================
 
     const supabase = await SupabaseClientFactory.createAdminClient(c.env);
-    
+
+    // Check if user already exists to determine new user status
+    console.log('[GoogleCallback] Checking if user exists');
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('id')
+      .eq('id', userId)
+      .single();
+
+    const isNewUser = !existingUser;
+    console.log('[GoogleCallback] User status:', { isNewUser, userId });
+
     console.log('[GoogleCallback] Calling create_account_atomic()');
-    
+
     const { data: accountData, error: accountError } = await supabase
       .rpc('create_account_atomic', {
         p_user_id: userId,
@@ -158,14 +169,11 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
         error_message: accountError?.message,
         error_details: accountError?.details
       });
-      return c.json({ 
+      return c.json({
         error: 'Failed to create account',
-        details: accountError?.message 
+        details: accountError?.message
       }, 500);
     }
-
-    // Ensure is_new_user has a default value if undefined
-    const isNewUser = accountData.is_new_user ?? false;
 
     console.log('[GoogleCallback] ✓ Account created successfully', {
       user_id: accountData.user_id,
