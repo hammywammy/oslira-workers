@@ -103,10 +103,10 @@ export async function analyzeInstagramLead(c: Context<{ Bindings: Env }>) {
 
     return successResponse(c, {
       run_id: runId,
-      status: 'processing',
-      message: 'Analysis started',
-      progress_url: `/api/analysis/${runId}/progress`,
-      cancel_url: `/api/analysis/${runId}/cancel`
+      username: input.username,
+      analysis_type: input.analysisType,
+      status: 'queued',
+      message: 'Analysis queued successfully'
     }, 202);
 
   } catch (error: any) {
@@ -139,12 +139,19 @@ export async function getAnalysisProgress(c: Context<{ Bindings: Env }>) {
 
     const progressId = c.env.ANALYSIS_PROGRESS.idFromName(runId);
     const progressDO = c.env.ANALYSIS_PROGRESS.get(progressId);
-    
+
     const response = await progressDO.fetch('http://do/progress');
+
+    // Check if response is valid before parsing
+    if (!response.ok || response.status === 404) {
+      return errorResponse(c, 'Analysis progress not available yet', 'NOT_FOUND', 404);
+    }
+
     const progress = await response.json();
 
+    // Handle case where DO hasn't initialized yet (returns null)
     if (!progress) {
-      return errorResponse(c, 'Analysis not found', 'NOT_FOUND', 404);
+      return errorResponse(c, 'Analysis progress not available yet', 'NOT_FOUND', 404);
     }
 
     return successResponse(c, progress);
