@@ -8,7 +8,7 @@ import { CommonSchemas } from '@/shared/utils/validation.util';
 // ===============================================================================
 
 export const ListLeadsQuerySchema = z.object({
-  businessProfileId: CommonSchemas.uuid.optional(),
+  businessProfileId: CommonSchemas.uuid,
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(50),
   sortBy: z.enum(['last_analyzed_at', 'follower_count', 'created_at']).default('last_analyzed_at'),

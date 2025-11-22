@@ -27,12 +27,8 @@ export class LeadsService {
       .from('leads')
       .select('*', { count: 'exact' })
       .eq('account_id', accountId)
+      .eq('business_profile_id', businessProfileId)
       .is('deleted_at', null);
-
-    // Filter by business profile if provided
-    if (businessProfileId) {
-      queryBuilder = queryBuilder.eq('business_profile_id', businessProfileId);
-    }
 
     // Search by username
     if (search) {
