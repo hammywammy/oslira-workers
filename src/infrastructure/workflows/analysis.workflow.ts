@@ -9,6 +9,7 @@ import { AnalysisRepository } from '@/infrastructure/database/repositories/analy
 import { BusinessRepository } from '@/infrastructure/database/repositories/business.repository';
 import { OperationsLedgerRepository } from '@/infrastructure/database/repositories/operations-ledger.repository';
 import { R2CacheService, type ProfileData as CacheProfileData } from '@/infrastructure/cache/r2-cache.service';
+import { AvatarCacheService } from '@/infrastructure/cache/avatar-cache.service';
 import { ApifyAdapter } from '@/infrastructure/scraping/apify.adapter';
 import { AIAnalysisService } from '@/infrastructure/ai/ai-analysis.service';
 import { getSecret } from '@/infrastructure/config/secrets';
@@ -320,7 +321,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         }
       });
 
-      // Step 8: Upsert lead
+      // Step 8: Upsert lead and cache avatar
       const leadId = await step.do('upsert_lead', {
         retries: { limit: 3, delay: '1 second' }
       }, async () => {
@@ -336,6 +337,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           // Transform to AI profile format for database (snake_case)
           const aiProfile = this.transformToAIProfile(profile);
 
+          // Step 8a: Upsert lead with Instagram URL first (to get lead_id)
           const lead = await leadsRepo.upsertLead({
             account_id: params.account_id,
             business_profile_id: params.business_profile_id,
@@ -345,14 +347,38 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             following_count: aiProfile.following_count,
             post_count: aiProfile.post_count,
             external_url: aiProfile.external_url,
-            profile_pic_url: aiProfile.profile_pic_url,
+            profile_pic_url: aiProfile.profile_pic_url, // Instagram URL initially
             is_verified: aiProfile.is_verified,
             is_private: aiProfile.is_private,
             is_business_account: aiProfile.is_business_account
           });
-          timing.db_upsert = Date.now() - upsertStart;
 
-          console.log(`[Workflow][${params.run_id}] Lead upserted:`, lead.lead_id);
+          console.log(`[Workflow][${params.run_id}] Lead upserted: ${lead.lead_id}`);
+
+          // Step 8b: Cache avatar to R2 using lead_id as key
+          if (aiProfile.profile_pic_url) {
+            try {
+              console.log(`[Workflow][${params.run_id}] Caching avatar to R2`);
+              const avatarService = new AvatarCacheService(this.env.R2_CACHE_BUCKET);
+              const r2Url = await avatarService.cacheAvatar(lead.lead_id, aiProfile.profile_pic_url);
+
+              // Step 8c: Update lead with R2 URL if caching succeeded
+              if (r2Url) {
+                await supabase
+                  .from('leads')
+                  .update({ profile_pic_url: r2Url })
+                  .eq('id', lead.lead_id);
+                console.log(`[Workflow][${params.run_id}] Lead updated with R2 avatar URL`);
+              } else {
+                console.log(`[Workflow][${params.run_id}] Avatar caching failed, keeping Instagram URL`);
+              }
+            } catch (avatarError) {
+              // Non-critical - log and continue
+              console.error(`[Workflow][${params.run_id}] Avatar caching error:`, avatarError);
+            }
+          }
+
+          timing.db_upsert = Date.now() - upsertStart;
           return lead.lead_id;
         } catch (error: any) {
           console.error(`[Workflow][${params.run_id}] Step 8 FAILED:`, this.serializeError(error));
