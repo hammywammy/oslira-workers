@@ -4,8 +4,7 @@
  * STRIPE CONFIGURATION
  * Maps internal tier names to Stripe Price IDs
  *
- * SANDBOX Price IDs (test mode)
- * Replace with production IDs when going live
+ * Separate configs for staging (test mode) and production (live mode)
  */
 
 // =============================================================================
@@ -13,30 +12,56 @@
 // =============================================================================
 
 export type TierName = 'free' | 'growth' | 'pro' | 'agency' | 'enterprise';
+export type AppEnvironment = 'staging' | 'production';
 
 // =============================================================================
-// STRIPE PRICE IDS
+// STRIPE PRICE IDS - STAGING (TEST MODE)
 // =============================================================================
 
-export const STRIPE_PRICE_IDS: Record<Exclude<TierName, 'free'>, string> = {
-  growth: 'price_1SW21iFZyrcdK01tvTZ0ZbyJ',
-  pro: 'price_1SW21tFZyrcdK01tVR91V4nW',
-  agency: 'price_1SW220FZyrcdK01tja6a58UH',
-  enterprise: 'price_1SW225FZyrcdK01tL0zd8t3A',
+const STAGING_PRICE_IDS: Record<Exclude<TierName, 'free'>, string> = {
+  growth: '', // TODO: Add Stripe test mode price ID
+  pro: '',    // TODO: Add Stripe test mode price ID
+  agency: '', // TODO: Add Stripe test mode price ID
+  enterprise: '', // TODO: Add Stripe test mode price ID
 };
 
 // =============================================================================
-// REDIRECT URLS
+// STRIPE PRICE IDS - PRODUCTION (LIVE MODE)
 // =============================================================================
 
-export const STRIPE_CONFIG = {
-  // Redirect URLs after checkout
-  successUrl: 'https://app.oslira.com/upgrade?success=true&session_id={CHECKOUT_SESSION_ID}',
-  cancelUrl: 'https://app.oslira.com/upgrade?canceled=true',
-
-  // Webhook endpoint
-  webhookPath: '/api/webhooks/stripe',
+const PRODUCTION_PRICE_IDS: Record<Exclude<TierName, 'free'>, string> = {
+  growth: '', // TODO: Add Stripe live mode price ID
+  pro: '',    // TODO: Add Stripe live mode price ID
+  agency: '', // TODO: Add Stripe live mode price ID
+  enterprise: '', // TODO: Add Stripe live mode price ID
 };
+
+// =============================================================================
+// ENVIRONMENT-AWARE CONFIGURATION
+// =============================================================================
+
+export interface StripeConfig {
+  priceIds: Record<Exclude<TierName, 'free'>, string>;
+  successUrl: string;
+  cancelUrl: string;
+  webhookPath: string;
+}
+
+/**
+ * Get environment-specific Stripe configuration
+ */
+export function getStripeConfig(appEnv: AppEnvironment): StripeConfig {
+  const isProduction = appEnv === 'production';
+  const baseUrl = isProduction ? 'https://app.oslira.com' : 'https://staging-app.oslira.com';
+  const priceIds = isProduction ? PRODUCTION_PRICE_IDS : STAGING_PRICE_IDS;
+
+  return {
+    priceIds,
+    successUrl: `${baseUrl}/upgrade?success=true&session_id={CHECKOUT_SESSION_ID}`,
+    cancelUrl: `${baseUrl}/upgrade?canceled=true`,
+    webhookPath: '/api/webhooks/stripe',
+  };
+}
 
 // =============================================================================
 // TIER UTILITIES
@@ -46,11 +71,12 @@ export const STRIPE_CONFIG = {
  * Get Stripe Price ID for tier
  * @throws Error if tier is 'free' (no Stripe price)
  */
-export function getStripePriceId(tier: TierName): string {
+export function getStripePriceId(tier: TierName, appEnv: AppEnvironment): string {
   if (tier === 'free') {
     throw new Error('Free tier has no Stripe price');
   }
-  return STRIPE_PRICE_IDS[tier];
+  const config = getStripeConfig(appEnv);
+  return config.priceIds[tier];
 }
 
 /**
