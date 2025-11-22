@@ -11,7 +11,7 @@ import {
 import { validateQuery, validateBody } from '@/shared/utils/validation.util';
 import { successResponse, errorResponse, paginatedResponse, createdResponse } from '@/shared/utils/response.util';
 import { getAuthContext } from '@/shared/middleware/auth.middleware';
-import { createUserClient } from '@/infrastructure/database/supabase.client';
+import { createUserClient, createAdminClient } from '@/infrastructure/database/supabase.client';
 
 /**
  * GET /api/credits/balance
@@ -22,8 +22,8 @@ export async function getCreditBalance(c: Context<{ Bindings: Env }>) {
     const auth = getAuthContext(c);
     const accountId = auth.accountId;
 
-    // Get balance
-    const supabase = await createUserClient(c.env);
+    // Get balance - using admin client to bypass RLS (auth already validated by middleware)
+    const supabase = await createAdminClient(c.env);
     const service = new CreditsService(supabase);
     const balance = await service.getBalance(accountId);
 
@@ -51,8 +51,8 @@ export async function getTransactions(c: Context<{ Bindings: Env }>) {
       transactionType: c.req.query('transactionType')
     });
 
-    // Get transactions
-    const supabase = await createUserClient(c.env);
+    // Get transactions - using admin client to bypass RLS (auth already validated by middleware)
+    const supabase = await createAdminClient(c.env);
     const service = new CreditsService(supabase);
     const { transactions, total } = await service.getTransactions(accountId, query);
 
