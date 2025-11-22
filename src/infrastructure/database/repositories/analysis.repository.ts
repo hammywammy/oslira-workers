@@ -96,11 +96,12 @@ export class AnalysisRepository extends BaseRepository<Analysis> {
    */
   async findInProgressAnalysis(
     leadId: string,
-    accountId: string
+    accountId: string,
+    excludeRunId?: string
   ): Promise<Analysis | null> {
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
 
-    const { data, error } = await this.supabase
+    let query = this.supabase
       .from('lead_analyses')
       .select('*')
       .eq('lead_id', leadId)
@@ -109,8 +110,13 @@ export class AnalysisRepository extends BaseRepository<Analysis> {
       .gte('created_at', fiveMinutesAgo)
       .is('deleted_at', null)
       .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .limit(1);
+
+    if (excludeRunId) {
+      query = query.neq('run_id', excludeRunId);
+    }
+
+    const { data, error } = await query.maybeSingle();
 
     if (error) throw error;
     return data as Analysis | null;
