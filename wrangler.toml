@@ -17,6 +17,10 @@ id = "dd86f413c4374811ac253bb9a6567182"
 binding = "R2_CACHE_BUCKET"
 bucket_name = "oslira-cache"
 
+[[r2_buckets]]
+binding = "R2_MEDIA_BUCKET"
+bucket_name = "oslira-media"
+
 # ===========================
 # ANALYTICS ENGINE
 # ===========================
@@ -128,6 +132,10 @@ id = "dd86f413c4374811ac253bb9a6567182"
 [[env.staging.r2_buckets]]
 binding = "R2_CACHE_BUCKET"
 bucket_name = "oslira-cache"
+
+[[env.staging.r2_buckets]]
+binding = "R2_MEDIA_BUCKET"
+bucket_name = "oslira-media"
 
 [[env.staging.analytics_engine_datasets]]
 binding = "ANALYTICS_ENGINE"
