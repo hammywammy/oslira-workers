@@ -25,10 +25,13 @@ export interface Env {
   
   // KV Namespace (rate limiting)
   OSLIRA_KV: KVNamespace;
-  
+
   // R2 Bucket (profile caching)
   R2_CACHE_BUCKET: R2Bucket;
-  
+
+  // R2 Bucket (media storage)
+  R2_MEDIA_BUCKET: R2Bucket;
+
   // Analytics Engine (cost/performance tracking)
   ANALYTICS_ENGINE: AnalyticsEngineDataset;
 

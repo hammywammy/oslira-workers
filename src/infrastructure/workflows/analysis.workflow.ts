@@ -359,7 +359,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           if (aiProfile.profile_pic_url) {
             try {
               console.log(`[Workflow][${params.run_id}] Caching avatar to R2`);
-              const avatarService = new AvatarCacheService(this.env.R2_CACHE_BUCKET);
+              const avatarService = new AvatarCacheService(this.env.R2_MEDIA_BUCKET);
               const r2Url = await avatarService.cacheAvatar(lead.lead_id, aiProfile.profile_pic_url);
 
               // Step 8c: Update lead with R2 URL if caching succeeded

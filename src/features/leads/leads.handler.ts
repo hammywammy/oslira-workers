@@ -160,7 +160,7 @@ export async function deleteLead(c: Context<{ Bindings: Env }>) {
 
     // Delete avatar from R2 (per-lead key means always safe to delete)
     try {
-      const avatarService = new AvatarCacheService(c.env.R2_CACHE_BUCKET);
+      const avatarService = new AvatarCacheService(c.env.R2_MEDIA_BUCKET);
       await avatarService.deleteAvatar(leadId);
       console.log(`[DeleteLead] Deleted R2 avatar for lead ${leadId}`);
     } catch (avatarError) {
