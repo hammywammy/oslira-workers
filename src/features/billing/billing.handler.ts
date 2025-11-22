@@ -7,7 +7,7 @@ import { validateBody } from '@/shared/utils/validation.util';
 import { successResponse, errorResponse } from '@/shared/utils/response.util';
 import { SupabaseClientFactory } from '@/infrastructure/database/supabase.client';
 import { getSecret } from '@/infrastructure/config/secrets';
-import { getStripePriceId, getTierOrder, STRIPE_CONFIG, type TierName } from '@/config/stripe.config';
+import { getStripePriceId, getTierOrder, getStripeConfig, type TierName } from '@/config/stripe.config';
 import { z } from 'zod';
 import Stripe from 'stripe';
 
@@ -138,8 +138,9 @@ export async function createUpgradeCheckout(c: Context<{ Bindings: Env }>) {
     const stripeKey = await getSecret('STRIPE_SECRET_KEY', c.env, c.env.APP_ENV);
     const stripe = new Stripe(stripeKey, { apiVersion: '2024-12-18.acacia' });
 
-    // Get price ID for new tier
-    const priceId = getStripePriceId(newTier);
+    // Get environment-specific Stripe configuration
+    const stripeConfig = getStripeConfig(c.env.APP_ENV as 'staging' | 'production');
+    const priceId = getStripePriceId(newTier, c.env.APP_ENV as 'staging' | 'production');
 
     // Create Checkout session
     const session = await stripe.checkout.sessions.create({
@@ -152,8 +153,8 @@ export async function createUpgradeCheckout(c: Context<{ Bindings: Env }>) {
           quantity: 1,
         },
       ],
-      success_url: STRIPE_CONFIG.successUrl,
-      cancel_url: STRIPE_CONFIG.cancelUrl,
+      success_url: stripeConfig.successUrl,
+      cancel_url: stripeConfig.cancelUrl,
       metadata: {
         account_id: accountId,
         new_tier: newTier,

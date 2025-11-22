@@ -8,6 +8,7 @@ compatibility_flags = ["nodejs_compat"]
 # ===========================
 [vars]
 APP_ENV = "production"
+FRONTEND_URL = "https://app.oslira.com"
 
 # ===========================
 # KV NAMESPACE
@@ -131,6 +132,7 @@ name = "oslira-workers-staging"
 
 [env.staging.vars]
 APP_ENV = "staging"
+FRONTEND_URL = "https://staging-app.oslira.com"
 
 # ===========================
 # STAGING: CUSTOM DOMAIN

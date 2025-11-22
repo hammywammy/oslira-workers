@@ -77,7 +77,10 @@ export class GoogleOAuthService {
 
     const credentials = await this.getCredentials();
 
-    const redirectUri = `${this.env.FRONTEND_URL || 'https://app.oslira.com'}/auth/callback`;
+    // Use FRONTEND_URL if set, otherwise derive from APP_ENV
+    const baseUrl = this.env.FRONTEND_URL ||
+      (this.env.APP_ENV === 'production' ? 'https://app.oslira.com' : 'https://staging-app.oslira.com');
+    const redirectUri = `${baseUrl}/auth/callback`;
     console.log(`[AUTH-TRACE-402][${Date.now()}] GoogleOAuth.exchangeParams: Prepared exchange parameters {redirectUri: '${redirectUri}'}`);
 
     const params = new URLSearchParams({
