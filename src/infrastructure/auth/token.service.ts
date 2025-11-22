@@ -72,11 +72,15 @@ export class TokenService {
   /**
    * Validate refresh token
    * Checks: exists, not expired, not revoked
-   * 
+   *
    * @param token - Token string to validate
    * @returns Token record or null if invalid
    */
   async validate(token: string): Promise<RefreshTokenRecord | null> {
+    console.log('[TokenService] Starting token validation', {
+      token_prefix: token.substring(0, 8)
+    });
+
     const { data, error } = await this.supabase
       .from('refresh_tokens')
       .select('*')
@@ -84,16 +88,100 @@ export class TokenService {
       .is('revoked_at', null)
       .single();
 
-    if (error || !data) {
+    if (error) {
+      console.error('[TokenService] Validation query error', {
+        token_prefix: token.substring(0, 8),
+        error_code: error.code,
+        error_message: error.message,
+        error_details: error.details,
+        error_hint: error.hint
+      });
+
+      // Run diagnostic query to check if token exists but was revoked
+      const { data: revokedCheck, error: revokedError } = await this.supabase
+        .from('refresh_tokens')
+        .select('token, revoked_at, replaced_by_token, expires_at, created_at')
+        .eq('token', token)
+        .maybeSingle();
+
+      if (revokedError) {
+        console.error('[TokenService] Diagnostic query failed', {
+          token_prefix: token.substring(0, 8),
+          error_code: revokedError.code,
+          error_message: revokedError.message
+        });
+      } else if (!revokedCheck) {
+        console.warn('[TokenService] Token not found in database', {
+          token_prefix: token.substring(0, 8)
+        });
+      } else {
+        console.warn('[TokenService] Token found but was revoked', {
+          token_prefix: token.substring(0, 8),
+          revoked_at: revokedCheck.revoked_at,
+          replaced_by_token: revokedCheck.replaced_by_token ? revokedCheck.replaced_by_token.substring(0, 8) : null,
+          expires_at: revokedCheck.expires_at,
+          created_at: revokedCheck.created_at
+        });
+      }
+
+      return null;
+    }
+
+    if (!data) {
+      console.warn('[TokenService] No data returned from query', {
+        token_prefix: token.substring(0, 8)
+      });
+
+      // Run diagnostic query to check if token exists but was revoked
+      const { data: revokedCheck, error: revokedError } = await this.supabase
+        .from('refresh_tokens')
+        .select('token, revoked_at, replaced_by_token, expires_at, created_at')
+        .eq('token', token)
+        .maybeSingle();
+
+      if (revokedError) {
+        console.error('[TokenService] Diagnostic query failed', {
+          token_prefix: token.substring(0, 8),
+          error_code: revokedError.code,
+          error_message: revokedError.message
+        });
+      } else if (!revokedCheck) {
+        console.warn('[TokenService] Token not found in database', {
+          token_prefix: token.substring(0, 8)
+        });
+      } else {
+        console.warn('[TokenService] Token found but was revoked', {
+          token_prefix: token.substring(0, 8),
+          revoked_at: revokedCheck.revoked_at,
+          replaced_by_token: revokedCheck.replaced_by_token ? revokedCheck.replaced_by_token.substring(0, 8) : null,
+          expires_at: revokedCheck.expires_at,
+          created_at: revokedCheck.created_at
+        });
+      }
+
       return null;
     }
 
     // Check expiry
+    const now = new Date();
     const expiresAt = new Date(data.expires_at);
-    if (expiresAt < new Date()) {
-      console.warn('[TokenService] Token expired:', token.substring(0, 8));
+    if (expiresAt < now) {
+      console.warn('[TokenService] Token expired', {
+        token_prefix: token.substring(0, 8),
+        expires_at: data.expires_at,
+        current_time: now.toISOString(),
+        expired_by_ms: now.getTime() - expiresAt.getTime(),
+        created_at: data.created_at
+      });
       return null;
     }
+
+    console.log('[TokenService] Token validated successfully', {
+      token_prefix: token.substring(0, 8),
+      user_id: data.user_id,
+      account_id: data.account_id,
+      expires_at: data.expires_at
+    });
 
     return data as RefreshTokenRecord;
   }

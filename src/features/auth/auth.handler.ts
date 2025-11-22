@@ -269,7 +269,40 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
       accountData.account_id
     );
 
-    console.log('[GoogleCallback] ✓ Refresh token created');
+    console.log('[GoogleCallback] ✓ Refresh token created', {
+      token_prefix: refreshToken.substring(0, 8)
+    });
+
+    // Verify token was actually inserted into database
+    const { data: verifyToken, error: verifyError } = await supabase
+      .from('refresh_tokens')
+      .select('token, user_id, account_id, expires_at, created_at')
+      .eq('token', refreshToken)
+      .maybeSingle();
+
+    if (verifyError) {
+      console.error('[GoogleCallback] ✗ Token verification query failed', {
+        token_prefix: refreshToken.substring(0, 8),
+        error_code: verifyError.code,
+        error_message: verifyError.message,
+        user_id: accountData.user_id,
+        account_id: accountData.account_id
+      });
+    } else if (!verifyToken) {
+      console.error('[GoogleCallback] ✗ Token NOT found in database after creation', {
+        token_prefix: refreshToken.substring(0, 8),
+        user_id: accountData.user_id,
+        account_id: accountData.account_id
+      });
+    } else {
+      console.log('[GoogleCallback] ✓ Token verified in database', {
+        token_prefix: refreshToken.substring(0, 8),
+        user_id: verifyToken.user_id,
+        account_id: verifyToken.account_id,
+        expires_at: verifyToken.expires_at,
+        created_at: verifyToken.created_at
+      });
+    }
 
     // ===========================================================================
     // STEP 7: Return response
@@ -341,10 +374,55 @@ export async function handleRefresh(c: Context<{ Bindings: Env }>) {
     const jwtService = new JWTService(c.env);
 
     // Validate refresh token
+    console.log('[Refresh] Validating refresh token', {
+      token_prefix: body.refreshToken.substring(0, 8)
+    });
+
     const tokenData = await tokenService.validate(body.refreshToken);
-    
+
     if (!tokenData) {
-      console.warn('[Refresh] Invalid or expired refresh token');
+      console.warn('[Refresh] Token validation failed - running diagnostics', {
+        token_prefix: body.refreshToken.substring(0, 8)
+      });
+
+      // Diagnostic query: Check if token exists at all (ignoring revoked_at filter)
+      const { data: tokenCheck, error: tokenCheckError } = await supabase
+        .from('refresh_tokens')
+        .select('token, user_id, account_id, expires_at, revoked_at, replaced_by_token, created_at')
+        .eq('token', body.refreshToken)
+        .maybeSingle();
+
+      if (tokenCheckError) {
+        console.error('[Refresh] Diagnostic query failed', {
+          error_code: tokenCheckError.code,
+          error_message: tokenCheckError.message,
+          token_prefix: body.refreshToken.substring(0, 8)
+        });
+      } else if (!tokenCheck) {
+        console.warn('[Refresh] Token does not exist in database', {
+          token_prefix: body.refreshToken.substring(0, 8)
+        });
+      } else {
+        const now = new Date();
+        const expiresAt = new Date(tokenCheck.expires_at);
+        const isExpired = expiresAt < now;
+        const isRevoked = tokenCheck.revoked_at !== null;
+
+        console.warn('[Refresh] Token found but invalid', {
+          token_prefix: body.refreshToken.substring(0, 8),
+          is_revoked: isRevoked,
+          revoked_at: tokenCheck.revoked_at,
+          is_expired: isExpired,
+          expires_at: tokenCheck.expires_at,
+          current_time: now.toISOString(),
+          time_difference_ms: expiresAt.getTime() - now.getTime(),
+          replaced_by_token: tokenCheck.replaced_by_token ? tokenCheck.replaced_by_token.substring(0, 8) : null,
+          created_at: tokenCheck.created_at,
+          user_id: tokenCheck.user_id,
+          account_id: tokenCheck.account_id
+        });
+      }
+
       return c.json({ error: 'Invalid or expired refresh token' }, 401);
     }
 
