@@ -146,7 +146,8 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             console.log(`[Workflow][${params.run_id}] Found existing lead:`, existingLead.id);
             const duplicate = await analysisRepo.findInProgressAnalysis(
               existingLead.id,
-              params.account_id
+              params.account_id,
+              params.run_id
             );
 
             if (duplicate) {
@@ -154,7 +155,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
               throw new Error('Analysis already in progress for this profile');
             }
           }
-          console.log(`[Workflow][${params.run_id}] No duplicates found`);
+          console.log(`[Workflow][${params.run_id}] No duplicates found (excluding self)`);
         } catch (error: any) {
           console.error(`[Workflow][${params.run_id}] Step 2 FAILED:`, this.serializeError(error));
           throw error;

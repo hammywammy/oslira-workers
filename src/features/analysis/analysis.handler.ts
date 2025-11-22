@@ -80,13 +80,42 @@ export async function analyzeInstagramLead(c: Context<{ Bindings: Env }>) {
       return errorResponse(c, 'Insufficient credits', 'INSUFFICIENT_CREDITS', 402);
     }
 
+    // Step 3.5: Check for existing in-progress analysis BEFORE creating any records
+    const leadsRepo = new LeadsRepository(supabase);
+    const analysisRepo = new AnalysisRepository(supabase);
+
+    const existingLead = await leadsRepo.findByUsername(
+      auth.accountId,
+      input.businessProfileId,
+      input.username
+    );
+
+    if (existingLead) {
+      const inProgressAnalysis = await analysisRepo.findInProgressAnalysis(
+        existingLead.id,
+        auth.accountId
+      );
+
+      if (inProgressAnalysis) {
+        console.warn(`[Analyze][${requestId}] Analysis already in progress`, {
+          accountId: auth.accountId,
+          username: input.username,
+          existingRunId: inProgressAnalysis.run_id
+        });
+        return c.json({
+          success: false,
+          error: 'Analysis already in progress for this profile',
+          code: 'DUPLICATE_ANALYSIS',
+          run_id: inProgressAnalysis.run_id
+        }, 409);
+      }
+    }
+
     // Step 4: Generate run ID
     const runId = generateId('run');
 
     // Step 5: Create placeholder database records BEFORE triggering workflow
     // This allows getActiveAnalyses to immediately find the analysis when frontend polls
-    const analysisRepo = new AnalysisRepository(supabase);
-    const leadsRepo = new LeadsRepository(supabase);
 
     // Create/get lead record (upsert pattern - returns existing if already exists)
     const leadResult = await leadsRepo.upsertLead({
