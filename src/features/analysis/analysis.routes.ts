@@ -3,7 +3,8 @@
 import { Hono } from 'hono';
 import type { Env } from '@/shared/types/env.types';
 import { authMiddleware } from '@/shared/middleware/auth.middleware';
-import { rateLimitMiddleware, RATE_LIMITS } from '@/shared/middleware/rate-limit.middleware';
+import { rateLimitMiddleware } from '@/shared/middleware/rate-limit.middleware';
+import { ANALYSIS_RATE_LIMITS, API_RATE_LIMITS } from '@/config/rate-limits.config';
 import {
   analyzeInstagramLead,
   getAnalysisProgress,
@@ -29,10 +30,10 @@ export function registerAnalysisRoutes(app: Hono<{ Bindings: Env }>) {
   app.use('/api/analysis/*', authMiddleware);
   
   // Strict rate limiting on analysis creation (prevent spam)
-  app.use('/api/leads/analyze', rateLimitMiddleware(RATE_LIMITS.ANALYSIS_CREATE));
-  
+  app.use('/api/leads/analyze', rateLimitMiddleware(ANALYSIS_RATE_LIMITS.CREATE));
+
   // General rate limiting on other analysis endpoints
-  app.use('/api/analysis/*', rateLimitMiddleware(RATE_LIMITS.API_GENERAL));
+  app.use('/api/analysis/*', rateLimitMiddleware(API_RATE_LIMITS.GENERAL));
 
   /**
    * POST /api/leads/analyze

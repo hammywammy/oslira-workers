@@ -3,12 +3,13 @@
 import { Hono } from 'hono';
 import type { Env } from '@/shared/types/env.types';
 import { authMiddleware } from '@/shared/middleware/auth.middleware';
-import { rateLimitMiddleware, RATE_LIMITS } from '@/shared/middleware/rate-limit.middleware';
-import { 
-  listBusinessProfiles, 
-  getBusinessProfile, 
-  createBusinessProfile, 
-  updateBusinessProfile 
+import { rateLimitMiddleware } from '@/shared/middleware/rate-limit.middleware';
+import { API_RATE_LIMITS } from '@/config/rate-limits.config';
+import {
+  listBusinessProfiles,
+  getBusinessProfile,
+  createBusinessProfile,
+  updateBusinessProfile
 } from './business.handler';
 
 export function registerBusinessRoutes(app: Hono<{ Bindings: Env }>) {
@@ -17,7 +18,7 @@ export function registerBusinessRoutes(app: Hono<{ Bindings: Env }>) {
   app.use('/api/business-profiles/*', authMiddleware);
   
   // Apply general API rate limiting
-  app.use('/api/business-profiles/*', rateLimitMiddleware(RATE_LIMITS.API_GENERAL));
+  app.use('/api/business-profiles/*', rateLimitMiddleware(API_RATE_LIMITS.GENERAL));
 
   /**
    * GET /api/business-profiles

@@ -3,12 +3,9 @@ import type { Context, Next } from 'hono';
 import type { Env } from '@/shared/types/env.types';
 
 /**
- * RATE LIMIT CONFIGURATION
+ * Re-export rate limit types and configs from centralized config
  */
-export interface RateLimitConfig {
-  requests: number;
-  windowSeconds: number;
-}
+export type { RateLimitConfig } from '@/config/rate-limits.config';
 
 /**
  * Rate limiting using Cloudflare KV
@@ -95,36 +92,7 @@ export function rateLimitMiddleware(config: RateLimitConfig) {
 }
 
 /**
- * Preset rate limit configurations
+ * Re-export rate limit configurations from centralized config
+ * for backward compatibility
  */
-export const RATE_LIMITS = {
-  ANALYSIS: {
-    requests: 100,
-    windowSeconds: 3600
-  },
-  
-  ANALYSIS_CREATE: {
-    requests: 20,
-    windowSeconds: 3600
-  },
-  
-  ANONYMOUS_ANALYSIS: {
-    requests: 5,
-    windowSeconds: 3600
-  },
-  
-  API_GENERAL: {
-    requests: 60,
-    windowSeconds: 60
-  },
-  
-  WEBHOOK: {
-    requests: 10,
-    windowSeconds: 60
-  },
-  
-  AUTH: {
-    requests: 10,
-    windowSeconds: 600
-  }
-} as const;
+export { RATE_LIMITS } from '@/config/rate-limits.config';

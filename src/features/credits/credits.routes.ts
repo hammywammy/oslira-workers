@@ -3,10 +3,11 @@
 import { Hono } from 'hono';
 import type { Env } from '@/shared/types/env.types';
 import { authMiddleware, optionalAuthMiddleware } from '@/shared/middleware/auth.middleware';
-import { rateLimitMiddleware, RATE_LIMITS } from '@/shared/middleware/rate-limit.middleware';
-import { 
-  getCreditBalance, 
-  getTransactions, 
+import { rateLimitMiddleware } from '@/shared/middleware/rate-limit.middleware';
+import { API_RATE_LIMITS, BILLING_RATE_LIMITS } from '@/config/rate-limits.config';
+import {
+  getCreditBalance,
+  getTransactions,
   purchaseCredits,
   getCreditPricing
 } from './credits.handler';
@@ -24,9 +25,9 @@ export function registerCreditsRoutes(app: Hono<{ Bindings: Env }>) {
   app.use('/api/credits/balance', authMiddleware);
   app.use('/api/credits/transactions', authMiddleware);
   app.use('/api/credits/purchase', authMiddleware);
-  
+
   // Apply general API rate limiting
-  app.use('/api/credits/*', rateLimitMiddleware(RATE_LIMITS.API_GENERAL));
+  app.use('/api/credits/*', rateLimitMiddleware(API_RATE_LIMITS.GENERAL));
 
   /**
    * GET /api/credits/balance
@@ -46,5 +47,9 @@ export function registerCreditsRoutes(app: Hono<{ Bindings: Env }>) {
    * Purchase credits via Stripe
    * Body: { amount: 100, payment_method_id: "pm_xxx", idempotency_key?: "uuid" }
    */
-  app.post('/api/credits/purchase', purchaseCredits);
+  app.post(
+    '/api/credits/purchase',
+    rateLimitMiddleware(BILLING_RATE_LIMITS.PURCHASE),
+    purchaseCredits
+  );
 }
