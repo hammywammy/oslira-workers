@@ -119,24 +119,77 @@ async function processWebhookMessage(
 
 /**
  * Handle checkout.session.completed
- * Grant initial credits for new customers
+ * Handles both:
+ * - Subscription upgrades (mode: 'subscription')
+ * - One-time credit purchases (mode: 'payment')
  */
 async function handleCheckoutCompleted(data: StripeWebhookMessage, env: Env): Promise<void> {
   const session = data.payload;
-  const accountId = data.account_id;
-  const creditsAmount = session.metadata?.credits_amount || 0;
+  const accountId = session.metadata?.account_id || data.account_id;
 
-  if (creditsAmount > 0) {
-    const supabase = await SupabaseClientFactory.createAdminClient(env);
+  console.log('[StripeWebhook] checkout.session.completed', {
+    session_id: session.id,
+    account_id: accountId,
+    mode: session.mode,
+  });
+
+  const supabase = await SupabaseClientFactory.createAdminClient(env);
+
+  // Handle subscription checkout (upgrades)
+  if (session.mode === 'subscription' && session.subscription) {
+    const newTier = session.metadata?.new_tier;
+    const stripeSubscriptionId = session.subscription;
+
+    if (newTier && accountId) {
+      // Update subscription in database
+      const { error: updateError } = await supabase
+        .from('subscriptions')
+        .update({
+          plan_type: newTier,
+          stripe_subscription_id: stripeSubscriptionId,
+          status: 'active',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('account_id', accountId);
+
+      if (updateError) {
+        console.error('[StripeWebhook] Failed to update subscription:', updateError);
+        throw updateError;
+      }
+
+      // Get new tier limits from plans table
+      const { data: plan } = await supabase
+        .from('plans')
+        .select('credits_per_month, features')
+        .eq('name', newTier)
+        .single();
+
+      if (plan) {
+        // Reset balances to new tier limits
+        await supabase
+          .from('balances')
+          .update({
+            credit_balance: plan.credits_per_month,
+            light_analyses_balance: parseInt(plan.features?.light_analyses || '0'),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('account_id', accountId);
+      }
+
+      console.log(`[StripeWebhook] Upgraded account ${accountId} to ${newTier}`);
+    }
+  }
+
+  // Handle one-time credit purchases (existing logic)
+  const creditsAmount = session.metadata?.credits_amount;
+  if (creditsAmount && parseInt(creditsAmount) > 0) {
     const creditsRepo = new CreditsRepository(supabase);
-
     await creditsRepo.addCredits(
       accountId,
       parseInt(creditsAmount),
       'purchase',
       `Credit purchase via Stripe: ${session.id}`
     );
-
     console.log(`[StripeWebhook] Granted ${creditsAmount} credits to account ${accountId}`);
   }
 }

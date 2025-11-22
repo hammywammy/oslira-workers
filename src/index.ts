@@ -13,6 +13,7 @@ import { registerAnalysisRoutes } from './features/analysis/analysis.routes';
 import { registerBulkAnalysisRoutes } from './features/analysis/bulk-analysis.routes';
 import { registerProfileRefreshRoutes } from './features/leads/profile-refresh.routes';
 import { registerOnboardingRoutes } from './features/onboarding/onboarding.routes';
+import { registerBillingRoutes } from './features/billing/billing.routes';
 import { handleStripeWebhookQueue } from './infrastructure/queues/stripe-webhook.consumer';
 import { handleAnalysisQueue } from './infrastructure/queues/analysis.consumer';
 import { handleBusinessContextQueue } from './infrastructure/queues/business-context.consumer';
@@ -137,6 +138,9 @@ registerProfileRefreshRoutes(app);
 
 // Phase 3 endpoints (Onboarding - NEW)
 registerOnboardingRoutes(app);
+
+// Billing endpoints
+registerBillingRoutes(app);
 
 // ===============================================================================
 // TEST ENDPOINTS (Disabled in production)
