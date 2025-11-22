@@ -8,6 +8,7 @@ import { successResponse, errorResponse } from '@/shared/utils/response.util';
 import { generateId } from '@/shared/utils/id.util';
 import { SupabaseClientFactory } from '@/infrastructure/database/supabase.client';
 import { CreditsRepository } from '@/infrastructure/database/repositories/credits.repository';
+import { AnalysisRepository } from '@/infrastructure/database/repositories/analysis.repository';
 import { z } from 'zod';
 
 /**
@@ -213,7 +214,7 @@ export async function getAnalysisResult(c: Context<{ Bindings: Env }>) {
 
     const progressId = c.env.ANALYSIS_PROGRESS.idFromName(runId);
     const progressDO = c.env.ANALYSIS_PROGRESS.get(progressId);
-    
+
     const progressResponse = await progressDO.fetch('http://do/progress');
     const progress = await progressResponse.json();
 
@@ -241,5 +242,86 @@ export async function getAnalysisResult(c: Context<{ Bindings: Env }>) {
     }
 
     return errorResponse(c, 'Failed to get result', 'RESULT_ERROR', 500);
+  }
+}
+
+/**
+ * GET /api/analysis/active
+ * Get all active analyses for the authenticated user
+ * Returns aggregated progress for all pending/processing analyses
+ */
+export async function getActiveAnalyses(c: Context<{ Bindings: Env }>) {
+  const requestId = generateId('req');
+
+  try {
+    const auth = getAuthContext(c);
+
+    // Query database for active analyses
+    const supabase = await SupabaseClientFactory.createAdminClient(c.env);
+    const analysisRepo = new AnalysisRepository(supabase);
+    const activeAnalyses = await analysisRepo.getActiveAnalyses(auth.accountId);
+
+    console.log(`[ActiveAnalyses][${requestId}] Found ${activeAnalyses.length} active analyses for account ${auth.accountId}`);
+
+    // If no active analyses, return empty result immediately
+    if (activeAnalyses.length === 0) {
+      return successResponse(c, {
+        active_count: 0,
+        analyses: []
+      });
+    }
+
+    // Fetch progress from each DO in parallel
+    const progressPromises = activeAnalyses.map(async (analysis) => {
+      try {
+        const progressId = c.env.ANALYSIS_PROGRESS.idFromName(analysis.run_id);
+        const progressDO = c.env.ANALYSIS_PROGRESS.get(progressId);
+
+        const response = await progressDO.fetch('http://do/progress');
+        const progress = await response.json();
+
+        return {
+          run_id: analysis.run_id,
+          username: progress?.username || null,
+          analysis_type: analysis.analysis_type,
+          status: progress?.status || analysis.status,
+          progress: progress?.progress || 0,
+          current_step: progress?.current_step || 'Initializing',
+          started_at: analysis.started_at,
+          updated_at: progress?.updated_at || analysis.updated_at
+        };
+      } catch (error: any) {
+        console.error(`[ActiveAnalyses][${requestId}] Failed to fetch progress for ${analysis.run_id}:`, error.message);
+
+        // Return basic info from database if DO fetch fails
+        return {
+          run_id: analysis.run_id,
+          username: null,
+          analysis_type: analysis.analysis_type,
+          status: analysis.status,
+          progress: 0,
+          current_step: 'Initializing',
+          started_at: analysis.started_at,
+          updated_at: analysis.updated_at
+        };
+      }
+    });
+
+    const analysesWithProgress = await Promise.all(progressPromises);
+
+    console.log(`[ActiveAnalyses][${requestId}] Returning ${analysesWithProgress.length} analyses with progress`);
+
+    return successResponse(c, {
+      active_count: analysesWithProgress.length,
+      analyses: analysesWithProgress
+    });
+
+  } catch (error: any) {
+    console.error(`[ActiveAnalyses][${requestId}] Error:`, {
+      error: error.message,
+      stack: error.stack?.split('\n')[0]
+    });
+
+    return errorResponse(c, 'Failed to fetch active analyses', 'ACTIVE_ANALYSES_ERROR', 500);
   }
 }
