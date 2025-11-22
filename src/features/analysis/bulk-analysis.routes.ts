@@ -3,8 +3,9 @@
 import { Hono } from 'hono';
 import type { Env } from '@/shared/types/env.types';
 import { authMiddleware } from '@/shared/middleware/auth.middleware';
-import { rateLimitMiddleware, RATE_LIMITS } from '@/shared/middleware/rate-limit.middleware';
-import { 
+import { rateLimitMiddleware } from '@/shared/middleware/rate-limit.middleware';
+import { ANALYSIS_RATE_LIMITS } from '@/config/rate-limits.config';
+import {
   bulkAnalyzeLeads,
   getBatchProgress,
   cancelBatch
@@ -28,10 +29,7 @@ export function registerBulkAnalysisRoutes(app: Hono<{ Bindings: Env }>) {
   app.use('/api/leads/analyze/bulk/*', authMiddleware);
   
   // Stricter rate limiting for bulk operations
-  app.use('/api/leads/analyze/bulk', rateLimitMiddleware({
-    requests: 5,
-    windowSeconds: 3600 // 5 requests per hour (FIXED: renamed from 'window')
-  }));
+  app.use('/api/leads/analyze/bulk', rateLimitMiddleware(ANALYSIS_RATE_LIMITS.BULK));
 
   /**
    * POST /api/leads/analyze/bulk

@@ -3,7 +3,8 @@
 import { Hono } from 'hono';
 import type { Env } from '@/shared/types/env.types';
 import { authMiddleware } from '@/shared/middleware/auth.middleware';
-import { rateLimitMiddleware, RATE_LIMITS } from '@/shared/middleware/rate-limit.middleware';
+import { rateLimitMiddleware } from '@/shared/middleware/rate-limit.middleware';
+import { AUTH_RATE_LIMITS, API_RATE_LIMITS } from '@/config/rate-limits.config';
 import { GoogleOAuthService } from '@/infrastructure/auth/google-oauth.service';
 import {
   handleGoogleCallback,
@@ -42,7 +43,7 @@ export function registerAuthRoutes(app: Hono<{ Bindings: Env }>) {
    */
   app.get(
     '/api/auth/google-client-id',
-    rateLimitMiddleware(RATE_LIMITS.API_GENERAL),
+    rateLimitMiddleware(API_RATE_LIMITS.GENERAL),
     async (c) => {
       try {
         console.log('[GoogleClientId] Fetching Google OAuth client ID');
@@ -86,10 +87,7 @@ export function registerAuthRoutes(app: Hono<{ Bindings: Env }>) {
    */
   app.post(
     '/api/auth/google/callback',
-    rateLimitMiddleware({
-      requests: 10,
-      windowSeconds: 600 // 10 requests per 10 minutes
-    }),
+    rateLimitMiddleware(AUTH_RATE_LIMITS.OAUTH_CALLBACK),
     handleGoogleCallback
   );
 
@@ -104,10 +102,7 @@ export function registerAuthRoutes(app: Hono<{ Bindings: Env }>) {
    */
   app.post(
     '/api/auth/refresh',
-    rateLimitMiddleware({
-      requests: 30,
-      windowSeconds: 3600 // 30 requests per hour
-    }),
+    rateLimitMiddleware(AUTH_RATE_LIMITS.TOKEN_REFRESH),
     handleRefresh
   );
 
@@ -122,7 +117,7 @@ export function registerAuthRoutes(app: Hono<{ Bindings: Env }>) {
    */
   app.post(
     '/api/auth/logout',
-    rateLimitMiddleware(RATE_LIMITS.API_GENERAL),
+    rateLimitMiddleware(AUTH_RATE_LIMITS.LOGOUT),
     handleLogout
   );
 
@@ -142,7 +137,7 @@ export function registerAuthRoutes(app: Hono<{ Bindings: Env }>) {
   app.get(
     '/api/auth/session',
     authMiddleware,
-    rateLimitMiddleware(RATE_LIMITS.API_GENERAL),
+    rateLimitMiddleware(AUTH_RATE_LIMITS.SESSION),
     handleGetSession
   );
   

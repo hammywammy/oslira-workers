@@ -3,7 +3,8 @@
 import { Hono } from 'hono';
 import type { Env } from '@/shared/types/env.types';
 import { authMiddleware } from '@/shared/middleware/auth.middleware';
-import { rateLimitMiddleware, RATE_LIMITS } from '@/shared/middleware/rate-limit.middleware';
+import { rateLimitMiddleware } from '@/shared/middleware/rate-limit.middleware';
+import { API_RATE_LIMITS } from '@/config/rate-limits.config';
 import { listLeads, getLead, getLeadAnalyses, deleteLead } from './leads.handler';
 
 export function registerLeadRoutes(app: Hono<{ Bindings: Env }>) {
@@ -12,7 +13,7 @@ export function registerLeadRoutes(app: Hono<{ Bindings: Env }>) {
   app.use('/api/leads/*', authMiddleware);
   
   // Apply general API rate limiting
-  app.use('/api/leads/*', rateLimitMiddleware(RATE_LIMITS.API_GENERAL));
+  app.use('/api/leads/*', rateLimitMiddleware(API_RATE_LIMITS.GENERAL));
 
   /**
    * GET /api/leads
