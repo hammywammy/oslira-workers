@@ -332,7 +332,7 @@ export async function getActiveAnalyses(c: Context<{ Bindings: Env }>) {
     const analysisRepo = new AnalysisRepository(supabase);
     const activeAnalyses = await analysisRepo.getActiveAnalyses(auth.accountId);
 
-    console.log(`[ActiveAnalyses][${requestId}] Found ${activeAnalyses.length} active analyses for account ${auth.accountId}`);
+    console.log(`[ActiveAnalyses][${requestId}] Found ${activeAnalyses.length} active/recent analyses for account ${auth.accountId}`);
 
     // If no active analyses, return empty result immediately
     if (activeAnalyses.length === 0) {
