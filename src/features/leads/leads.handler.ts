@@ -13,7 +13,7 @@ import { validateQuery } from '@/shared/utils/validation.util';
 import { successResponse, errorResponse, paginatedResponse, noContentResponse } from '@/shared/utils/response.util';
 import { getAuthContext } from '@/shared/middleware/auth.middleware';
 import { AppError } from '@/shared/middleware/error.middleware';
-import { createUserClient } from '@/infrastructure/database/supabase.client';
+import { SupabaseClientFactory } from '@/infrastructure/database/supabase.client';
 
 /**
  * GET /api/leads
@@ -35,7 +35,7 @@ export async function listLeads(c: Context<{ Bindings: Env }>) {
     });
 
     // Get leads
-    const supabase = await createUserClient(c.env);
+    const supabase = await SupabaseClientFactory.createAdminClient(c.env);
     const service = new LeadsService(supabase);
     const { leads, total } = await service.listLeads(accountId, query);
 
@@ -71,7 +71,7 @@ export async function getLead(c: Context<{ Bindings: Env }>) {
     validateQuery(GetLeadParamsSchema, { leadId });
 
     // Get lead
-    const supabase = await createUserClient(c.env);
+    const supabase = await SupabaseClientFactory.createAdminClient(c.env);
     const service = new LeadsService(supabase);
     const lead = await service.getLeadById(accountId, leadId);
 
@@ -110,7 +110,7 @@ export async function getLeadAnalyses(c: Context<{ Bindings: Env }>) {
     });
 
     // Verify lead ownership
-    const supabase = await createUserClient(c.env);
+    const supabase = await SupabaseClientFactory.createAdminClient(c.env);
     const service = new LeadsService(supabase);
     const hasAccess = await service.verifyLeadOwnership(accountId, leadId);
 
@@ -148,7 +148,7 @@ export async function deleteLead(c: Context<{ Bindings: Env }>) {
     validateQuery(DeleteLeadParamsSchema, { leadId });
 
     // Verify lead ownership
-    const supabase = await createUserClient(c.env);
+    const supabase = await SupabaseClientFactory.createAdminClient(c.env);
     const service = new LeadsService(supabase);
     const hasAccess = await service.verifyLeadOwnership(accountId, leadId);
 
