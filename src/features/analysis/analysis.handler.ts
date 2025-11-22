@@ -9,6 +9,7 @@ import { generateId } from '@/shared/utils/id.util';
 import { SupabaseClientFactory } from '@/infrastructure/database/supabase.client';
 import { CreditsRepository } from '@/infrastructure/database/repositories/credits.repository';
 import { AnalysisRepository } from '@/infrastructure/database/repositories/analysis.repository';
+import { LeadsRepository } from '@/infrastructure/database/repositories/leads.repository';
 import { z } from 'zod';
 
 /**
@@ -82,7 +83,41 @@ export async function analyzeInstagramLead(c: Context<{ Bindings: Env }>) {
     // Step 4: Generate run ID
     const runId = generateId('run');
 
-    // Step 5: Trigger workflow
+    // Step 5: Create placeholder database records BEFORE triggering workflow
+    // This allows getActiveAnalyses to immediately find the analysis when frontend polls
+    const analysisRepo = new AnalysisRepository(supabase);
+    const leadsRepo = new LeadsRepository(supabase);
+
+    // Create/get lead record (upsert pattern - returns existing if already exists)
+    const leadResult = await leadsRepo.upsertLead({
+      account_id: auth.accountId,
+      business_profile_id: input.businessProfileId,
+      username: input.username,
+      follower_count: 0,
+      following_count: 0,
+      post_count: 0,
+      is_verified: false,
+      is_private: false,
+      is_business_account: false
+    });
+
+    // Create analysis record with status: 'pending'
+    await analysisRepo.createAnalysis({
+      run_id: runId,
+      lead_id: leadResult.lead_id,
+      account_id: auth.accountId,
+      business_profile_id: input.businessProfileId,
+      analysis_type: input.analysisType,
+      status: 'pending'
+    });
+
+    console.log(`[Analyze][${requestId}] Created placeholder records`, {
+      leadId: leadResult.lead_id,
+      runId,
+      isNewLead: leadResult.is_new
+    });
+
+    // Step 6: Trigger workflow
     const workflowParams = {
       run_id: runId,
       account_id: auth.accountId,
@@ -91,7 +126,7 @@ export async function analyzeInstagramLead(c: Context<{ Bindings: Env }>) {
       analysis_type: input.analysisType,
       requested_at: new Date().toISOString()
     };
-    
+
     await c.env.ANALYSIS_WORKFLOW.create({ params: workflowParams });
 
     console.log(`[Analyze][${requestId}] Started`, {
@@ -278,6 +313,19 @@ export async function getActiveAnalyses(c: Context<{ Bindings: Env }>) {
       });
     }
 
+    // Helper to parse step from current_step string (e.g., "Step 2/4: Checking cache" -> {current: 2, total: 4})
+    const parseStep = (currentStep: string): { current: number; total: number } => {
+      const match = currentStep?.match(/Step (\d+)\/(\d+)/);
+      if (match) {
+        return {
+          current: parseInt(match[1], 10),
+          total: parseInt(match[2], 10)
+        };
+      }
+      // Default to step 0 of 4 if parsing fails
+      return { current: 0, total: 4 };
+    };
+
     // Fetch progress from each DO in parallel
     const progressPromises = activeAnalyses.map(async (analysis) => {
       try {
@@ -287,29 +335,32 @@ export async function getActiveAnalyses(c: Context<{ Bindings: Env }>) {
         const response = await progressDO.fetch('http://do/progress');
         const progress = await response.json();
 
+        // Transform to match frontend's expected AnalysisJob interface
         return {
-          run_id: analysis.run_id,
+          runId: analysis.run_id,
           username: progress?.username || null,
-          analysis_type: analysis.analysis_type,
-          status: progress?.status || analysis.status,
+          analysisType: analysis.analysis_type,
+          // Map 'processing' status to 'analyzing' for frontend
+          status: (progress?.status || analysis.status) === 'processing' ? 'analyzing' : (progress?.status || analysis.status),
           progress: progress?.progress || 0,
-          current_step: progress?.current_step || 'Initializing',
-          started_at: analysis.started_at,
-          updated_at: progress?.updated_at || analysis.updated_at
+          // Parse current_step string into step object with current and total
+          step: parseStep(progress?.current_step || 'Step 0/4: Initializing'),
+          startedAt: analysis.started_at,
+          updatedAt: progress?.updated_at || analysis.updated_at
         };
       } catch (error: any) {
         console.error(`[ActiveAnalyses][${requestId}] Failed to fetch progress for ${analysis.run_id}:`, error.message);
 
         // Return basic info from database if DO fetch fails
         return {
-          run_id: analysis.run_id,
+          runId: analysis.run_id,
           username: null,
-          analysis_type: analysis.analysis_type,
-          status: analysis.status,
+          analysisType: analysis.analysis_type,
+          status: analysis.status === 'processing' ? 'analyzing' : analysis.status,
           progress: 0,
-          current_step: 'Initializing',
-          started_at: analysis.started_at,
-          updated_at: analysis.updated_at
+          step: { current: 0, total: 4 },
+          startedAt: analysis.started_at,
+          updatedAt: analysis.updated_at
         };
       }
     });
