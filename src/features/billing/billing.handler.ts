@@ -121,12 +121,13 @@ export async function createUpgradeCheckout(c: Context<{ Bindings: Env }>) {
     if (!stripeCustomerId) {
       const { data: account } = await supabase
         .from('accounts')
-        .select(`${customerIdColumn}, stripe_customer_id`)
+        .select('stripe_customer_id_test, stripe_customer_id_live')
         .eq('id', accountId)
         .single();
 
-      // Try environment-specific column first, fallback to old column
-      stripeCustomerId = account?.[customerIdColumn] || account?.stripe_customer_id;
+      stripeCustomerId = isProduction
+        ? account?.stripe_customer_id_live
+        : account?.stripe_customer_id_test;
     }
 
     if (!stripeCustomerId) {

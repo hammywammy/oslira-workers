@@ -161,11 +161,13 @@ await step.do('link_stripe_to_subscription', async () => {
 
     const { data: account, error: accountError } = await supabase
       .from('accounts')
-      .select(`${customerIdColumn}, stripe_customer_id`)
+      .select('stripe_customer_id_test, stripe_customer_id_live')
       .eq('id', params.account_id)
       .single();
 
-    const stripeCustomerId = account?.[customerIdColumn] || account?.stripe_customer_id;
+    const stripeCustomerId = isProduction
+      ? account?.stripe_customer_id_live
+      : account?.stripe_customer_id_test;
 
     if (accountError || !stripeCustomerId) {
       console.warn('[Step5] ⚠ No stripe_customer_id found - skipping subscription link', {
