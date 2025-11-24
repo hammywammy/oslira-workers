@@ -99,60 +99,30 @@ async function googleIdToUUID(googleId: string): Promise<string> {
  */
 export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
   try {
-    console.log(`[AUTH-TRACE-001][${Date.now()}] GoogleCallback.start: OAuth callback initiated`);
-    console.log('[GoogleCallback] ========== REQUEST START ==========');
-
     const body = await c.req.json() as GoogleCallbackRequest;
 
     if (!body.code) {
-      console.error(`[AUTH-TRACE-002][${Date.now()}] GoogleCallback.validation: Missing authorization code`);
-      console.error('[GoogleCallback] Missing authorization code');
       return c.json({ error: 'Missing authorization code' }, 400);
     }
-
-    console.log(`[AUTH-TRACE-003][${Date.now()}] GoogleCallback.codeReceived: Authorization code received {codeLength: ${body.code.length}}`);
-    console.log('[GoogleCallback] Authorization code received', {
-      code_length: body.code.length
-    });
 
     // ===========================================================================
     // STEP 1: Exchange code with Google
     // ===========================================================================
 
-    console.log(`[AUTH-TRACE-004][${Date.now()}] GoogleCallback.exchangeStart: Starting OAuth code exchange with Google`);
     const googleOAuth = new GoogleOAuthService(c.env);
     const googleUser = await googleOAuth.completeOAuthFlow(body.code);
-
-    console.log(`[AUTH-TRACE-005][${Date.now()}] GoogleCallback.exchangeComplete: Google user info received {googleId: '${googleUser.id}', email: '${googleUser.email}', name: '${googleUser.name}'}`);
-    console.log('[GoogleCallback] ✓ Google user info received', {
-      google_id: googleUser.id,
-      email: googleUser.email,
-      name: googleUser.name,
-      has_picture: !!googleUser.picture
-    });
 
     // ===========================================================================
     // STEP 2: Convert Google ID to UUID
     // ===========================================================================
 
-    console.log(`[AUTH-TRACE-006][${Date.now()}] GoogleCallback.uuidConversionStart: Converting Google ID to deterministic UUID`);
     const userId = await googleIdToUUID(googleUser.id);
-
-    console.log(`[AUTH-TRACE-007][${Date.now()}] GoogleCallback.uuidConversionComplete: Google ID converted {googleId: '${googleUser.id}', userId: '${userId}'}`);
-    console.log('[GoogleCallback] ✓ Google ID converted to UUID', {
-      google_id: googleUser.id,
-      user_uuid: userId
-    });
 
     // ===========================================================================
     // STEP 3: Create/update user atomically
     // ===========================================================================
 
-    console.log(`[AUTH-TRACE-008][${Date.now()}] GoogleCallback.dbConnectionStart: Creating Supabase admin client`);
     const supabase = await SupabaseClientFactory.createAdminClient(c.env);
-
-    console.log(`[AUTH-TRACE-009][${Date.now()}] GoogleCallback.accountCreationStart: Calling create_account_atomic {userId: '${userId}', email: '${googleUser.email}'}`);
-    console.log('[GoogleCallback] Calling create_account_atomic()');
 
     const { data: accountData, error: accountError } = await supabase
       .rpc('create_account_atomic', {
@@ -163,8 +133,7 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
       });
 
     if (accountError || !accountData) {
-      console.error(`[AUTH-TRACE-010][${Date.now()}] GoogleCallback.accountCreationFailed: Account creation failed {errorCode: '${accountError?.code}', errorMessage: '${accountError?.message}'}`);
-      console.error('[GoogleCallback] ✗ Account creation failed', {
+      console.error('[GoogleCallback] Account creation failed', {
         error_code: accountError?.code,
         error_message: accountError?.message,
         error_details: accountError?.details
@@ -177,14 +146,6 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
 
     // Ensure is_new_user has a default value if undefined
     const isNewUser = accountData.is_new_user ?? false;
-
-    console.log(`[AUTH-TRACE-011][${Date.now()}] GoogleCallback.accountCreationComplete: Account created successfully {userId: '${accountData.user_id}', accountId: '${accountData.account_id}', isNewUser: ${isNewUser}}`);
-    console.log('[GoogleCallback] ✓ Account created successfully', {
-      user_id: accountData.user_id,
-      account_id: accountData.account_id,
-      is_new_user: isNewUser,
-      credit_balance: accountData.credit_balance
-    });
 
     // ===========================================================================
     // STEP 4: Create Stripe customer (NEW USERS ONLY)
@@ -263,7 +224,6 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
     // STEP 5: Issue JWT access token
     // ===========================================================================
 
-    console.log(`[AUTH-TRACE-012][${Date.now()}] GoogleCallback.jwtSignStart: Starting JWT access token creation {userId: '${accountData.user_id}', accountId: '${accountData.account_id}'}`);
     const jwtService = new JWTService(c.env);
     const accessToken = await jwtService.sign({
       userId: accountData.user_id,
@@ -272,65 +232,20 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
       onboardingCompleted: accountData.onboarding_completed
     });
 
-    console.log(`[AUTH-TRACE-013][${Date.now()}] GoogleCallback.jwtSignComplete: JWT access token issued {tokenLength: ${accessToken.length}}`);
-    console.log('[GoogleCallback] ✓ JWT access token issued');
-
     // ===========================================================================
     // STEP 6: Create refresh token
     // ===========================================================================
 
-    console.log(`[AUTH-TRACE-014][${Date.now()}] GoogleCallback.refreshTokenCreateStart: Starting refresh token creation {userId: '${accountData.user_id}', accountId: '${accountData.account_id}'}`);
     const tokenService = new TokenService(supabase);
     const refreshToken = await tokenService.create(
       accountData.user_id,
       accountData.account_id
     );
 
-    console.log(`[AUTH-TRACE-015][${Date.now()}] GoogleCallback.refreshTokenCreateComplete: Refresh token created {tokenPrefix: '${refreshToken.substring(0, 8)}', tokenLength: ${refreshToken.length}}`);
-    console.log('[GoogleCallback] ✓ Refresh token created', {
-      token_prefix: refreshToken.substring(0, 8)
-    });
-
-    // Verify token was actually inserted into database
-    console.log(`[AUTH-TRACE-016][${Date.now()}] GoogleCallback.dbVerifyStart: Querying database to verify token was inserted {tokenPrefix: '${refreshToken.substring(0, 8)}'}`);
-    const { data: verifyToken, error: verifyError } = await supabase
-      .from('refresh_tokens')
-      .select('token, user_id, account_id, expires_at, created_at')
-      .eq('token', refreshToken)
-      .maybeSingle();
-
-    if (verifyError) {
-      console.error(`[AUTH-TRACE-017][${Date.now()}] GoogleCallback.dbVerifyError: Token verification query failed {tokenPrefix: '${refreshToken.substring(0, 8)}', errorCode: '${verifyError.code}', errorMessage: '${verifyError.message}'}`);
-      console.error('[GoogleCallback] ✗ Token verification query failed', {
-        token_prefix: refreshToken.substring(0, 8),
-        error_code: verifyError.code,
-        error_message: verifyError.message,
-        user_id: accountData.user_id,
-        account_id: accountData.account_id
-      });
-    } else if (!verifyToken) {
-      console.error(`[AUTH-TRACE-018][${Date.now()}] GoogleCallback.dbVerifyNotFound: Token NOT found in database after creation {tokenPrefix: '${refreshToken.substring(0, 8)}', userId: '${accountData.user_id}'}`);
-      console.error('[GoogleCallback] ✗ Token NOT found in database after creation', {
-        token_prefix: refreshToken.substring(0, 8),
-        user_id: accountData.user_id,
-        account_id: accountData.account_id
-      });
-    } else {
-      console.log(`[AUTH-TRACE-019][${Date.now()}] GoogleCallback.dbVerifySuccess: Token verified in database {tokenPrefix: '${refreshToken.substring(0, 8)}', userId: '${verifyToken.user_id}', accountId: '${verifyToken.account_id}', expiresAt: '${verifyToken.expires_at}', createdAt: '${verifyToken.created_at}'}`);
-      console.log('[GoogleCallback] ✓ Token verified in database', {
-        token_prefix: refreshToken.substring(0, 8),
-        user_id: verifyToken.user_id,
-        account_id: verifyToken.account_id,
-        expires_at: verifyToken.expires_at,
-        created_at: verifyToken.created_at
-      });
-    }
-
     // ===========================================================================
     // STEP 7: Return response
     // ===========================================================================
 
-    console.log(`[AUTH-TRACE-020][${Date.now()}] GoogleCallback.responsePreparation: Preparing auth response {accessTokenLength: ${accessToken.length}, refreshTokenPrefix: '${refreshToken.substring(0, 8)}'}`);
     const response: AuthResponse = {
       accessToken,
       refreshToken,
@@ -349,14 +264,6 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
       },
       isNewUser: isNewUser
     };
-
-    console.log(`[AUTH-TRACE-021][${Date.now()}] GoogleCallback.responseReturning: Returning auth response to frontend {refreshTokenPrefix: '${refreshToken.substring(0, 8)}', userId: '${accountData.user_id}', accountId: '${accountData.account_id}'}`);
-    console.log('[GoogleCallback] ========== SUCCESS ==========', {
-      user_id: accountData.user_id,
-      account_id: accountData.account_id,
-      is_new_user: isNewUser,
-      onboarding_completed: accountData.onboarding_completed
-    });
 
     return successResponse(c, response);
 
@@ -387,124 +294,58 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
  */
 export async function handleRefresh(c: Context<{ Bindings: Env }>) {
   try {
-    console.log(`[AUTH-TRACE-101][${Date.now()}] Refresh.start: Refresh token endpoint called`);
     const body = await c.req.json() as RefreshRequest;
 
     if (!body.refreshToken) {
-      console.error(`[AUTH-TRACE-102][${Date.now()}] Refresh.validation: Missing refresh token in request body`);
       return c.json({ error: 'Missing refresh token' }, 400);
     }
-
-    console.log(`[AUTH-TRACE-103][${Date.now()}] Refresh.tokenReceived: Refresh token received from frontend {tokenPrefix: '${body.refreshToken.substring(0, 8)}', tokenLength: ${body.refreshToken.length}}`);
 
     const supabase = await SupabaseClientFactory.createAdminClient(c.env);
     const tokenService = new TokenService(supabase);
     const jwtService = new JWTService(c.env);
 
     // Validate refresh token
-    console.log(`[AUTH-TRACE-104][${Date.now()}] Refresh.validateStart: Starting refresh token validation {tokenPrefix: '${body.refreshToken.substring(0, 8)}'}`);
-    console.log('[Refresh] Validating refresh token', {
-      token_prefix: body.refreshToken.substring(0, 8)
-    });
-
     const tokenData = await tokenService.validate(body.refreshToken);
 
     if (!tokenData) {
-      console.error(`[AUTH-TRACE-105][${Date.now()}] Refresh.validateFailed: Token validation failed {tokenPrefix: '${body.refreshToken.substring(0, 8)}'}`);
-      console.warn('[Refresh] Token validation failed - running diagnostics', {
-        token_prefix: body.refreshToken.substring(0, 8)
-      });
-
-      // Diagnostic query: Check if token exists at all (ignoring revoked_at filter)
-      const { data: tokenCheck, error: tokenCheckError } = await supabase
-        .from('refresh_tokens')
-        .select('token, user_id, account_id, expires_at, revoked_at, replaced_by_token, created_at')
-        .eq('token', body.refreshToken)
-        .maybeSingle();
-
-      if (tokenCheckError) {
-        console.error('[Refresh] Diagnostic query failed', {
-          error_code: tokenCheckError.code,
-          error_message: tokenCheckError.message,
-          token_prefix: body.refreshToken.substring(0, 8)
-        });
-      } else if (!tokenCheck) {
-        console.warn('[Refresh] Token does not exist in database', {
-          token_prefix: body.refreshToken.substring(0, 8)
-        });
-      } else {
-        const now = new Date();
-        const expiresAt = new Date(tokenCheck.expires_at);
-        const isExpired = expiresAt < now;
-        const isRevoked = tokenCheck.revoked_at !== null;
-
-        console.warn('[Refresh] Token found but invalid', {
-          token_prefix: body.refreshToken.substring(0, 8),
-          is_revoked: isRevoked,
-          revoked_at: tokenCheck.revoked_at,
-          is_expired: isExpired,
-          expires_at: tokenCheck.expires_at,
-          current_time: now.toISOString(),
-          time_difference_ms: expiresAt.getTime() - now.getTime(),
-          replaced_by_token: tokenCheck.replaced_by_token ? tokenCheck.replaced_by_token.substring(0, 8) : null,
-          created_at: tokenCheck.created_at,
-          user_id: tokenCheck.user_id,
-          account_id: tokenCheck.account_id
-        });
-      }
-
       return c.json({ error: 'Invalid or expired refresh token' }, 401);
     }
 
-    console.log(`[AUTH-TRACE-106][${Date.now()}] Refresh.validateSuccess: Token validated successfully {tokenPrefix: '${body.refreshToken.substring(0, 8)}', userId: '${tokenData.user_id}', accountId: '${tokenData.account_id}'}`);
-
     // Rotate token (create new, invalidate old)
-    console.log(`[AUTH-TRACE-107][${Date.now()}] Refresh.rotateStart: Starting token rotation {oldTokenPrefix: '${body.refreshToken.substring(0, 8)}', userId: '${tokenData.user_id}'}`);
     const newRefreshToken = await tokenService.rotate(
       body.refreshToken,
       tokenData.user_id,
       tokenData.account_id
     );
 
-    console.log(`[AUTH-TRACE-108][${Date.now()}] Refresh.rotateComplete: Token rotation complete {oldTokenPrefix: '${body.refreshToken.substring(0, 8)}', newTokenPrefix: '${newRefreshToken.substring(0, 8)}'}`);
+    // Fetch user's email
+    const { data: user } = await supabase
+      .from('users')
+      .select('email')
+      .eq('id', tokenData.user_id)
+      .single();
 
+    // Check if user has any completed business profiles
+    const { data: businesses } = await supabase
+      .from('business_profiles')
+      .select('onboarding_completed')
+      .eq('account_id', tokenData.account_id);
 
-// Fetch user's email
-console.log(`[AUTH-TRACE-109][${Date.now()}] Refresh.userDataFetch: Fetching user email and onboarding status {userId: '${tokenData.user_id}'}`);
-const { data: user } = await supabase
-  .from('users')
-  .select('email')
-  .eq('id', tokenData.user_id)
-  .single();
+    const hasCompletedBusiness = businesses?.some(b => b.onboarding_completed) || false;
 
-// Check if user has any completed business profiles
-const { data: businesses } = await supabase
-  .from('business_profiles')
-  .select('onboarding_completed')
-  .eq('account_id', tokenData.account_id);
-
-const hasCompletedBusiness = businesses?.some(b => b.onboarding_completed) || false;
-
-console.log(`[AUTH-TRACE-110][${Date.now()}] Refresh.userDataFetched: User data retrieved {email: '${user?.email}', onboardingCompleted: ${hasCompletedBusiness}}`);
-
-// Issue new access token
-console.log(`[AUTH-TRACE-111][${Date.now()}] Refresh.jwtSignStart: Creating new JWT access token {userId: '${tokenData.user_id}', accountId: '${tokenData.account_id}'}`);
-const newAccessToken = await jwtService.sign({
-  userId: tokenData.user_id,
-  accountId: tokenData.account_id,
-  email: user?.email || tokenData.user_id,
-  onboardingCompleted: hasCompletedBusiness
-});
-
-    console.log(`[AUTH-TRACE-112][${Date.now()}] Refresh.jwtSignComplete: New JWT access token created {tokenLength: ${newAccessToken.length}}`);
+    // Issue new access token
+    const newAccessToken = await jwtService.sign({
+      userId: tokenData.user_id,
+      accountId: tokenData.account_id,
+      email: user?.email || tokenData.user_id,
+      onboardingCompleted: hasCompletedBusiness
+    });
 
     const response: RefreshResponse = {
       accessToken: newAccessToken,
       refreshToken: newRefreshToken,
       expiresAt: jwtService.getExpiryTime()
     };
-
-    console.log(`[AUTH-TRACE-113][${Date.now()}] Refresh.responseReturning: Returning refresh response to frontend {newRefreshTokenPrefix: '${newRefreshToken.substring(0, 8)}', userId: '${tokenData.user_id}'}`);
 
     return c.json(response, 200);
 
