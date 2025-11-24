@@ -121,9 +121,7 @@ async function processWebhookMessage(
 
 /**
  * Handle checkout.session.completed
- * Handles both:
- * - Subscription upgrades (mode: 'subscription')
- * - One-time credit purchases (mode: 'payment')
+ * Handles both subscription upgrades and one-time credit purchases
  */
 async function handleCheckoutCompleted(data: StripeWebhookMessage, env: Env): Promise<void> {
   const session = data.payload;
@@ -135,103 +133,112 @@ async function handleCheckoutCompleted(data: StripeWebhookMessage, env: Env): Pr
     mode: session.mode,
   });
 
+  if (!accountId) {
+    console.error('[StripeWebhook] No account_id in session metadata');
+    return;
+  }
+
   const supabase = await SupabaseClientFactory.createAdminClient(env);
 
-  // Handle subscription checkout (upgrades)
+  // ===============================================================================
+  // HANDLE SUBSCRIPTION UPGRADES (mode: 'subscription')
+  // ===============================================================================
   if (session.mode === 'subscription' && session.subscription) {
     const newTier = session.metadata?.new_tier;
     const stripeSubscriptionId = session.subscription as string;
 
-    if (newTier && accountId) {
-      // Fetch full subscription details from Stripe
-      const stripeKey = await getSecret('STRIPE_SECRET_KEY', env, env.APP_ENV);
-      const stripe = new Stripe(stripeKey, { apiVersion: '2024-12-18.acacia' });
+    if (!newTier) {
+      console.error('[StripeWebhook] No new_tier in session metadata');
+      return;
+    }
 
-      const stripeSubscription = await stripe.subscriptions.retrieve(stripeSubscriptionId);
+    // Fetch full subscription details from Stripe API
+    const stripeKey = await getSecret('STRIPE_SECRET_KEY', env, env.APP_ENV);
+    const stripe = new Stripe(stripeKey, { apiVersion: '2024-12-18.acacia' });
 
-      // Extract subscription details
-      const subscriptionItem = stripeSubscription.items.data[0];
-      const priceId = subscriptionItem?.price?.id || null;
-      const priceCents = subscriptionItem?.price?.unit_amount || 0;
-      const periodStart = new Date(stripeSubscription.current_period_start * 1000).toISOString();
-      const periodEnd = new Date(stripeSubscription.current_period_end * 1000).toISOString();
+    const stripeSubscription = await stripe.subscriptions.retrieve(stripeSubscriptionId);
 
-      console.log('[StripeWebhook] Subscription details retrieved', {
-        subscription_id: stripeSubscriptionId,
-        price_id: priceId,
-        price_cents: priceCents,
-        period_start: periodStart,
-        period_end: periodEnd,
-      });
+    // Extract subscription details
+    const subscriptionItem = stripeSubscription.items.data[0];
+    const priceId = subscriptionItem?.price?.id || null;
+    const priceCents = subscriptionItem?.price?.unit_amount || 0;
+    const periodStart = new Date(stripeSubscription.current_period_start * 1000).toISOString();
+    const periodEnd = new Date(stripeSubscription.current_period_end * 1000).toISOString();
 
-      // Update subscription with ALL fields
-      const { error: updateError } = await supabase
-        .from('subscriptions')
-        .update({
-          plan_type: newTier,
-          stripe_subscription_id: stripeSubscriptionId,
-          stripe_price_id: priceId,
-          price_cents: priceCents,
-          status: 'active',
-          current_period_start: periodStart,
-          current_period_end: periodEnd,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('account_id', accountId);
+    console.log('[StripeWebhook] Subscription details from Stripe:', {
+      subscription_id: stripeSubscriptionId,
+      price_id: priceId,
+      price_cents: priceCents,
+      period_start: periodStart,
+      period_end: periodEnd,
+      new_tier: newTier,
+    });
 
-      if (updateError) {
-        console.error('[StripeWebhook] Failed to update subscription:', updateError);
-        throw updateError;
-      }
-
-      console.log('[StripeWebhook] Subscription updated in database', {
-        account_id: accountId,
-        new_tier: newTier,
+    // UPDATE 1: subscriptions table
+    const { error: updateError } = await supabase
+      .from('subscriptions')
+      .update({
+        plan_type: newTier,
         stripe_subscription_id: stripeSubscriptionId,
-      });
+        stripe_price_id: priceId,
+        price_cents: priceCents,
+        status: 'active',
+        current_period_start: periodStart,
+        current_period_end: periodEnd,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('account_id', accountId);
 
-      // Get new tier limits from plans table
-      const { data: plan, error: planError } = await supabase
-        .from('plans')
-        .select('credits_per_month, features')
-        .eq('name', newTier)
-        .single();
+    if (updateError) {
+      console.error('[StripeWebhook] Failed to update subscriptions table:', updateError);
+      throw updateError;
+    }
 
-      if (planError || !plan) {
-        console.error('[StripeWebhook] Failed to fetch plan details:', planError);
-        throw new Error(`Plan not found: ${newTier}`);
-      }
+    console.log('[StripeWebhook] subscriptions table updated');
 
-      const creditsQuota = plan.credits_per_month;
-      const lightQuota = parseInt(plan.features?.light_analyses || '0', 10);
+    // UPDATE 2: balances table (get quotas from plans table)
+    const { data: plan, error: planError } = await supabase
+      .from('plans')
+      .select('credits_per_month, features')
+      .eq('name', newTier)
+      .single();
 
-      // Reset balances to new tier limits
-      const { error: balanceError } = await supabase
-        .from('balances')
-        .update({
-          credit_balance: creditsQuota,
-          light_analyses_balance: lightQuota,
-          last_transaction_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('account_id', accountId);
+    if (planError || !plan) {
+      console.error('[StripeWebhook] Failed to fetch plan details:', planError);
+      throw new Error(`Plan not found: ${newTier}`);
+    }
 
-      if (balanceError) {
-        console.error('[StripeWebhook] Failed to update balances:', balanceError);
-        throw balanceError;
-      }
+    const creditsQuota = plan.credits_per_month;
+    const lightQuota = typeof plan.features === 'object' && plan.features?.light_analyses
+      ? parseInt(plan.features.light_analyses, 10)
+      : 0;
 
-      console.log('[StripeWebhook] Balances updated', {
-        account_id: accountId,
+    const { error: balanceError } = await supabase
+      .from('balances')
+      .update({
         credit_balance: creditsQuota,
         light_analyses_balance: lightQuota,
-      });
+        last_transaction_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('account_id', accountId);
 
-      console.log(`[StripeWebhook] ✅ Upgraded account ${accountId} to ${newTier}`);
+    if (balanceError) {
+      console.error('[StripeWebhook] Failed to update balances table:', balanceError);
+      throw balanceError;
     }
+
+    console.log('[StripeWebhook] balances table updated:', {
+      credit_balance: creditsQuota,
+      light_analyses_balance: lightQuota,
+    });
+
+    console.log(`[StripeWebhook] ✅ Successfully upgraded account ${accountId} to ${newTier}`);
   }
 
-  // Handle one-time credit purchases (existing logic)
+  // ===============================================================================
+  // HANDLE ONE-TIME CREDIT PURCHASES (mode: 'payment')
+  // ===============================================================================
   const creditsAmount = session.metadata?.credits_amount;
   if (creditsAmount && parseInt(creditsAmount) > 0) {
     const creditsRepo = new CreditsRepository(supabase);

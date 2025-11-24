@@ -1,26 +1,36 @@
-// src/features/billing/billing.routes.ts
+// features/billing/billing.routes.ts
 
 import { Hono } from 'hono';
 import type { Env } from '@/shared/types/env.types';
 import { authMiddleware } from '@/shared/middleware/auth.middleware';
-import { rateLimitMiddleware, RATE_LIMITS } from '@/shared/middleware/rate-limit.middleware';
-import { getSubscription, createUpgradeCheckout } from './billing.handler';
+import { rateLimitMiddleware } from '@/shared/middleware/rate-limit.middleware';
+import { API_RATE_LIMITS, WEBHOOK_RATE_LIMITS } from '@/config/rate-limits.config';
+import {
+  getSubscription,
+  createUpgradeCheckout,
+  handleStripeWebhook
+} from './billing.handler';
 
-export function registerBillingRoutes(app: Hono<{ Bindings: Env }>) {
-  // All billing routes require authentication
+export function registerBillingRoutes(app: Hono) {
+  console.log('[Routes] Registering billing routes');
+
+  // ===============================================================================
+  // STRIPE WEBHOOK (NO AUTH - signature verified in handler)
+  // ===============================================================================
+  app.post(
+    '/api/webhooks/stripe',
+    rateLimitMiddleware(WEBHOOK_RATE_LIMITS.STRIPE),
+    handleStripeWebhook
+  );
+
+  // ===============================================================================
+  // AUTHENTICATED BILLING ROUTES
+  // ===============================================================================
   app.use('/api/billing/*', authMiddleware);
-  app.use('/api/billing/*', rateLimitMiddleware(RATE_LIMITS.API_GENERAL));
+  app.use('/api/billing/*', rateLimitMiddleware(API_RATE_LIMITS.GENERAL));
 
-  /**
-   * GET /api/billing/subscription
-   * Get current subscription details
-   */
   app.get('/api/billing/subscription', getSubscription);
-
-  /**
-   * POST /api/billing/upgrade
-   * Create Stripe Checkout session for upgrade
-   * Body: { newTier: 'growth' | 'pro' | 'agency' | 'enterprise' }
-   */
   app.post('/api/billing/upgrade', createUpgradeCheckout);
+
+  console.log('[Routes] Billing routes registered');
 }
