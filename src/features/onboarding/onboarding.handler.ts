@@ -184,10 +184,12 @@ export async function getGenerationResult(c: Context<{ Bindings: Env }>) {
  *
  * Real-time alternative to polling /progress endpoint.
  * Automatically closes when generation completes or fails.
+ *
+ * NOTE: No authentication required - the cryptographically random runId UUID
+ * serves as implicit authentication (only the user who initiated the request knows it).
  */
 export async function streamGenerationProgress(c: Context<{ Bindings: Env }>) {
   try {
-    const auth = getAuthContext(c);
     const runId = c.req.param('runId');
 
     // Validate runId format
