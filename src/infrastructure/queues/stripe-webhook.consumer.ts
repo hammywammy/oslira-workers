@@ -199,7 +199,7 @@ async function handleCheckoutCompleted(data: StripeWebhookMessage, env: Env): Pr
     // UPDATE 2: balances table (get quotas from plans table)
     const { data: plan, error: planError } = await supabase
       .from('plans')
-      .select('credits_per_month, features')
+      .select('credits_per_month, light_analyses_per_month')
       .eq('name', newTier)
       .single();
 
@@ -209,9 +209,7 @@ async function handleCheckoutCompleted(data: StripeWebhookMessage, env: Env): Pr
     }
 
     const creditsQuota = plan.credits_per_month;
-    const lightQuota = typeof plan.features === 'object' && plan.features?.light_analyses
-      ? parseInt(plan.features.light_analyses, 10)
-      : 0;
+    const lightQuota = plan.light_analyses_per_month;
 
     const { error: balanceError } = await supabase
       .from('balances')
@@ -273,7 +271,7 @@ async function handleInvoicePaymentSucceeded(data: StripeWebhookMessage, env: En
         plan_type,
         plans!inner(
           credits_per_month,
-          features
+          light_analyses_per_month
         )
       `)
       .eq('stripe_subscription_id', subscriptionId)
@@ -285,9 +283,9 @@ async function handleInvoicePaymentSucceeded(data: StripeWebhookMessage, env: En
       return;
     }
 
-    const plan = subscription.plans;
-    const creditsQuota = plan.credits_per_month;
-    const lightQuota = parseInt(plan.features.light_analyses);
+    const plan = subscription.plans as any;
+    const creditsQuota = plan.credits_per_month as number;
+    const lightQuota = plan.light_analyses_per_month as number;
 
     // Reset balances (monthly renewal via Stripe invoice)
     await supabase
@@ -325,14 +323,29 @@ async function handleSubscriptionUpdated(data: StripeWebhookMessage, env: Env): 
   const accountId = data.account_id;
 
   const supabase = await SupabaseClientFactory.createAdminClient(env);
-  
+
+  // Build update object with safe date conversions
+  const updateData: any = {
+    status: subscription.status,
+    updated_at: new Date().toISOString()
+  };
+
+  // Only update dates if they exist (avoid "Invalid time value" errors)
+  if (subscription.current_period_start) {
+    updateData.current_period_start = new Date(subscription.current_period_start * 1000).toISOString();
+  }
+
+  if (subscription.current_period_end) {
+    updateData.current_period_end = new Date(subscription.current_period_end * 1000).toISOString();
+  }
+
+  if (subscription.canceled_at) {
+    updateData.canceled_at = new Date(subscription.canceled_at * 1000).toISOString();
+  }
+
   await supabase
     .from('subscriptions')
-    .update({
-      status: subscription.status,
-      current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
-      updated_at: new Date().toISOString()
-    })
+    .update(updateData)
     .eq('stripe_subscription_id', subscription.id)
     .eq('account_id', accountId);
 
