@@ -71,9 +71,9 @@ async function processWebhookMessage(
   const supabase = await SupabaseClientFactory.createAdminClient(env);
   const { data: existing } = await supabase
     .from('webhook_events')
-    .select('id')
-    .eq('event_id', data.event_id)
-    .eq('status', 'processed')
+    .select('stripe_event_id')
+    .eq('stripe_event_id', data.event_id)
+    .not('processed_at', 'is', null)
     .single();
 
   if (existing) {
@@ -83,11 +83,10 @@ async function processWebhookMessage(
 
   // Store webhook event
   await supabase.from('webhook_events').insert({
-    event_id: data.event_id,
+    stripe_event_id: data.event_id,
     event_type: data.event_type,
-    payload: data.payload,
-    status: 'processing',
-    received_at: data.received_at
+    account_id: data.account_id,
+    payload: data.payload
   });
 
   // Route to appropriate handler
@@ -115,8 +114,8 @@ async function processWebhookMessage(
   // Mark as processed
   await supabase
     .from('webhook_events')
-    .update({ status: 'processed', processed_at: new Date().toISOString() })
-    .eq('event_id', data.event_id);
+    .update({ processed_at: new Date().toISOString() })
+    .eq('stripe_event_id', data.event_id);
 }
 
 /**
@@ -365,7 +364,7 @@ async function handleSubscriptionDeleted(data: StripeWebhookMessage, env: Env): 
     .from('subscriptions')
     .update({
       status: 'cancelled',
-      cancelled_at: new Date().toISOString(),
+      canceled_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     })
     .eq('stripe_subscription_id', subscription.id)
