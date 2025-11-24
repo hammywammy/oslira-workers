@@ -112,17 +112,22 @@ export async function createUpgradeCheckout(c: Context<{ Bindings: Env }>) {
       );
     }
 
-    // Get stripe_customer_id from accounts table if not on subscription
+    // Get environment-specific customer ID
+    const isProduction = c.env.APP_ENV === 'production';
+    const customerIdColumn = isProduction ? 'stripe_customer_id_live' : 'stripe_customer_id_test';
+
     let stripeCustomerId = subscription.stripe_customer_id;
 
     if (!stripeCustomerId) {
       const { data: account } = await supabase
         .from('accounts')
-        .select('stripe_customer_id')
+        .select('stripe_customer_id_test, stripe_customer_id_live')
         .eq('id', accountId)
         .single();
 
-      stripeCustomerId = account?.stripe_customer_id;
+      stripeCustomerId = isProduction
+        ? account?.stripe_customer_id_live
+        : account?.stripe_customer_id_test;
     }
 
     if (!stripeCustomerId) {

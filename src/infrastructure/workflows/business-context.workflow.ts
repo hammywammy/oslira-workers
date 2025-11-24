@@ -155,15 +155,21 @@ await step.do('link_stripe_to_subscription', async () => {
 
   try {
     const supabase = await SupabaseClientFactory.createAdminClient(this.env);
-    
-    // Get account's stripe_customer_id
+
+    const isProduction = this.env.APP_ENV === 'production';
+    const customerIdColumn = isProduction ? 'stripe_customer_id_live' : 'stripe_customer_id_test';
+
     const { data: account, error: accountError } = await supabase
       .from('accounts')
-      .select('stripe_customer_id')
+      .select('stripe_customer_id_test, stripe_customer_id_live')
       .eq('id', params.account_id)
       .single();
 
-    if (accountError || !account?.stripe_customer_id) {
+    const stripeCustomerId = isProduction
+      ? account?.stripe_customer_id_live
+      : account?.stripe_customer_id_test;
+
+    if (accountError || !stripeCustomerId) {
       console.warn('[Step5] ⚠ No stripe_customer_id found - skipping subscription link', {
         account_id: params.account_id,
         has_account: !!account,
@@ -172,36 +178,40 @@ await step.do('link_stripe_to_subscription', async () => {
       return; // Non-fatal - continue workflow
     }
 
-    // Update subscription with stripe_customer_id
+    // Update subscription with environment-specific column
+    const subscriptionUpdate: any = { stripe_customer_id: stripeCustomerId };
+    if (isProduction) {
+      subscriptionUpdate.stripe_customer_id_live = stripeCustomerId;
+    } else {
+      subscriptionUpdate.stripe_customer_id_test = stripeCustomerId;
+    }
+
     const { error: updateError } = await supabase
       .from('subscriptions')
-      .update({
-        stripe_customer_id: account.stripe_customer_id
-      })
-      .eq('account_id', params.account_id)
-      .is('stripe_customer_id', null); // Only update if not already set
+      .update(subscriptionUpdate)
+      .eq('account_id', params.account_id);
 
     if (updateError) {
       console.error('[Step5] ⚠ Failed to update subscription with stripe_customer_id', {
         error_code: updateError.code,
         error_message: updateError.message,
         account_id: params.account_id,
-        stripe_customer_id: account.stripe_customer_id
+        stripe_customer_id: stripeCustomerId
       });
       // Non-fatal - continue workflow
     } else {
       console.log('[Step5] ✓ Subscription linked to Stripe customer', {
         account_id: params.account_id,
-        stripe_customer_id: account.stripe_customer_id
+        stripe_customer_id: stripeCustomerId
       });
     }
 
     // Also update Stripe customer metadata with business context
     const { StripeService } = await import('@/infrastructure/billing/stripe.service');
     const stripeService = new StripeService(this.env);
-    
+
     await stripeService.updateCustomerMetadata({
-      customer_id: account.stripe_customer_id,
+      customer_id: stripeCustomerId,
       metadata: {
         business_profile_id: businessProfileId,
         onboarding_completed: 'true',

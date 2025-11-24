@@ -26,6 +26,7 @@ interface CachedSecrets {
 export class BusinessContextProgressDO extends DurableObject {
   private state: DurableObjectState;
   private lastLoggedState: string | null = null; // For change detection
+  private sseConnections: Map<string, ReadableStreamDefaultController> = new Map(); // Active SSE streams
 
   constructor(state: DurableObjectState, env: Env) {
     super(state, env);
@@ -47,18 +48,78 @@ export class BusinessContextProgressDO extends DurableObject {
       // =========================================================================
       if (isPolling) {
         const progress = await this.getProgress();
-        
+
         // Only log if state has changed since last poll
-        const currentStateKey = progress 
-          ? `${progress.status}-${progress.progress}-${progress.current_step}` 
+        const currentStateKey = progress
+          ? `${progress.status}-${progress.progress}-${progress.current_step}`
           : 'null';
-        
+
         if (this.lastLoggedState !== currentStateKey) {
           console.log(`[ProgressDO] STATE CHANGE: ${currentStateKey}`);
           this.lastLoggedState = currentStateKey;
         }
-        
+
         return Response.json(progress);
+      }
+
+      // =========================================================================
+      // GET /stream - SSE STREAMING ENDPOINT
+      // =========================================================================
+      if (method === 'GET' && url.pathname === '/stream') {
+        console.log('[ProgressDO] SSE stream connection requested');
+
+        const connectionId = crypto.randomUUID();
+        let isClosed = false;
+
+        const stream = new ReadableStream({
+          start: async (controller) => {
+            try {
+              // Store connection
+              this.sseConnections.set(connectionId, controller);
+              console.log(`[ProgressDO] SSE connection established: ${connectionId}`);
+
+              // Send initial connection event
+              const encoder = new TextEncoder();
+              controller.enqueue(encoder.encode(`event: connected\ndata: ${JSON.stringify({ connectionId })}\n\n`));
+
+              // Send current state immediately
+              const currentProgress = await this.getProgress();
+              if (currentProgress) {
+                const progressEvent = `event: progress\ndata: ${JSON.stringify(currentProgress)}\n\n`;
+                controller.enqueue(encoder.encode(progressEvent));
+
+                // If already complete or failed, close stream
+                if (currentProgress.status === 'complete' || currentProgress.status === 'failed') {
+                  const completeEvent = `event: ${currentProgress.status}\ndata: ${JSON.stringify(currentProgress)}\n\n`;
+                  controller.enqueue(encoder.encode(completeEvent));
+                  controller.close();
+                  this.sseConnections.delete(connectionId);
+                  isClosed = true;
+                }
+              }
+            } catch (error: any) {
+              console.error(`[ProgressDO] SSE stream error: ${error.message}`);
+              if (!isClosed) {
+                controller.error(error);
+                this.sseConnections.delete(connectionId);
+              }
+            }
+          },
+          cancel: () => {
+            console.log(`[ProgressDO] SSE connection closed: ${connectionId}`);
+            this.sseConnections.delete(connectionId);
+            isClosed = true;
+          }
+        });
+
+        return new Response(stream, {
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no' // Disable nginx buffering
+          }
+        });
       }
 
       // =========================================================================
@@ -85,9 +146,15 @@ export class BusinessContextProgressDO extends DurableObject {
           progress: update.progress,
           step: update.current_step
         });
-        
+
         await this.updateProgress(update);
-        
+
+        // Broadcast update to all SSE connections
+        const currentProgress = await this.getProgress();
+        if (currentProgress) {
+          this.broadcastToSSE(currentProgress);
+        }
+
         console.log('[ProgressDO] ✓ Update complete');
         return Response.json({ success: true });
       }
@@ -163,8 +230,11 @@ if (method === 'POST' && url.pathname === '/complete') {
       }, { status: 500 });
     }
     
+    // Broadcast completion to all SSE connections
+    this.broadcastToSSE(verified, 'complete');
+
     console.log('[ProgressDO] ========== COMPLETE ENDPOINT SUCCESS ==========');
-    return Response.json({ 
+    return Response.json({
       success: true,
       status: verified.status,
       progress: verified.progress
@@ -189,9 +259,15 @@ if (method === 'POST' && url.pathname === '/complete') {
       if (method === 'POST' && url.pathname === '/fail') {
         const error = await request.json();
         console.log('[ProgressDO] Marking failed:', error.error_message);
-        
+
         await this.failGeneration(error.error_message);
-        
+
+        // Broadcast failure to all SSE connections
+        const currentProgress = await this.getProgress();
+        if (currentProgress) {
+          this.broadcastToSSE(currentProgress, 'failed');
+        }
+
         console.log('[ProgressDO] ✓ Marked failed');
         return Response.json({ success: true });
       }
@@ -366,12 +442,62 @@ if (method === 'POST' && url.pathname === '/complete') {
   }
 
   /**
+   * Broadcast progress update to all active SSE connections
+   */
+  private broadcastToSSE(
+    progress: BusinessContextProgressState,
+    eventType: 'progress' | 'complete' | 'failed' = 'progress'
+  ): void {
+    if (this.sseConnections.size === 0) {
+      return;
+    }
+
+    const encoder = new TextEncoder();
+    const event = `event: ${eventType}\ndata: ${JSON.stringify(progress)}\n\n`;
+    const encoded = encoder.encode(event);
+
+    const connectionsToRemove: string[] = [];
+
+    this.sseConnections.forEach((controller, connectionId) => {
+      try {
+        controller.enqueue(encoded);
+
+        // Close connection if complete or failed
+        if (eventType === 'complete' || eventType === 'failed') {
+          controller.close();
+          connectionsToRemove.push(connectionId);
+        }
+      } catch (error: any) {
+        console.error(`[ProgressDO] Failed to send to SSE connection ${connectionId}:`, error.message);
+        connectionsToRemove.push(connectionId);
+      }
+    });
+
+    // Clean up closed/failed connections
+    connectionsToRemove.forEach(id => this.sseConnections.delete(id));
+
+    if (connectionsToRemove.length > 0) {
+      console.log(`[ProgressDO] Cleaned up ${connectionsToRemove.length} SSE connections`);
+    }
+  }
+
+  /**
    * Alarm handler - cleanup after 24 hours
    */
   async alarm(): Promise<void> {
     console.log('[ProgressDO] Alarm triggered - cleanup starting');
-    
+
     try {
+      // Close all active SSE connections before cleanup
+      this.sseConnections.forEach((controller, connectionId) => {
+        try {
+          controller.close();
+        } catch (error: any) {
+          console.error(`[ProgressDO] Error closing SSE connection ${connectionId}:`, error.message);
+        }
+      });
+      this.sseConnections.clear();
+
       await this.state.storage.deleteAll();
       console.log('[ProgressDO] ✓ Cleanup complete');
     } catch (error: any) {

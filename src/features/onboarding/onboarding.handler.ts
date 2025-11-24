@@ -10,10 +10,10 @@
 import type { Context } from 'hono';
 import type { Env } from '@/shared/types/env.types';
 import type { BusinessContextQueueMessage } from '@/shared/types/business-context.types';
-import { 
-  GenerateContextRequestSchema, 
+import {
+  GenerateContextRequestSchema,
   GetProgressParamsSchema,
-  transformToWorkflowParams 
+  transformToWorkflowParams
 } from './onboarding.schemas';
 import { getAuthContext } from '@/shared/utils/auth.util';
 import { validateBody } from '@/shared/utils/validation.util';

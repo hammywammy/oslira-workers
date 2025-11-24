@@ -19,10 +19,10 @@ export type AppEnvironment = 'staging' | 'production';
 // =============================================================================
 
 const STAGING_PRICE_IDS: Record<Exclude<TierName, 'free'>, string> = {
-  growth: '', // TODO: Add Stripe test mode price ID
-  pro: '',    // TODO: Add Stripe test mode price ID
-  agency: '', // TODO: Add Stripe test mode price ID
-  enterprise: '', // TODO: Add Stripe test mode price ID
+  growth: 'price_1SW21iFZyrcdK01tvTZ0ZbyJ',
+  pro: 'price_1SW21tFZyrcdK01tVR91V4nW',
+  agency: 'price_1SW220FZyrcdK01tja6a58UH',
+  enterprise: 'price_1SW225FZyrcdK01tL0zd8t3A',
 };
 
 // =============================================================================
@@ -30,10 +30,10 @@ const STAGING_PRICE_IDS: Record<Exclude<TierName, 'free'>, string> = {
 // =============================================================================
 
 const PRODUCTION_PRICE_IDS: Record<Exclude<TierName, 'free'>, string> = {
-  growth: '', // TODO: Add Stripe live mode price ID
-  pro: '',    // TODO: Add Stripe live mode price ID
-  agency: '', // TODO: Add Stripe live mode price ID
-  enterprise: '', // TODO: Add Stripe live mode price ID
+  growth: 'price_1SW4DhJzvcRSqGG3560s1ZZG',
+  pro: 'price_1SW4DgJzvcRSqGG3H2TvVGMK',
+  agency: 'price_1SW4DeJzvcRSqGG3r6WDNhU6',
+  enterprise: 'price_1SW4DbJzvcRSqGG3gcMITfUW',
 };
 
 // =============================================================================
