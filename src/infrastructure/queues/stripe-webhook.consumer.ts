@@ -199,7 +199,7 @@ async function handleCheckoutCompleted(data: StripeWebhookMessage, env: Env): Pr
     const { data: plan, error: planError } = await supabase
       .from('plans')
       .select('credits_per_month, light_analyses_per_month')
-      .eq('name', newTier)
+      .ilike('name', newTier)
       .single();
 
     if (planError || !plan) {
@@ -372,3 +372,12 @@ async function handleSubscriptionDeleted(data: StripeWebhookMessage, env: Env): 
 
   console.log(`[StripeWebhook] Cancelled subscription ${subscription.id}`);
 }
+
+/**
+ * Default export for queue binding
+ */
+export default {
+  async queue(batch: MessageBatch<StripeWebhookMessage>, env: Env): Promise<void> {
+    return handleStripeWebhookQueue(batch, env);
+  }
+};
