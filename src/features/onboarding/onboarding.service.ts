@@ -17,8 +17,8 @@ export interface OnboardingFormData {
 export class OnboardingService {
   private aiClient: AIGatewayClient;
 
-  constructor(env: Env, openaiKey: string, claudeKey: string) {
-    this.aiClient = new AIGatewayClient(env, openaiKey, claudeKey);
+  constructor(env: Env, openaiKey: string, claudeKey: string, private aiGatewayToken: string) {
+    this.aiClient = new AIGatewayClient(env, openaiKey, claudeKey, aiGatewayToken);
   }
 
   async generateBusinessContext(userInputs: OnboardingFormData): Promise<BusinessContextResult> {
