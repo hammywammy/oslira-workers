@@ -232,6 +232,58 @@ export async function getAnalysisProgress(c: Context<{ Bindings: Env }>) {
 }
 
 /**
+ * GET /api/analysis/:runId/stream
+ * Stream analysis progress via Server-Sent Events (SSE)
+ *
+ * Real-time alternative to polling /progress endpoint.
+ * Automatically closes when analysis completes or fails.
+ *
+ * NOTE: No authentication required - the cryptographically random runId
+ * serves as implicit authentication (only the user who initiated the request knows it).
+ */
+export async function streamAnalysisProgress(c: Context<{ Bindings: Env }>) {
+  try {
+    const runId = c.req.param('runId');
+
+    // Validate runId format
+    validateBody(GetProgressParamsSchema, { runId });
+
+    console.log('[StreamAnalysisProgress] Starting SSE stream:', runId);
+
+    // Connect to Durable Object's SSE stream endpoint
+    const progressId = c.env.ANALYSIS_PROGRESS.idFromName(runId);
+    const progressDO = c.env.ANALYSIS_PROGRESS.get(progressId);
+
+    // Fetch the SSE stream from Durable Object
+    const doResponse = await progressDO.fetch('http://do/stream');
+
+    if (!doResponse.ok || !doResponse.body) {
+      console.error('[StreamAnalysisProgress] Failed to connect to DO stream');
+      return errorResponse(c, 'Failed to establish stream', 'STREAM_ERROR', 500);
+    }
+
+    // Return the DO's SSE stream directly to the client
+    return new Response(doResponse.body, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no'
+      }
+    });
+
+  } catch (error: any) {
+    console.error('[StreamAnalysisProgress] Error:', error);
+
+    if (error.name === 'ZodError') {
+      return errorResponse(c, 'Invalid run ID', 'VALIDATION_ERROR', 400);
+    }
+
+    return errorResponse(c, 'Failed to stream progress', 'STREAM_ERROR', 500);
+  }
+}
+
+/**
  * POST /api/analysis/:runId/cancel
  * Cancel running analysis
  */

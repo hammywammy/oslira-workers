@@ -83,10 +83,6 @@ binding = "STRIPE_WEBHOOK_QUEUE"
 queue = "stripe-webhooks"
 
 [[queues.producers]]
-binding = "ANALYSIS_QUEUE"
-queue = "analysis-jobs"
-
-[[queues.producers]]
 binding = "BUSINESS_CONTEXT_QUEUE"
 queue = "business-context-jobs"
 
@@ -97,13 +93,6 @@ max_batch_size = 10
 max_batch_timeout = 30
 max_retries = 3
 dead_letter_queue = "stripe-webhooks-dlq"
-
-[[queues.consumers]]
-queue = "analysis-jobs"
-max_batch_size = 1
-max_batch_timeout = 5
-max_retries = 3
-dead_letter_queue = "analysis-jobs-dlq"
 
 [[queues.consumers]]
 queue = "business-context-jobs"
@@ -204,10 +193,6 @@ binding = "STRIPE_WEBHOOK_QUEUE"
 queue = "stripe-webhooks-staging"
 
 [[env.staging.queues.producers]]
-binding = "ANALYSIS_QUEUE"
-queue = "analysis-jobs-staging"
-
-[[env.staging.queues.producers]]
 binding = "BUSINESS_CONTEXT_QUEUE"
 queue = "business-context-jobs-staging"
 
@@ -220,13 +205,6 @@ max_batch_size = 10
 max_batch_timeout = 30
 max_retries = 3
 dead_letter_queue = "stripe-webhooks-dlq-staging"
-
-[[env.staging.queues.consumers]]
-queue = "analysis-jobs-staging"
-max_batch_size = 1
-max_batch_timeout = 5
-max_retries = 3
-dead_letter_queue = "analysis-jobs-dlq-staging"
 
 [[env.staging.queues.consumers]]
 queue = "business-context-jobs-staging"
