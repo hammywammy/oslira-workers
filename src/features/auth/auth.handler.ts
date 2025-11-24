@@ -586,6 +586,22 @@ const { data: businesses } = await supabase
 
 const hasCompletedBusiness = businesses?.some(b => b.onboarding_completed) || false;
 
+// Issue fresh JWT if onboarding status changed (JWT claims are stale)
+let newAccessToken: string | undefined;
+if (hasCompletedBusiness !== auth.onboardingCompleted) {
+  console.log('[GetSession] Onboarding status changed, issuing fresh JWT', {
+    jwt_claim: auth.onboardingCompleted,
+    actual_status: hasCompletedBusiness
+  });
+  const jwtService = new JWTService(c.env);
+  newAccessToken = await jwtService.sign({
+    userId: auth.userId,
+    accountId: auth.accountId,
+    email: user.email,
+    onboardingCompleted: hasCompletedBusiness
+  });
+}
+
 // Fetch credit balance and light analyses balance
 const { data: balances } = await supabase
   .from('balances')
@@ -593,7 +609,7 @@ const { data: balances } = await supabase
   .eq('account_id', auth.accountId)
   .single();
 
-const response: SessionResponse = {
+const response: SessionResponse & { newAccessToken?: string } = {
   user: {
     id: user.id,
     email: user.email,
@@ -608,6 +624,12 @@ const response: SessionResponse = {
     light_analyses_balance: balances?.light_analyses_balance || 0
   }
 };
+
+// Include fresh JWT if onboarding status changed
+if (newAccessToken) {
+  response.newAccessToken = newAccessToken;
+}
+
     return successResponse(c, response);
 
   } catch (error: any) {

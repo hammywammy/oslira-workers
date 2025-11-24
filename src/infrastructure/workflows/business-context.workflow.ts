@@ -20,45 +20,42 @@ export class BusinessContextWorkflow extends WorkflowEntrypoint<Env, BusinessCon
 
     try {
       // =========================================================================
-      // STEP 1: Fetch Secrets
+      // STEP 1: Fetch Secrets (no progress update - quick operation)
       // =========================================================================
       const secrets = await step.do('fetch_secrets', async () => {
-        await this.updateProgress(progressDO, 5, 'Loading configuration');
-
         const [openaiKey, claudeKey, aiGatewayToken] = await Promise.all([
           getSecret('OPENAI_API_KEY', this.env, this.env.APP_ENV),
           getSecret('ANTHROPIC_API_KEY', this.env, this.env.APP_ENV),
           getSecret('CLOUDFLARE_AI_GATEWAY_TOKEN', this.env, this.env.APP_ENV)
         ]);
 
-        await this.updateProgress(progressDO, 10, 'Configuration loaded');
         return { openaiKey, claudeKey, aiGatewayToken };
       });
 
       // =========================================================================
-      // STEP 2: AI Generation
+      // STEP 2: AI Generation (UPDATE 1: 10%, UPDATE 2: 70%)
       // =========================================================================
       let contextResult: any;
       await step.do('generate_ai_content', async () => {
-        await this.updateProgress(progressDO, 15, 'Generating business tagline');
+        // UPDATE 1: Start AI generation
+        await this.updateProgress(progressDO, 10, 'Generating AI content...');
 
         const service = new OnboardingService(this.env, secrets.openaiKey, secrets.claudeKey, secrets.aiGatewayToken);
         contextResult = await service.generateBusinessContext(params.user_inputs);
 
-        await this.updateProgress(progressDO, 60, 'AI generation complete');
+        // UPDATE 2: AI complete, saving to database
+        await this.updateProgress(progressDO, 70, 'Saving to database...');
         console.log('[Workflow] AI complete');
       });
 
       // =========================================================================
-      // STEP 3: Save to Database
+      // STEP 3: Save to Database (no progress update - 70% already set)
       // =========================================================================
       const businessProfileId = await step.do('save_to_database', async () => {
         console.log('[Step3] ENTRY - Saving business profile to database');
         const saveStartTime = Date.now();
-        
-        try {
-          await this.updateProgress(progressDO, 70, 'Saving business profile');
 
+        try {
           const supabase = await SupabaseClientFactory.createAdminClient(this.env);
           const businessRepo = new BusinessRepository(supabase);
 
@@ -70,25 +67,25 @@ export class BusinessContextWorkflow extends WorkflowEntrypoint<Env, BusinessCon
             has_business_summary_generated: !!contextResult.business_summary_generated
           });
 
-const result = await businessRepo.createBusinessProfile({
-  account_id: params.account_id,
-  full_name: params.user_inputs.full_name,
-  signature_name: params.user_inputs.signature_name,
-  business_name: params.user_inputs.business_name,  // ← ADD THIS LINE
-  business_one_liner: contextResult.business_one_liner,
-  business_summary_generated: contextResult.business_summary_generated,
-  
-  // User inputs for manual JSON construction
-  business_summary: params.user_inputs.business_summary,
-  communication_tone: params.user_inputs.communication_tone,
-  target_description: params.user_inputs.target_description,
-  icp_min_followers: params.user_inputs.icp_min_followers,
-  icp_max_followers: params.user_inputs.icp_max_followers,
-  target_company_sizes: params.user_inputs.target_company_sizes,
-  
-  // AI generation metadata
-  ai_generation_metadata: contextResult.ai_metadata
-});
+          const result = await businessRepo.createBusinessProfile({
+            account_id: params.account_id,
+            full_name: params.user_inputs.full_name,
+            signature_name: params.user_inputs.signature_name,
+            business_name: params.user_inputs.business_name,
+            business_one_liner: contextResult.business_one_liner,
+            business_summary_generated: contextResult.business_summary_generated,
+
+            // User inputs for manual JSON construction
+            business_summary: params.user_inputs.business_summary,
+            communication_tone: params.user_inputs.communication_tone,
+            target_description: params.user_inputs.target_description,
+            icp_min_followers: params.user_inputs.icp_min_followers,
+            icp_max_followers: params.user_inputs.icp_max_followers,
+            target_company_sizes: params.user_inputs.target_company_sizes,
+
+            // AI generation metadata
+            ai_generation_metadata: contextResult.ai_metadata
+          });
 
           const saveDuration = Date.now() - saveStartTime;
           console.log('[Step3] ✓ Database save SUCCESS', {
@@ -97,10 +94,8 @@ const result = await businessRepo.createBusinessProfile({
             was_created: result.was_created
           });
 
-          await this.updateProgress(progressDO, 80, 'Profile created successfully');
-
           return result.business_profile_id;
-          
+
         } catch (error: any) {
           console.error('[Step3] ✗ Database save FAILED', {
             error_name: error.name,
@@ -112,18 +107,16 @@ const result = await businessRepo.createBusinessProfile({
       });
 
 // =========================================================================
-// STEP 4: Mark Business Profile as Onboarded
+// STEP 4: Mark Business Profile as Onboarded (no progress update)
 // =========================================================================
 await step.do('mark_business_onboarded', async () => {
   console.log('[Step4] Marking business profile as onboarded');
-  
-  await this.updateProgress(progressDO, 90, 'Finalizing business profile');
 
   const supabase = await SupabaseClientFactory.createAdminClient(this.env);
-  
+
   const { error: dbUpdateError } = await supabase
     .from('business_profiles')
-    .update({ 
+    .update({
       onboarding_completed: true,
       onboarding_completed_at: new Date().toISOString()
     })
@@ -141,23 +134,19 @@ await step.do('mark_business_onboarded', async () => {
   console.log('[Step4] ✓ Business marked as onboarded', {
     business_profile_id: businessProfileId
   });
-
-  await this.updateProgress(progressDO, 95, 'Business profile ready');
 });
 
 // =========================================================================
-// STEP 5: Link Stripe Customer to Subscription
+// STEP 5: Link Stripe Customer to Subscription (no progress update)
 // =========================================================================
 await step.do('link_stripe_to_subscription', async () => {
   console.log('[Step5] Linking Stripe customer to subscription');
-  
-  await this.updateProgress(progressDO, 93, 'Updating billing profile');
 
   try {
     const supabase = await SupabaseClientFactory.createAdminClient(this.env);
 
     const isProduction = this.env.APP_ENV === 'production';
-    const customerIdColumn = isProduction ? 'stripe_customer_id_live' : 'stripe_customer_id_test';
+    const columnName = isProduction ? 'stripe_customer_id_live' : 'stripe_customer_id_test';
 
     const { data: account, error: accountError } = await supabase
       .from('accounts')
@@ -175,20 +164,13 @@ await step.do('link_stripe_to_subscription', async () => {
         has_account: !!account,
         error: accountError?.message
       });
-      return; // Non-fatal - continue workflow
+      return;
     }
 
     // Update subscription with environment-specific column
-    const subscriptionUpdate: any = { stripe_customer_id: stripeCustomerId };
-    if (isProduction) {
-      subscriptionUpdate.stripe_customer_id_live = stripeCustomerId;
-    } else {
-      subscriptionUpdate.stripe_customer_id_test = stripeCustomerId;
-    }
-
     const { error: updateError } = await supabase
       .from('subscriptions')
-      .update(subscriptionUpdate)
+      .update({ [columnName]: stripeCustomerId })
       .eq('account_id', params.account_id);
 
     if (updateError) {
@@ -198,7 +180,6 @@ await step.do('link_stripe_to_subscription', async () => {
         account_id: params.account_id,
         stripe_customer_id: stripeCustomerId
       });
-      // Non-fatal - continue workflow
     } else {
       console.log('[Step5] ✓ Subscription linked to Stripe customer', {
         account_id: params.account_id,
@@ -206,7 +187,7 @@ await step.do('link_stripe_to_subscription', async () => {
       });
     }
 
-    // Also update Stripe customer metadata with business context
+    // Update Stripe customer metadata with business context
     const { StripeService } = await import('@/infrastructure/billing/stripe.service');
     const stripeService = new StripeService(this.env);
 
@@ -221,32 +202,23 @@ await step.do('link_stripe_to_subscription', async () => {
       }
     });
 
-    console.log('[Step5] ✓ Stripe customer metadata updated', {
-      customer_id: account.stripe_customer_id,
-      business_profile_id: businessProfileId
-    });
+    console.log('[Step5] ✓ Stripe customer metadata updated');
 
   } catch (error: any) {
-    // Log but don't fail workflow
+    // Non-fatal - log and continue
     console.error('[Step5] ⚠ Subscription/Stripe update failed (NON-FATAL)', {
       error_message: error.message,
       account_id: params.account_id
     });
   }
-
-  await this.updateProgress(progressDO, 95, 'Business profile ready');
 });
 
 // =========================================================================
-// STEP 6: Mark Complete  ← UPDATE FROM STEP 5 TO STEP 6
+// STEP 6: Mark Complete (UPDATE 3: 100% via /complete endpoint)
 // =========================================================================
 await step.do('mark_complete', async () => {
-  // ... existing code ...
-});      
-// STEP 5: Mark Complete
-await step.do('mark_complete', async () => {
   console.log('[Workflow] Calling /complete endpoint...');
-  
+
   const completeResponse = await progressDO.fetch('http://do/complete', {
     method: 'POST',
     body: JSON.stringify({
@@ -267,8 +239,6 @@ await step.do('mark_complete', async () => {
   const completeData = await completeResponse.json();
   console.log('[Workflow] ✓ Complete endpoint response:', completeData);
   console.log('[Workflow] ========== WORKFLOW COMPLETE ==========');
-  
-  // ✅ NO MORE UPDATES AFTER THIS - STATUS STAYS 'complete'
 });
 
       console.log('[Workflow] ========== SUCCESS ==========', {
