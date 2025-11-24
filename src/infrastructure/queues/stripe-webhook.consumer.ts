@@ -4,6 +4,8 @@ import type { Env } from '@/shared/types/env.types';
 import type { MessageBatch, Message } from '@cloudflare/workers-types';
 import { SupabaseClientFactory } from '@/infrastructure/database/supabase.client';
 import { CreditsRepository } from '@/infrastructure/database/repositories/credits.repository';
+import Stripe from 'stripe';
+import { getSecret } from '@/infrastructure/config/secrets';
 
 /**
  * STRIPE WEBHOOK CONSUMER
@@ -138,16 +140,41 @@ async function handleCheckoutCompleted(data: StripeWebhookMessage, env: Env): Pr
   // Handle subscription checkout (upgrades)
   if (session.mode === 'subscription' && session.subscription) {
     const newTier = session.metadata?.new_tier;
-    const stripeSubscriptionId = session.subscription;
+    const stripeSubscriptionId = session.subscription as string;
 
     if (newTier && accountId) {
-      // Update subscription in database
+      // Fetch full subscription details from Stripe
+      const stripeKey = await getSecret('STRIPE_SECRET_KEY', env, env.APP_ENV);
+      const stripe = new Stripe(stripeKey, { apiVersion: '2024-12-18.acacia' });
+
+      const stripeSubscription = await stripe.subscriptions.retrieve(stripeSubscriptionId);
+
+      // Extract subscription details
+      const subscriptionItem = stripeSubscription.items.data[0];
+      const priceId = subscriptionItem?.price?.id || null;
+      const priceCents = subscriptionItem?.price?.unit_amount || 0;
+      const periodStart = new Date(stripeSubscription.current_period_start * 1000).toISOString();
+      const periodEnd = new Date(stripeSubscription.current_period_end * 1000).toISOString();
+
+      console.log('[StripeWebhook] Subscription details retrieved', {
+        subscription_id: stripeSubscriptionId,
+        price_id: priceId,
+        price_cents: priceCents,
+        period_start: periodStart,
+        period_end: periodEnd,
+      });
+
+      // Update subscription with ALL fields
       const { error: updateError } = await supabase
         .from('subscriptions')
         .update({
           plan_type: newTier,
           stripe_subscription_id: stripeSubscriptionId,
+          stripe_price_id: priceId,
+          price_cents: priceCents,
           status: 'active',
+          current_period_start: periodStart,
+          current_period_end: periodEnd,
           updated_at: new Date().toISOString(),
         })
         .eq('account_id', accountId);
@@ -157,26 +184,50 @@ async function handleCheckoutCompleted(data: StripeWebhookMessage, env: Env): Pr
         throw updateError;
       }
 
+      console.log('[StripeWebhook] Subscription updated in database', {
+        account_id: accountId,
+        new_tier: newTier,
+        stripe_subscription_id: stripeSubscriptionId,
+      });
+
       // Get new tier limits from plans table
-      const { data: plan } = await supabase
+      const { data: plan, error: planError } = await supabase
         .from('plans')
         .select('credits_per_month, features')
         .eq('name', newTier)
         .single();
 
-      if (plan) {
-        // Reset balances to new tier limits
-        await supabase
-          .from('balances')
-          .update({
-            credit_balance: plan.credits_per_month,
-            light_analyses_balance: parseInt(plan.features?.light_analyses || '0'),
-            updated_at: new Date().toISOString(),
-          })
-          .eq('account_id', accountId);
+      if (planError || !plan) {
+        console.error('[StripeWebhook] Failed to fetch plan details:', planError);
+        throw new Error(`Plan not found: ${newTier}`);
       }
 
-      console.log(`[StripeWebhook] Upgraded account ${accountId} to ${newTier}`);
+      const creditsQuota = plan.credits_per_month;
+      const lightQuota = parseInt(plan.features?.light_analyses || '0', 10);
+
+      // Reset balances to new tier limits
+      const { error: balanceError } = await supabase
+        .from('balances')
+        .update({
+          credit_balance: creditsQuota,
+          light_analyses_balance: lightQuota,
+          last_transaction_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('account_id', accountId);
+
+      if (balanceError) {
+        console.error('[StripeWebhook] Failed to update balances:', balanceError);
+        throw balanceError;
+      }
+
+      console.log('[StripeWebhook] Balances updated', {
+        account_id: accountId,
+        credit_balance: creditsQuota,
+        light_analyses_balance: lightQuota,
+      });
+
+      console.log(`[StripeWebhook] ✅ Upgraded account ${accountId} to ${newTier}`);
     }
   }
 
@@ -241,6 +292,16 @@ async function handleInvoicePaymentSucceeded(data: StripeWebhookMessage, env: En
         updated_at: new Date().toISOString()
       })
       .eq('account_id', accountId);
+
+    // Update subscription period dates
+    await supabase
+      .from('subscriptions')
+      .update({
+        current_period_start: new Date().toISOString(),
+        current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('stripe_subscription_id', subscriptionId);
 
     console.log(
       `[StripeWebhook] Reset balances for ${accountId} (${subscription.plan_type}): ` +
