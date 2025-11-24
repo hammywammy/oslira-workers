@@ -8,6 +8,7 @@ import { ANALYSIS_RATE_LIMITS, API_RATE_LIMITS } from '@/config/rate-limits.conf
 import {
   analyzeInstagramLead,
   getAnalysisProgress,
+  streamAnalysisProgress,
   cancelAnalysis,
   getAnalysisResult,
   getActiveAnalyses
@@ -24,7 +25,11 @@ import {
  */
 
 export function registerAnalysisRoutes(app: Hono<{ Bindings: Env }>) {
-  
+
+  // SSE stream endpoint - MUST be registered BEFORE auth middleware
+  // (runId serves as implicit authentication)
+  app.get('/api/analysis/:runId/stream', streamAnalysisProgress);
+
   // All analysis routes require authentication
   app.use('/api/leads/analyze', authMiddleware);
   app.use('/api/analysis/*', authMiddleware);
