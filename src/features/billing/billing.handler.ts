@@ -58,7 +58,9 @@ export async function getSubscription(c: Context<{ Bindings: Env }>) {
       tier: subscription.plan_type,
       status: subscription.status,
       stripeSubscriptionId: subscription.stripe_subscription_id,
-      stripeCustomerId: subscription.stripe_customer_id,
+      stripeCustomerId: c.env.APP_ENV === 'production'
+        ? subscription.stripe_customer_id_live
+        : subscription.stripe_customer_id_test,
       currentPeriodStart: subscription.current_period_start,
       currentPeriodEnd: subscription.current_period_end,
       creditsRemaining: balance?.credit_balance ?? 0,
@@ -88,10 +90,14 @@ export async function createUpgradeCheckout(c: Context<{ Bindings: Env }>) {
 
     const supabase = await SupabaseClientFactory.createAdminClient(c.env);
 
+    // Determine environment-specific customer ID column
+    const isProduction = c.env.APP_ENV === 'production';
+    const customerIdColumn = isProduction ? 'stripe_customer_id_live' : 'stripe_customer_id_test';
+
     // Get current subscription
     const { data: subscription, error: subError } = await supabase
       .from('subscriptions')
-      .select('plan_type, stripe_customer_id')
+      .select(`plan_type, stripe_customer_id_test, stripe_customer_id_live`)
       .eq('account_id', accountId)
       .single();
 
@@ -113,10 +119,9 @@ export async function createUpgradeCheckout(c: Context<{ Bindings: Env }>) {
     }
 
     // Get environment-specific customer ID
-    const isProduction = c.env.APP_ENV === 'production';
-    const customerIdColumn = isProduction ? 'stripe_customer_id_live' : 'stripe_customer_id_test';
-
-    let stripeCustomerId = subscription.stripe_customer_id;
+    let stripeCustomerId = isProduction
+      ? subscription.stripe_customer_id_live
+      : subscription.stripe_customer_id_test;
 
     if (!stripeCustomerId) {
       const { data: account } = await supabase
