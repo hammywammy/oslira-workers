@@ -25,13 +25,14 @@ export class BusinessContextWorkflow extends WorkflowEntrypoint<Env, BusinessCon
       const secrets = await step.do('fetch_secrets', async () => {
         await this.updateProgress(progressDO, 5, 'Loading configuration');
 
-        const [openaiKey, claudeKey] = await Promise.all([
+        const [openaiKey, claudeKey, aiGatewayToken] = await Promise.all([
           getSecret('OPENAI_API_KEY', this.env, this.env.APP_ENV),
-          getSecret('ANTHROPIC_API_KEY', this.env, this.env.APP_ENV)
+          getSecret('ANTHROPIC_API_KEY', this.env, this.env.APP_ENV),
+          getSecret('CLOUDFLARE_AI_GATEWAY_TOKEN', this.env, this.env.APP_ENV)
         ]);
 
         await this.updateProgress(progressDO, 10, 'Configuration loaded');
-        return { openaiKey, claudeKey };
+        return { openaiKey, claudeKey, aiGatewayToken };
       });
 
       // =========================================================================
@@ -41,7 +42,7 @@ export class BusinessContextWorkflow extends WorkflowEntrypoint<Env, BusinessCon
       await step.do('generate_ai_content', async () => {
         await this.updateProgress(progressDO, 15, 'Generating business tagline');
 
-        const service = new OnboardingService(this.env, secrets.openaiKey, secrets.claudeKey);
+        const service = new OnboardingService(this.env, secrets.openaiKey, secrets.claudeKey, secrets.aiGatewayToken);
         contextResult = await service.generateBusinessContext(params.user_inputs);
 
         await this.updateProgress(progressDO, 60, 'AI generation complete');
@@ -154,15 +155,19 @@ await step.do('link_stripe_to_subscription', async () => {
 
   try {
     const supabase = await SupabaseClientFactory.createAdminClient(this.env);
-    
-    // Get account's stripe_customer_id
+
+    const isProduction = this.env.APP_ENV === 'production';
+    const customerIdColumn = isProduction ? 'stripe_customer_id_live' : 'stripe_customer_id_test';
+
     const { data: account, error: accountError } = await supabase
       .from('accounts')
-      .select('stripe_customer_id')
+      .select(`${customerIdColumn}, stripe_customer_id`)
       .eq('id', params.account_id)
       .single();
 
-    if (accountError || !account?.stripe_customer_id) {
+    const stripeCustomerId = account?.[customerIdColumn] || account?.stripe_customer_id;
+
+    if (accountError || !stripeCustomerId) {
       console.warn('[Step5] ⚠ No stripe_customer_id found - skipping subscription link', {
         account_id: params.account_id,
         has_account: !!account,
@@ -171,36 +176,40 @@ await step.do('link_stripe_to_subscription', async () => {
       return; // Non-fatal - continue workflow
     }
 
-    // Update subscription with stripe_customer_id
+    // Update subscription with environment-specific column
+    const subscriptionUpdate: any = { stripe_customer_id: stripeCustomerId };
+    if (isProduction) {
+      subscriptionUpdate.stripe_customer_id_live = stripeCustomerId;
+    } else {
+      subscriptionUpdate.stripe_customer_id_test = stripeCustomerId;
+    }
+
     const { error: updateError } = await supabase
       .from('subscriptions')
-      .update({
-        stripe_customer_id: account.stripe_customer_id
-      })
-      .eq('account_id', params.account_id)
-      .is('stripe_customer_id', null); // Only update if not already set
+      .update(subscriptionUpdate)
+      .eq('account_id', params.account_id);
 
     if (updateError) {
       console.error('[Step5] ⚠ Failed to update subscription with stripe_customer_id', {
         error_code: updateError.code,
         error_message: updateError.message,
         account_id: params.account_id,
-        stripe_customer_id: account.stripe_customer_id
+        stripe_customer_id: stripeCustomerId
       });
       // Non-fatal - continue workflow
     } else {
       console.log('[Step5] ✓ Subscription linked to Stripe customer', {
         account_id: params.account_id,
-        stripe_customer_id: account.stripe_customer_id
+        stripe_customer_id: stripeCustomerId
       });
     }
 
     // Also update Stripe customer metadata with business context
     const { StripeService } = await import('@/infrastructure/billing/stripe.service');
     const stripeService = new StripeService(this.env);
-    
+
     await stripeService.updateCustomerMetadata({
-      customer_id: account.stripe_customer_id,
+      customer_id: stripeCustomerId,
       metadata: {
         business_profile_id: businessProfileId,
         onboarding_completed: 'true',

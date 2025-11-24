@@ -130,7 +130,8 @@ export function registerInfrastructureTests(app: Hono<{ Bindings: Env }>) {
     try {
       const openaiKey = await getApiKey('OPENAI_API_KEY', c.env, c.env.APP_ENV);
       const claudeKey = await getApiKey('ANTHROPIC_API_KEY', c.env, c.env.APP_ENV);
-      const aiClient = new AIGatewayClient(c.env, openaiKey, claudeKey);
+      const aiGatewayToken = await getApiKey('CLOUDFLARE_AI_GATEWAY_TOKEN', c.env, c.env.APP_ENV);
+      const aiClient = new AIGatewayClient(c.env, openaiKey, claudeKey, aiGatewayToken);
 
       const response = await aiClient.call({
         model: 'gpt-5-nano',
