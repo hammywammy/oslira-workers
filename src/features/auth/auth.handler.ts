@@ -213,10 +213,13 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
           account_id: accountData.account_id
         });
 
-        // Save stripe_customer_id to accounts table
+        // Save stripe_customer_id to accounts table (environment-specific column)
+        const isProduction = c.env.APP_ENV === 'production';
+        const columnName = isProduction ? 'stripe_customer_id_live' : 'stripe_customer_id_test';
+
         const { error: updateError } = await supabase
           .from('accounts')
-          .update({ stripe_customer_id: stripeCustomerId })
+          .update({ [columnName]: stripeCustomerId })
           .eq('id', accountData.account_id);
 
         if (updateError) {

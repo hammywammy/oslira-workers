@@ -145,8 +145,7 @@ export class StripeService {
         await supabase
           .from('accounts')
           .update({
-            [columnName]: customer.id,
-            stripe_customer_id: customer.id // Keep for backwards compatibility
+            [columnName]: customer.id
           })
           .eq('id', input.account_id);
 
@@ -189,13 +188,11 @@ export class StripeService {
       const isProduction = this.env.APP_ENV === 'production';
       const columnName = isProduction ? 'stripe_customer_id_live' : 'stripe_customer_id_test';
 
-      // Also keep old column for backwards compatibility during migration
       const supabase = await SupabaseClientFactory.createAdminClient(this.env);
       await supabase
         .from('accounts')
         .update({
-          [columnName]: customer.id,
-          stripe_customer_id: customer.id // Keep for backwards compatibility
+          [columnName]: customer.id
         })
         .eq('id', input.account_id);
 
