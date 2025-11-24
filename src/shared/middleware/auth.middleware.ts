@@ -57,7 +57,7 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) 
 const path = c.req.path;
 const isAuthEndpoint = path.includes('/api/auth/');
 const isOnboardingEndpoint = path.includes('/api/onboarding/');
-const isBusinessEndpoint = path.includes('/api/business/'); // ✅ ADDED: Allow business endpoints during onboarding
+const isBusinessEndpoint = path.startsWith('/api/business/');
 
 console.log(`[AUTH-TRACE-506][${Date.now()}] AuthMiddleware.onboardingCheck: Checking onboarding status {path: '${path}', isAuthEndpoint: ${isAuthEndpoint}, isOnboardingEndpoint: ${isOnboardingEndpoint}, isBusinessEndpoint: ${isBusinessEndpoint}, onboardingCompleted: ${payload.onboardingCompleted}}`);
 
