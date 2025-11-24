@@ -10,10 +10,10 @@
 import type { Context } from 'hono';
 import type { Env } from '@/shared/types/env.types';
 import type { BusinessContextQueueMessage } from '@/shared/types/business-context.types';
-import { 
-  GenerateContextRequestSchema, 
+import {
+  GenerateContextRequestSchema,
   GetProgressParamsSchema,
-  transformToWorkflowParams 
+  transformToWorkflowParams
 } from './onboarding.schemas';
 import { getAuthContext } from '@/shared/utils/auth.util';
 import { validateBody } from '@/shared/utils/validation.util';
@@ -175,5 +175,55 @@ export async function getGenerationResult(c: Context<{ Bindings: Env }>) {
   } catch (error: any) {
     console.error('[GetGenerationResult] Error:', error);
     return errorResponse(c, 'Failed to get result', 'RESULT_ERROR', 500);
+  }
+}
+
+/**
+ * GET /api/business/generate-context/:runId/stream
+ * Stream generation progress via Server-Sent Events (SSE)
+ *
+ * Real-time alternative to polling /progress endpoint.
+ * Automatically closes when generation completes or fails.
+ */
+export async function streamGenerationProgress(c: Context<{ Bindings: Env }>) {
+  try {
+    const auth = getAuthContext(c);
+    const runId = c.req.param('runId');
+
+    // Validate runId format
+    validateBody(GetProgressParamsSchema, { runId });
+
+    console.log('[StreamGenerationProgress] Starting SSE stream:', runId);
+
+    // Connect to Durable Object's SSE stream endpoint
+    const progressId = c.env.BUSINESS_CONTEXT_PROGRESS.idFromName(runId);
+    const progressDO = c.env.BUSINESS_CONTEXT_PROGRESS.get(progressId);
+
+    // Fetch the SSE stream from Durable Object
+    const doResponse = await progressDO.fetch('http://do/stream');
+
+    if (!doResponse.ok || !doResponse.body) {
+      console.error('[StreamGenerationProgress] Failed to connect to DO stream');
+      return errorResponse(c, 'Failed to establish stream', 'STREAM_ERROR', 500);
+    }
+
+    // Return the DO's SSE stream directly to the client
+    return new Response(doResponse.body, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no'
+      }
+    });
+
+  } catch (error: any) {
+    console.error('[StreamGenerationProgress] Error:', error);
+
+    if (error.name === 'ZodError') {
+      return errorResponse(c, 'Invalid run ID', 'VALIDATION_ERROR', 400);
+    }
+
+    return errorResponse(c, 'Failed to stream progress', 'STREAM_ERROR', 500);
   }
 }

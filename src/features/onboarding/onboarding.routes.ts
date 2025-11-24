@@ -7,7 +7,8 @@ import { rateLimitMiddleware } from '@/shared/middleware/rate-limit.middleware';
 import {
   generateBusinessContext,
   getGenerationProgress,
-  getGenerationResult
+  getGenerationResult,
+  streamGenerationProgress
 } from './onboarding.handler';
 
 /**
@@ -46,6 +47,13 @@ export function registerOnboardingRoutes(app: Hono<{ Bindings: Env }>) {
    * Poll this endpoint to track status
    */
   app.get('/api/business/generate-context/:runId/progress', getGenerationProgress);
+
+  /**
+   * GET /api/business/generate-context/:runId/stream
+   * Stream generation progress via Server-Sent Events (SSE)
+   * Real-time alternative to polling - automatically closes on completion
+   */
+  app.get('/api/business/generate-context/:runId/stream', streamGenerationProgress);
 
   /**
    * GET /api/business/generate-context/:runId/result
