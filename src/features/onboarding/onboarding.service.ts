@@ -83,9 +83,26 @@ export class OnboardingService {
         model: 'gpt-5-mini',
         system_prompt: 'You write punchy, memorable one-liners for businesses. Maximum 140 characters. No fluff.',
         user_prompt: this.buildOneLinerPrompt(data),
-        max_tokens: 1500
+        max_tokens: 2000
       });
-      
+
+      // Validate and sanitize the one-liner response
+      let oneLiner = (result.content || '').trim();
+
+      // Check for empty or invalid response
+      if (!oneLiner || oneLiner.length === 0) {
+        console.warn('[OnboardingService] One-liner generation returned empty, using fallback');
+        oneLiner = 'Please provide more specific business details';
+      }
+
+      // Truncate if somehow over 140 chars
+      if (oneLiner.length > 140) {
+        console.warn('[OnboardingService] One-liner exceeded 140 chars, truncating');
+        oneLiner = oneLiner.substring(0, 137) + '...';
+      }
+
+      result.content = oneLiner;
+
       console.log(`[OnboardingService] One-liner SUCCESS`);
       return result;
       
@@ -138,7 +155,11 @@ export class OnboardingService {
 - No jargon or buzzwords
 - Focus on value delivered
 
-Create a ONE-LINE tagline.`;
+CRITICAL INSTRUCTIONS:
+- Output ONLY the final one-liner tagline (max 140 characters)
+- No explanations, alternatives, preamble, or reasoning
+- No quotes around the output
+- If the provided business information is too vague or lacks actionable detail, return exactly: "Please provide more specific business details"`;
   }
 
   private buildSummaryPrompt(data: OnboardingFormData): string {
