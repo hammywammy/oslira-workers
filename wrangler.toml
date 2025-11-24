@@ -136,7 +136,7 @@ name = "oslira-workers-staging"
 APP_ENV = "staging"
 FRONTEND_URL = "https://staging-app.oslira.com"
 CLOUDFLARE_ACCOUNT_ID = "ec3a04af3fca5fbb10ec831616e63cfc"
-AI_GATEWAY_NAME = "oslira-gateway"
+AI_GATEWAY_NAME = "oslira-gateway-staging"
 
 # ===========================
 # STAGING: CUSTOM DOMAIN
