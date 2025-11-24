@@ -210,64 +210,91 @@ export async function createUpgradeCheckout(c: Context<{ Bindings: Env }>) {
  *
  * Authentication: Stripe signature verification (no auth middleware)
  * Rate limit: WEBHOOK_RATE_LIMITS.STRIPE (100/min)
+ *
+ * CRITICAL: Uses constructEventAsync() for Cloudflare Workers compatibility
  */
-export async function handleStripeWebhook(c: Context) {
+export async function handleStripeWebhook(c: Context<{ Bindings: Env }>) {
   console.log('[StripeWebhook] Webhook received');
 
-  const stripeKey = await getSecret('STRIPE_SECRET_KEY', c.env, c.env.APP_ENV);
-  const webhookSecret = await getSecret('STRIPE_WEBHOOK_SECRET', c.env, c.env.APP_ENV);
-
-  const stripe = new Stripe(stripeKey, { apiVersion: '2024-12-18.acacia' });
-
-  // Verify signature
-  const signature = c.req.header('stripe-signature');
-  if (!signature) {
-    console.error('[StripeWebhook] Missing stripe-signature header');
-    return c.json({ error: 'Missing signature' }, 400);
-  }
-
-  let event: Stripe.Event;
-
   try {
+    // Fetch secrets
+    const stripeKey = await getSecret('STRIPE_SECRET_KEY', c.env, c.env.APP_ENV);
+    const webhookSecret = await getSecret('STRIPE_WEBHOOK_SECRET', c.env, c.env.APP_ENV);
+
+    const stripe = new Stripe(stripeKey, {
+      apiVersion: '2024-12-18.acacia'
+    });
+
+    // Get signature header
+    const signature = c.req.header('stripe-signature');
+    if (!signature) {
+      console.error('[StripeWebhook] Missing stripe-signature header');
+      return c.json({ error: 'Missing signature' }, 400);
+    }
+
+    // Get raw body (Stripe needs exact bytes for signature verification)
     const body = await c.req.text();
-    event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
-  } catch (err: any) {
-    console.error('[StripeWebhook] Signature verification failed:', err.message);
-    return c.json({ error: 'Invalid signature' }, 400);
-  }
 
-  console.log('[StripeWebhook] Event verified:', {
-    type: event.type,
-    id: event.id,
-  });
+    // Verify signature - USE ASYNC VERSION FOR CLOUDFLARE WORKERS
+    let event: Stripe.Event;
+    try {
+      event = await stripe.webhooks.constructEventAsync(
+        body,
+        signature,
+        webhookSecret
+      );
+    } catch (err: any) {
+      console.error('[StripeWebhook] Signature verification failed:', err.message);
+      return c.json({ error: 'Invalid signature' }, 400);
+    }
 
-  // Extract metadata
-  const eventObject = event.data.object as any;
-  const accountId = eventObject.metadata?.account_id || null;
-  const customerId = eventObject.customer || null;
+    console.log('[StripeWebhook] ✓ Event verified:', {
+      type: event.type,
+      id: event.id,
+    });
 
-  // Queue event for async processing
-  try {
-    await c.env.STRIPE_WEBHOOK_QUEUE.send({
-      event_id: event.id,
+    // Extract metadata
+    const eventObject = event.data.object as any;
+    const accountId = eventObject.metadata?.account_id || null;
+    const customerId = eventObject.customer || null;
+
+    console.log('[StripeWebhook] Event details:', {
       event_type: event.type,
+      account_id: accountId,
       customer_id: customerId,
-      account_id: accountId,
-      payload: eventObject,
-      received_at: new Date().toISOString(),
+      mode: eventObject.mode
     });
 
-    console.log('[StripeWebhook] Event queued:', {
-      event_id: event.id,
-      event_type: event.type,
-      account_id: accountId,
+    // Queue event for async processing
+    try {
+      await c.env.STRIPE_WEBHOOK_QUEUE.send({
+        event_id: event.id,
+        event_type: event.type,
+        customer_id: customerId,
+        account_id: accountId,
+        payload: eventObject,
+        received_at: new Date().toISOString(),
+      });
+
+      console.log('[StripeWebhook] ✓ Event queued for processing:', {
+        event_id: event.id,
+        event_type: event.type,
+        account_id: accountId,
+      });
+    } catch (queueError: any) {
+      console.error('[StripeWebhook] ✗ Queue send failed:', queueError);
+      // Return 500 so Stripe retries
+      return c.json({ error: 'Failed to queue webhook' }, 500);
+    }
+
+    // Return 200 immediately - processing happens async in queue consumer
+    return c.json({ received: true, event_id: event.id });
+
+  } catch (error: any) {
+    console.error('[StripeWebhook] ✗ Unexpected error:', {
+      error: error.message,
+      stack: error.stack?.split('\n').slice(0, 3)
     });
-  } catch (queueError: any) {
-    console.error('[StripeWebhook] Queue failed:', queueError);
-    // Return 500 so Stripe retries
-    return c.json({ error: 'Failed to queue webhook' }, 500);
+    return c.json({ error: 'Webhook processing failed' }, 500);
   }
-
-  // Return 200 immediately - processing happens async
-  return c.json({ received: true, event_id: event.id });
 }
