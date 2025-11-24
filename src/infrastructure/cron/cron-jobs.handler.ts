@@ -10,9 +10,10 @@ import { getSentryService } from '@/infrastructure/monitoring/sentry.service';
  *
  * Handles all scheduled tasks:
  * 1. Daily free plan credit reset (midnight UTC)
- * 2. Monthly credit renewal (subscriptions)
- * 3. Daily cleanup (old analyses, soft deleted records)
- * 4. Hourly failed analysis refunds
+ * 2. Daily refresh token cleanup (1 AM UTC)
+ * 3. Monthly credit renewal (subscriptions)
+ * 4. Daily cleanup (old analyses, soft deleted records)
+ * 5. Hourly failed analysis refunds
  */
 
 export class CronJobsHandler {
@@ -384,6 +385,75 @@ export class CronJobsHandler {
       throw error;
     }
   }
+
+  /**
+   * Daily refresh token cleanup (1 AM UTC)
+   * Removes revoked and expired refresh tokens to keep table clean
+   */
+  async cleanupRefreshTokens(): Promise<void> {
+    console.log('[Cron] Starting refresh token cleanup...');
+    const sentry = await getSentryService(this.env);
+
+    sentry.addBreadcrumb('Refresh token cleanup started', 'cron', 'info');
+
+    try {
+      const supabase = await SupabaseClientFactory.createAdminClient(this.env);
+
+      // Delete revoked tokens (revoked_at IS NOT NULL)
+      const { count: revokedCount, error: revokedError } = await supabase
+        .from('refresh_tokens')
+        .delete()
+        .not('revoked_at', 'is', null)
+        .select('*', { count: 'exact', head: true });
+
+      if (revokedError) {
+        console.error('[Cron] Failed to delete revoked tokens:', revokedError);
+        throw revokedError;
+      }
+
+      // Delete expired tokens (expires_at < NOW())
+      const { count: expiredCount, error: expiredError } = await supabase
+        .from('refresh_tokens')
+        .delete()
+        .lt('expires_at', new Date().toISOString())
+        .select('*', { count: 'exact', head: true });
+
+      if (expiredError) {
+        console.error('[Cron] Failed to delete expired tokens:', expiredError);
+        throw expiredError;
+      }
+
+      const totalDeleted = (revokedCount || 0) + (expiredCount || 0);
+
+      console.log('[Cron] Refresh token cleanup complete', {
+        revoked_deleted: revokedCount || 0,
+        expired_deleted: expiredCount || 0,
+        total_deleted: totalDeleted,
+      });
+
+      // Track metrics in Analytics Engine
+      if (this.env.ANALYTICS_ENGINE) {
+        this.env.ANALYTICS_ENGINE.writeDataPoint({
+          blobs: ['refresh_token_cleanup', 'success'],
+          doubles: [revokedCount || 0, expiredCount || 0],
+          indexes: [new Date().toISOString().split('T')[0]],
+        });
+      }
+
+      await sentry.captureMessage(
+        `Refresh token cleanup: ${totalDeleted} tokens deleted (${revokedCount} revoked, ${expiredCount} expired)`,
+        'info',
+        { tags: { cron_job: 'refresh_token_cleanup' } }
+      );
+
+    } catch (error: any) {
+      console.error('[Cron] Refresh token cleanup error:', error);
+      await sentry.captureException(error, {
+        tags: { cron_job: 'refresh_token_cleanup' },
+      });
+      throw error;
+    }
+  }
 }
 
 /**
@@ -400,6 +470,10 @@ export async function executeCronJob(cronExpression: string, env: Env): Promise<
     switch (cronExpression) {
       case '0 0 * * *': // Daily free plan credit reset (midnight UTC)
         await handler.resetFreePlanCredits();
+        break;
+
+      case '0 1 * * *': // Daily refresh token cleanup (1 AM UTC)
+        await handler.cleanupRefreshTokens();
         break;
 
       case '0 3 1 * *': // Monthly renewal (1st of month, 3 AM UTC)
