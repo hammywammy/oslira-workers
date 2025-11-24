@@ -3,6 +3,7 @@
 import Stripe from 'stripe';
 import type { Env } from '@/shared/types/env.types';
 import { getSecret } from '@/infrastructure/config/secrets';
+import { SupabaseClientFactory } from '@/infrastructure/database/supabase.client';
 
 /**
  * STRIPE SERVICE - PRODUCTION GRADE
@@ -122,7 +123,7 @@ export class StripeService {
         // Edge case: Old customer missing our metadata
         if (!customer.metadata?.account_id) {
           console.log('[StripeService] Updating missing metadata on existing customer');
-          
+
           await stripe.customers.update(customer.id, {
             metadata: {
               account_id: input.account_id,
@@ -135,6 +136,19 @@ export class StripeService {
 
           console.log('[StripeService] ✓ Metadata added to existing customer');
         }
+
+        // Save to environment-specific column (for existing customers too)
+        const isProduction = this.env.APP_ENV === 'production';
+        const columnName = isProduction ? 'stripe_customer_id_live' : 'stripe_customer_id_test';
+
+        const supabase = await SupabaseClientFactory.createAdminClient(this.env);
+        await supabase
+          .from('accounts')
+          .update({
+            [columnName]: customer.id,
+            stripe_customer_id: customer.id // Keep for backwards compatibility
+          })
+          .eq('id', input.account_id);
 
         return customer.id;
       }
@@ -170,6 +184,20 @@ export class StripeService {
         email: input.email,
         account_id: input.account_id
       });
+
+      // Save to environment-specific column
+      const isProduction = this.env.APP_ENV === 'production';
+      const columnName = isProduction ? 'stripe_customer_id_live' : 'stripe_customer_id_test';
+
+      // Also keep old column for backwards compatibility during migration
+      const supabase = await SupabaseClientFactory.createAdminClient(this.env);
+      await supabase
+        .from('accounts')
+        .update({
+          [columnName]: customer.id,
+          stripe_customer_id: customer.id // Keep for backwards compatibility
+        })
+        .eq('id', input.account_id);
 
       return customer.id;
 
