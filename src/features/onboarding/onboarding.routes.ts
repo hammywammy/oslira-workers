@@ -20,10 +20,22 @@ import {
  */
 
 export function registerOnboardingRoutes(app: Hono<{ Bindings: Env }>) {
-  
+
   console.log('[Routes] Registering onboarding routes');
-  
-  // All onboarding routes require authentication
+
+  /**
+   * GET /api/business/generate-context/:runId/stream
+   * Stream generation progress via Server-Sent Events (SSE)
+   * Real-time alternative to polling - automatically closes on completion
+   *
+   * NOTE: Registered BEFORE auth middleware because EventSource cannot send custom headers.
+   * Authentication is implicit via the cryptographically random runId UUID that only the
+   * authenticated user who initiated the request knows (returned from POST endpoint).
+   * This follows industry patterns used by Stripe/GitHub webhooks where the secret URL is the auth.
+   */
+  app.get('/api/business/generate-context/:runId/stream', streamGenerationProgress);
+
+  // All other onboarding routes require authentication
   app.use('/api/business/generate-context', authMiddleware);
   app.use('/api/business/generate-context/*', authMiddleware);
 
@@ -53,6 +65,6 @@ export function registerOnboardingRoutes(app: Hono<{ Bindings: Env }>) {
    * Returns full business context data
    */
   app.get('/api/business/generate-context/:runId/result', getGenerationResult);
-  
+
   console.log('[Routes] Onboarding routes registered successfully');
 }
