@@ -25,13 +25,14 @@ export class BusinessContextWorkflow extends WorkflowEntrypoint<Env, BusinessCon
       const secrets = await step.do('fetch_secrets', async () => {
         await this.updateProgress(progressDO, 5, 'Loading configuration');
 
-        const [openaiKey, claudeKey] = await Promise.all([
+        const [openaiKey, claudeKey, aiGatewayToken] = await Promise.all([
           getSecret('OPENAI_API_KEY', this.env, this.env.APP_ENV),
-          getSecret('ANTHROPIC_API_KEY', this.env, this.env.APP_ENV)
+          getSecret('ANTHROPIC_API_KEY', this.env, this.env.APP_ENV),
+          getSecret('CLOUDFLARE_AI_GATEWAY_TOKEN', this.env, this.env.APP_ENV)
         ]);
 
         await this.updateProgress(progressDO, 10, 'Configuration loaded');
-        return { openaiKey, claudeKey };
+        return { openaiKey, claudeKey, aiGatewayToken };
       });
 
       // =========================================================================
@@ -41,7 +42,7 @@ export class BusinessContextWorkflow extends WorkflowEntrypoint<Env, BusinessCon
       await step.do('generate_ai_content', async () => {
         await this.updateProgress(progressDO, 15, 'Generating business tagline');
 
-        const service = new OnboardingService(this.env, secrets.openaiKey, secrets.claudeKey);
+        const service = new OnboardingService(this.env, secrets.openaiKey, secrets.claudeKey, secrets.aiGatewayToken);
         contextResult = await service.generateBusinessContext(params.user_inputs);
 
         await this.updateProgress(progressDO, 60, 'AI generation complete');

@@ -44,9 +44,9 @@ export class AIAnalysisService {
   private promptBuilder: PromptBuilder;
   private aiClient: AIGatewayClient;
 
-  constructor(env: Env, openaiKey: string, claudeKey: string) {
+  constructor(env: Env, openaiKey: string, claudeKey: string, private aiGatewayToken: string) {
     this.promptBuilder = new PromptBuilder();
-    this.aiClient = new AIGatewayClient(env, openaiKey, claudeKey);
+    this.aiClient = new AIGatewayClient(env, openaiKey, claudeKey, aiGatewayToken);
   }
 
   /**
@@ -55,8 +55,9 @@ export class AIAnalysisService {
   static async create(env: Env): Promise<AIAnalysisService> {
     const openaiKey = await getSecret('OPENAI_API_KEY', env, env.APP_ENV);
     const claudeKey = await getSecret('ANTHROPIC_API_KEY', env, env.APP_ENV);
+    const aiGatewayToken = await getSecret('CLOUDFLARE_AI_GATEWAY_TOKEN', env, env.APP_ENV);
 
-    return new AIAnalysisService(env, openaiKey, claudeKey);
+    return new AIAnalysisService(env, openaiKey, claudeKey, aiGatewayToken);
   }
 
   // ===============================================================================

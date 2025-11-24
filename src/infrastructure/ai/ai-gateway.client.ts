@@ -71,11 +71,12 @@ export interface AIResponse {
 export class AIGatewayClient {
   private openaiBaseURL: string;
   private claudeBaseURL: string;
-  
+
   constructor(
     private env: Env,
     private openaiKey: string,
-    private claudeKey: string
+    private claudeKey: string,
+    private aiGatewayToken: string
   ) {
     this.openaiBaseURL = `https://gateway.ai.cloudflare.com/v1/${env.CLOUDFLARE_ACCOUNT_ID}/${env.AI_GATEWAY_NAME}/openai`;
     this.claudeBaseURL = `https://gateway.ai.cloudflare.com/v1/${env.CLOUDFLARE_ACCOUNT_ID}/${env.AI_GATEWAY_NAME}/anthropic`;
@@ -144,7 +145,8 @@ export class AIGatewayClient {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${this.openaiKey}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'cf-aig-authorization': `Bearer ${this.aiGatewayToken}`
         },
         body: JSON.stringify(body)
       });
@@ -272,7 +274,8 @@ export class AIGatewayClient {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${this.openaiKey}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'cf-aig-authorization': `Bearer ${this.aiGatewayToken}`
         },
         body: JSON.stringify(body)
       });
@@ -352,7 +355,8 @@ export class AIGatewayClient {
         headers: {
           'x-api-key': this.claudeKey,
           'anthropic-version': '2023-06-01',
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'cf-aig-authorization': `Bearer ${this.aiGatewayToken}`
         },
         body: JSON.stringify(body)
       });
