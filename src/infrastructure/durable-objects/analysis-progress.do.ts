@@ -55,7 +55,7 @@ export class AnalysisProgressDO extends DurableObject {
 
       // GET /stream - SSE streaming endpoint
       if (method === 'GET' && url.pathname === '/stream') {
-        console.log('[AnalysisProgressDO] SSE stream connection requested');
+        console.log('[AnalysisProgressDO] SSE stream connection requested, current connections:', this.sseConnections.size);
 
         const connectionId = crypto.randomUUID();
         let isClosed = false;
@@ -65,7 +65,7 @@ export class AnalysisProgressDO extends DurableObject {
             try {
               // Store connection
               this.sseConnections.set(connectionId, controller);
-              console.log(`[AnalysisProgressDO] SSE connection established: ${connectionId}`);
+              console.log(`[AnalysisProgressDO] SSE connection established: ${connectionId.substring(0, 8)}..., total connections: ${this.sseConnections.size}`);
 
               // Send initial connection event
               const encoder = new TextEncoder();
@@ -74,17 +74,23 @@ export class AnalysisProgressDO extends DurableObject {
               // Send current state immediately
               const currentProgress = await this.getProgress();
               if (currentProgress) {
+                console.log(`[AnalysisProgressDO] Sending initial progress to new connection: ${currentProgress.progress}% - ${currentProgress.status}`);
                 const progressEvent = `event: progress\ndata: ${JSON.stringify(currentProgress)}\n\n`;
                 controller.enqueue(encoder.encode(progressEvent));
 
                 // If already complete or failed, close stream
                 if (currentProgress.status === 'complete' || currentProgress.status === 'failed') {
+                  console.log(`[AnalysisProgressDO] Analysis already ${currentProgress.status}, closing stream immediately`);
                   const completeEvent = `event: ${currentProgress.status}\ndata: ${JSON.stringify(currentProgress)}\n\n`;
                   controller.enqueue(encoder.encode(completeEvent));
                   controller.close();
                   this.sseConnections.delete(connectionId);
                   isClosed = true;
+                } else {
+                  console.log(`[AnalysisProgressDO] Stream staying open for future updates, connections: ${this.sseConnections.size}`);
                 }
+              } else {
+                console.log('[AnalysisProgressDO] No progress state yet, stream staying open waiting for initialization');
               }
             } catch (error: any) {
               console.error(`[AnalysisProgressDO] SSE stream error: ${error.message}`);
@@ -95,7 +101,7 @@ export class AnalysisProgressDO extends DurableObject {
             }
           },
           cancel: () => {
-            console.log(`[AnalysisProgressDO] SSE connection closed: ${connectionId}`);
+            console.log(`[AnalysisProgressDO] SSE connection cancelled/closed: ${connectionId.substring(0, 8)}..., remaining: ${this.sseConnections.size - 1}`);
             this.sseConnections.delete(connectionId);
             isClosed = true;
           }
@@ -114,6 +120,12 @@ export class AnalysisProgressDO extends DurableObject {
       // POST /update - Update progress (called by workflow)
       if (method === 'POST' && url.pathname === '/update') {
         const update = await request.json();
+        console.log('[AnalysisProgressDO] Updating:', {
+          progress: update.progress,
+          step: update.current_step,
+          sseConnections: this.sseConnections.size
+        });
+
         await this.updateProgress(update);
 
         // Broadcast update to all SSE connections
@@ -122,6 +134,7 @@ export class AnalysisProgressDO extends DurableObject {
           this.broadcastToSSE(currentProgress);
         }
 
+        console.log('[AnalysisProgressDO] ✓ Update complete');
         return Response.json({ success: true });
       }
 
@@ -140,6 +153,9 @@ export class AnalysisProgressDO extends DurableObject {
 
       // POST /complete - Mark as complete (called by workflow)
       if (method === 'POST' && url.pathname === '/complete') {
+        console.log('[AnalysisProgressDO] ========== COMPLETE ENDPOINT START ==========');
+        console.log('[AnalysisProgressDO] SSE connections before complete:', this.sseConnections.size);
+
         const result = await request.json();
         await this.completeAnalysis(result);
 
@@ -149,13 +165,17 @@ export class AnalysisProgressDO extends DurableObject {
           this.broadcastToSSE(currentProgress, 'complete');
         }
 
+        console.log('[AnalysisProgressDO] ========== COMPLETE ENDPOINT SUCCESS ==========');
         return Response.json({ success: true });
       }
 
       // POST /fail - Mark as failed (called by workflow)
       if (method === 'POST' && url.pathname === '/fail') {
-        const error = await request.json();
-        await this.failAnalysis(error.message);
+        const errorBody = await request.json();
+        console.log('[AnalysisProgressDO] Marking failed:', errorBody.message);
+        console.log('[AnalysisProgressDO] SSE connections before fail:', this.sseConnections.size);
+
+        await this.failAnalysis(errorBody.message);
 
         // Broadcast failure to all SSE connections
         const currentProgress = await this.getProgress();
@@ -163,6 +183,7 @@ export class AnalysisProgressDO extends DurableObject {
           this.broadcastToSSE(currentProgress, 'failed');
         }
 
+        console.log('[AnalysisProgressDO] ✓ Marked failed');
         return Response.json({ success: true });
       }
 
@@ -342,8 +363,11 @@ export class AnalysisProgressDO extends DurableObject {
     eventType: 'progress' | 'complete' | 'failed' | 'cancelled' = 'progress'
   ): void {
     if (this.sseConnections.size === 0) {
+      console.log(`[AnalysisProgressDO] broadcastToSSE: No SSE connections to broadcast to (progress: ${progress.progress}%, status: ${progress.status})`);
       return;
     }
+
+    console.log(`[AnalysisProgressDO] Broadcasting ${eventType} to ${this.sseConnections.size} SSE connections (progress: ${progress.progress}%)`);
 
     const encoder = new TextEncoder();
     const event = `event: ${eventType}\ndata: ${JSON.stringify(progress)}\n\n`;
@@ -354,6 +378,7 @@ export class AnalysisProgressDO extends DurableObject {
     this.sseConnections.forEach((controller, connectionId) => {
       try {
         controller.enqueue(encoded);
+        console.log(`[AnalysisProgressDO] ✓ Sent ${eventType} event to connection ${connectionId.substring(0, 8)}...`);
 
         // Close connection if complete or failed
         if (eventType === 'complete' || eventType === 'failed' || eventType === 'cancelled') {
@@ -370,7 +395,7 @@ export class AnalysisProgressDO extends DurableObject {
     connectionsToRemove.forEach(id => this.sseConnections.delete(id));
 
     if (connectionsToRemove.length > 0) {
-      console.log(`[AnalysisProgressDO] Cleaned up ${connectionsToRemove.length} SSE connections`);
+      console.log(`[AnalysisProgressDO] Cleaned up ${connectionsToRemove.length} SSE connections, ${this.sseConnections.size} remaining`);
     }
   }
 
