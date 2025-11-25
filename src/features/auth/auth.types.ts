@@ -152,3 +152,39 @@ export interface AuthContext {
   email: string;
   onboardingCompleted: boolean;
 }
+
+/**
+ * BOOTSTRAP RESPONSE
+ * Returned from GET /api/auth/bootstrap
+ * Single source of truth for all user initialization data
+ */
+export interface BootstrapResponse {
+  user: {
+    id: string;
+    email: string;
+    full_name: string;
+    avatar_url: string | null;
+    onboarding_completed: boolean;
+  };
+  account: {
+    id: string;
+    name: string;
+  };
+  subscription: {
+    id: string;
+    tier: 'free' | 'growth' | 'pro' | 'agency' | 'enterprise';
+    status: 'active' | 'canceled' | 'past_due';
+    current_period_start: string;
+    current_period_end: string;
+    stripe_subscription_id: string | null;
+    stripe_customer_id: string | null;
+  } | null;
+  balances: {
+    account_id: string;
+    credit_balance: number;
+    light_analyses_balance: number;
+    last_transaction_at: string | null;
+    created_at: string;
+    updated_at: string;
+  };
+}
