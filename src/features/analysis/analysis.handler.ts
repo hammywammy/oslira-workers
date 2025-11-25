@@ -261,6 +261,10 @@ export async function getAnalysisProgress(c: Context<{ Bindings: Env }>) {
  * Real-time alternative to polling /progress endpoint.
  * Automatically closes when analysis completes or fails.
  *
+ * ARCHITECTURE: Creates its own SSE stream with built-in heartbeat,
+ * polling the DO for updates. This is more robust than forwarding the
+ * DO's stream directly, as it maintains keep-alive during long operations.
+ *
  * NOTE: No authentication required - the cryptographically random runId
  * serves as implicit authentication (only the user who initiated the request knows it).
  */
@@ -271,22 +275,129 @@ export async function streamAnalysisProgress(c: Context<{ Bindings: Env }>) {
     // Validate runId format
     validateBody(GetProgressParamsSchema, { runId });
 
-    console.log('[StreamAnalysisProgress] Starting SSE stream:', runId);
+    console.log('[SSE] Starting stream:', runId);
 
-    // Connect to Durable Object's SSE stream endpoint
     const progressId = c.env.ANALYSIS_PROGRESS.idFromName(runId);
     const progressDO = c.env.ANALYSIS_PROGRESS.get(progressId);
 
-    // Fetch the SSE stream from Durable Object
-    const doResponse = await progressDO.fetch('http://do/stream');
+    // Track stream state
+    let isStreamClosed = false;
+    let lastProgress = -1;
+    let lastStatus = '';
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
+    let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 
-    if (!doResponse.ok || !doResponse.body) {
-      console.error('[StreamAnalysisProgress] Failed to connect to DO stream');
-      return errorResponse(c, 'Failed to establish stream', 'STREAM_ERROR', 500);
-    }
+    const encoder = new TextEncoder();
 
-    // Return the DO's SSE stream directly to the client
-    return new Response(doResponse.body, {
+    // Create our own SSE stream with heartbeat
+    const stream = new ReadableStream({
+      start: async (controller) => {
+        // Helper to send SSE event
+        const sendEvent = (eventType: string, data: object) => {
+          if (isStreamClosed) return;
+          try {
+            const event = `event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
+            controller.enqueue(encoder.encode(event));
+          } catch (e) {
+            // Stream might be closed
+          }
+        };
+
+        // Helper to send heartbeat comment (keeps connection alive)
+        const sendHeartbeat = () => {
+          if (isStreamClosed) return;
+          try {
+            controller.enqueue(encoder.encode(': heartbeat\n\n'));
+          } catch (e) {
+            // Stream might be closed
+          }
+        };
+
+        // Initial SSE comment to establish stream
+        controller.enqueue(encoder.encode(': stream-start\n\n'));
+
+        // Fetch initial state
+        try {
+          const response = await progressDO.fetch('http://do/progress');
+          if (response.ok) {
+            const progress = await response.json() as { status: string; progress: number } | null;
+            if (progress) {
+              lastProgress = progress.progress;
+              lastStatus = progress.status;
+
+              const eventType = progress.status === 'pending' ? 'ready' : 'progress';
+              sendEvent(eventType, progress);
+              console.log(`[SSE] Initial state: ${progress.status} ${progress.progress}%`);
+
+              // If already terminal, close stream
+              if (progress.status === 'complete' || progress.status === 'failed' || progress.status === 'cancelled') {
+                sendEvent(progress.status, progress);
+                controller.close();
+                isStreamClosed = true;
+                return;
+              }
+            }
+          }
+        } catch (e) {
+          console.error('[SSE] Failed to fetch initial state:', e);
+        }
+
+        // Poll for updates every second
+        pollInterval = setInterval(async () => {
+          if (isStreamClosed) {
+            if (pollInterval) clearInterval(pollInterval);
+            return;
+          }
+
+          try {
+            const response = await progressDO.fetch('http://do/progress');
+            if (!response.ok) return;
+
+            const progress = await response.json() as { status: string; progress: number } | null;
+            if (!progress) return;
+
+            // Only send if progress or status changed
+            if (progress.progress !== lastProgress || progress.status !== lastStatus) {
+              lastProgress = progress.progress;
+              lastStatus = progress.status;
+
+              sendEvent('progress', progress);
+
+              // If terminal state, send final event and close
+              if (progress.status === 'complete' || progress.status === 'failed' || progress.status === 'cancelled') {
+                sendEvent(progress.status, progress);
+                console.log(`[SSE] Terminal state: ${progress.status}`);
+
+                // Clean up intervals
+                if (pollInterval) clearInterval(pollInterval);
+                if (heartbeatInterval) clearInterval(heartbeatInterval);
+                pollInterval = null;
+                heartbeatInterval = null;
+
+                controller.close();
+                isStreamClosed = true;
+              }
+            }
+          } catch (e) {
+            // Ignore polling errors, will retry next interval
+          }
+        }, 1000);
+
+        // Send heartbeat every 15 seconds to keep connection alive
+        heartbeatInterval = setInterval(() => {
+          sendHeartbeat();
+        }, 15000);
+      },
+
+      cancel: () => {
+        console.log('[SSE] Client disconnected:', runId);
+        isStreamClosed = true;
+        if (pollInterval) clearInterval(pollInterval);
+        if (heartbeatInterval) clearInterval(heartbeatInterval);
+      }
+    });
+
+    return new Response(stream, {
       headers: {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
@@ -296,7 +407,7 @@ export async function streamAnalysisProgress(c: Context<{ Bindings: Env }>) {
     });
 
   } catch (error: any) {
-    console.error('[StreamAnalysisProgress] Error:', error);
+    console.error('[SSE] Error:', error);
 
     if (error.name === 'ZodError') {
       return errorResponse(c, 'Invalid run ID', 'VALIDATION_ERROR', 400);
