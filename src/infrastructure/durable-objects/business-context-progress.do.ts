@@ -212,6 +212,16 @@ export class BusinessContextProgressDO extends DurableObject {
           // Broadcast completion to all WebSocket clients
           this.broadcastProgress(verified, 'complete');
 
+          // CRITICAL: Close all WebSocket connections after broadcasting completion
+          const sockets = this.ctx.getWebSockets();
+          sockets.forEach(ws => {
+            try {
+              ws.close(1000, 'Generation complete');
+            } catch (error: any) {
+              console.error('[BusinessContextProgressDO] Error closing WebSocket:', error.message);
+            }
+          });
+
           console.log('[BusinessContextProgressDO] ========== COMPLETE ENDPOINT SUCCESS ==========');
           return Response.json({
             success: true,
@@ -474,6 +484,16 @@ export class BusinessContextProgressDO extends DurableObject {
 
       // Broadcast completion to all WebSocket clients
       this.broadcastProgress(completed, 'complete');
+
+      // CRITICAL: Close all WebSocket connections after broadcasting completion
+      const sockets = this.ctx.getWebSockets();
+      sockets.forEach(ws => {
+        try {
+          ws.close(1000, 'Generation complete');
+        } catch (error: any) {
+          console.error('[BusinessContextProgressDO] Error closing WebSocket:', error.message);
+        }
+      });
     } catch (error: any) {
       console.error('[BusinessContextProgressDO] Complete failed:', error.message);
       throw error;
@@ -504,6 +524,16 @@ export class BusinessContextProgressDO extends DurableObject {
 
       // Broadcast failure to all WebSocket clients
       this.broadcastProgress(failed, 'failed');
+
+      // CRITICAL: Close all WebSocket connections after broadcasting failure
+      const sockets = this.ctx.getWebSockets();
+      sockets.forEach(ws => {
+        try {
+          ws.close(1000, 'Generation failed');
+        } catch (error: any) {
+          console.error('[BusinessContextProgressDO] Error closing WebSocket:', error.message);
+        }
+      });
     } catch (error: any) {
       console.error('[BusinessContextProgressDO] Mark failed failed:', error.message);
       throw error;
