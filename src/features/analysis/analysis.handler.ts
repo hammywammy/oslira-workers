@@ -255,8 +255,60 @@ export async function getAnalysisProgress(c: Context<{ Bindings: Env }>) {
 }
 
 /**
+ * GET /api/analysis/:runId/ws
+ * WebSocket proxy to Durable Object for real-time progress updates.
+ *
+ * Uses WebSocket Hibernation API for cost efficiency.
+ * Forwards WebSocket upgrade request directly to DO.
+ *
+ * NOTE: No authentication required - the cryptographically random runId
+ * serves as implicit authentication (only the user who initiated the request knows it).
+ */
+export async function streamAnalysisProgressWS(c: Context<{ Bindings: Env }>) {
+  try {
+    const runId = c.req.param('runId');
+
+    // Validate WebSocket upgrade
+    if (c.req.header('Upgrade') !== 'websocket') {
+      return errorResponse(c, 'Expected WebSocket upgrade', 'BAD_REQUEST', 400);
+    }
+
+    // Validate runId format
+    validateBody(GetProgressParamsSchema, { runId });
+
+    console.log('[WebSocket] Proxying to DO:', runId);
+
+    // Get DO stub
+    const progressId = c.env.ANALYSIS_PROGRESS.idFromName(runId);
+    const progressDO = c.env.ANALYSIS_PROGRESS.get(progressId);
+
+    // Build DO URL with runId parameter
+    const url = new URL(c.req.url);
+    url.pathname = '/ws';
+    url.searchParams.set('runId', runId);
+
+    // Forward upgrade request to DO
+    return await progressDO.fetch(url.toString(), {
+      headers: c.req.raw.headers
+    });
+
+  } catch (error: any) {
+    console.error('[WebSocket] Proxy error:', error);
+
+    if (error.name === 'ZodError') {
+      return errorResponse(c, 'Invalid run ID', 'VALIDATION_ERROR', 400);
+    }
+
+    return errorResponse(c, 'WebSocket connection failed', 'WEBSOCKET_ERROR', 500);
+  }
+}
+
+/**
  * GET /api/analysis/:runId/stream
  * Stream analysis progress via Server-Sent Events (SSE)
+ *
+ * @deprecated Use streamAnalysisProgressWS (WebSocket) instead for better real-time performance.
+ * This SSE endpoint is kept for backwards compatibility but uses polling internally.
  *
  * Real-time alternative to polling /progress endpoint.
  * Automatically closes when analysis completes or fails.
