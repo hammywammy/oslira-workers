@@ -76,11 +76,17 @@ function calculateProgressPercentages(timing: TimingProfile): StepProgress[] {
 
 /**
  * Pre-calculated progress maps for each analysis type
- * Add new maps here when implementing additional analysis tiers
+ * MODULAR: Add new maps here when implementing additional analysis tiers
+ *
+ * Each analysis type gets its own progress percentages based on timing profile
  */
 export const WORKFLOW_PROGRESS: Record<AnalysisType, Map<string, StepProgress>> = {
   light: new Map(
     calculateProgressPercentages(ANALYSIS_CONFIG.light.timing)
+      .map(step => [step.step, step])
+  ),
+  deep: new Map(
+    calculateProgressPercentages(ANALYSIS_CONFIG.deep.timing)
       .map(step => [step.step, step])
   )
 };
