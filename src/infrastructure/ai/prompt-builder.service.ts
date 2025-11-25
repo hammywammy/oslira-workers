@@ -1,6 +1,7 @@
 // infrastructure/ai/prompt-builder.service.ts
 
 import type { BusinessProfile } from '@/infrastructure/database/repositories/business.repository';
+import type { AIProfileData, AIPostData } from '@/shared/types/profile.types';
 
 /**
  * PROMPT BUILDER SERVICE
@@ -10,70 +11,38 @@ import type { BusinessProfile } from '@/infrastructure/database/repositories/bus
  * - Profile data: DYNAMIC (changes per request, never cached)
  *
  * Cache savings: 90% on business context (30-40% total cost reduction)
+ *
+ * Uses unified types from @/shared/types/profile.types
  */
-
-export interface ProfileData {
-  username: string;
-  display_name: string;
-  follower_count: number;
-  following_count: number;
-  post_count: number;
-  bio: string;
-  external_url: string | null;
-  is_verified: boolean;
-  is_private: boolean;
-  is_business_account: boolean;
-  profile_pic_url: string;
-  posts: PostData[];
-}
-
-export interface PostData {
-  id: string;
-  caption: string;
-  like_count: number;
-  comment_count: number;
-  timestamp: string;
-  media_type: 'photo' | 'video' | 'carousel';
-  media_url: string;
-}
 
 export class PromptBuilder {
 
   /**
    * Build business context (CACHED - 800 tokens)
    * This section is reused across all analyses for the same business profile
+   *
+   * FIXED: Correctly maps database JSONB fields (business_context & ideal_customer_profile)
    */
   buildBusinessContext(business: BusinessProfile): string {
-    const contextPack = business.business_context_pack || {};
+    // Extract data from JSONB fields (database schema)
+    const context = business.business_context || {};
+    const icp = business.ideal_customer_profile || {};
 
     return `# BUSINESS CONTEXT (Your Client)
 
-**Company:** ${business.business_name}
-**Website:** ${business.website || 'Not provided'}
+**Company:** ${business.business_name || business.full_name}
 **One-Liner:** ${business.business_one_liner || 'Not provided'}
+**Business Summary:** ${context.business_summary || business.business_summary_generated || 'Not provided'}
 
 ## Target Audience
-${contextPack.target_audience || 'Not specified'}
+${icp.target_audience || context.target_description || 'Not specified'}
 
-## Industry & Offering
-- **Industry:** ${contextPack.industry || 'Not specified'}
-- **What We Offer:** ${contextPack.offering || 'Not specified'}
+## Communication Tone
+${icp.brand_voice || context.communication_tone || 'Professional and engaging'}
 
 ## Ideal Customer Profile (ICP)
-- **Follower Range:** ${contextPack.icp_min_followers || 0} - ${contextPack.icp_max_followers || 'unlimited'}
-- **Min Engagement Rate:** ${contextPack.icp_min_engagement_rate || 0}%
-- **Content Themes:** ${contextPack.icp_content_themes?.join(', ') || 'Any'}
-- **Geographic Focus:** ${contextPack.icp_geographic_focus || 'Global'}
-- **Industry Niche:** ${contextPack.icp_industry_niche || 'Any'}
-
-## Key Selling Points
-${contextPack.selling_points?.map((p: string, i: number) => `${i + 1}. ${p}`).join('\n') || 'Not specified'}
-
-## Brand Voice
-${contextPack.brand_voice || 'Professional and engaging'}
-
-## Outreach Goals
-${contextPack.outreach_goals || 'Build partnerships and drive conversions'}
+- **Follower Range:** ${icp.icp_min_followers || context.icp_min_followers || 0} - ${icp.icp_max_followers || context.icp_max_followers || 'unlimited'}
+- **Target Company Sizes:** ${context.target_company_sizes?.join(', ') || 'Any'}
 
 ---`;
   }
@@ -81,7 +50,7 @@ ${contextPack.outreach_goals || 'Build partnerships and drive conversions'}
   /**
    * Build profile summary (DYNAMIC - never cached)
    */
-  buildProfileSummary(profile: ProfileData): string {
+  buildProfileSummary(profile: AIProfileData): string {
     const avgLikes = this.calculateAvgLikes(profile);
     const avgComments = this.calculateAvgComments(profile);
     const postingFrequency = this.estimatePostingFrequency(profile);
@@ -114,7 +83,7 @@ ${profile.external_url || 'None'}
   /**
    * Build recent posts section (DYNAMIC - never cached)
    */
-  buildRecentPosts(profile: ProfileData, limit: number = 6): string {
+  buildRecentPosts(profile: AIProfileData, limit: number = 6): string {
     const posts = profile.posts.slice(0, limit);
 
     let postsSection = `# RECENT POSTS (Last ${posts.length})\n\n`;
@@ -140,7 +109,7 @@ ${post.caption || 'No caption'}
    * Model: gpt-5-nano (fast, cheap, 6s avg)
    * Focus: Quick fit assessment - overall_score + summary only
    */
-  buildLightAnalysisPrompt(business: BusinessProfile, profile: ProfileData): {
+  buildLightAnalysisPrompt(business: BusinessProfile, profile: AIProfileData): {
     system: string;
     user: string;
   } {
@@ -180,21 +149,21 @@ Return JSON:
   // HELPER METHODS
   // ===============================================================================
 
-  private calculateAvgLikes(profile: ProfileData): number {
+  private calculateAvgLikes(profile: AIProfileData): number {
     if (!profile.posts.length) return 0;
 
     const totalLikes = profile.posts.reduce((sum, post) => sum + post.like_count, 0);
     return Math.round(totalLikes / profile.posts.length);
   }
 
-  private calculateAvgComments(profile: ProfileData): number {
+  private calculateAvgComments(profile: AIProfileData): number {
     if (!profile.posts.length) return 0;
 
     const totalComments = profile.posts.reduce((sum, post) => sum + post.comment_count, 0);
     return Math.round(totalComments / profile.posts.length);
   }
 
-  private estimatePostingFrequency(profile: ProfileData): string {
+  private estimatePostingFrequency(profile: AIProfileData): string {
     if (profile.posts.length < 2) return 'Unknown';
 
     const oldest = new Date(profile.posts[profile.posts.length - 1].timestamp);

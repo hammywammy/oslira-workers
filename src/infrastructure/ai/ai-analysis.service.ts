@@ -2,7 +2,7 @@
 
 import type { Env } from '@/shared/types/env.types';
 import type { BusinessProfile } from '@/infrastructure/database/repositories/business.repository';
-import type { ProfileData } from './prompt-builder.service';
+import type { AIProfileData } from '@/shared/types/profile.types';
 import { PromptBuilder } from './prompt-builder.service';
 import { AIGatewayClient } from './ai-gateway.client';
 import { getSecret } from '@/infrastructure/config/secrets';
@@ -66,10 +66,58 @@ export class AIAnalysisService {
 
   async executeLightAnalysis(
     business: BusinessProfile,
-    profile: ProfileData,
+    profile: AIProfileData,
     attempt: number = 1
   ): Promise<LightAnalysisResult> {
     const prompts = this.promptBuilder.buildLightAnalysisPrompt(business, profile);
+
+    // =========================================================================
+    // COMPREHENSIVE LOGGING - Shows ALL data fed to AI
+    // =========================================================================
+    console.log('═══════════════════════════════════════════════════════════════');
+    console.log('🤖 AI ANALYSIS INPUT - Full Context Preview');
+    console.log('═══════════════════════════════════════════════════════════════');
+
+    // Log business data extraction
+    const context = business.business_context || {};
+    const icp = business.ideal_customer_profile || {};
+
+    console.log('📊 BUSINESS DATA (from database):');
+    console.log('  • business_name:', business.business_name || 'MISSING');
+    console.log('  • full_name:', business.full_name || 'MISSING');
+    console.log('  • business_one_liner:', business.business_one_liner || 'MISSING');
+    console.log('  • business_summary_generated:', business.business_summary_generated || 'MISSING');
+
+    console.log('\n📦 business_context (JSONB):');
+    console.log('  • business_summary:', context.business_summary || 'MISSING');
+    console.log('  • communication_tone:', context.communication_tone || 'MISSING');
+    console.log('  • target_description:', context.target_description || 'MISSING');
+    console.log('  • icp_min_followers:', context.icp_min_followers || 'MISSING');
+    console.log('  • icp_max_followers:', context.icp_max_followers || 'MISSING');
+    console.log('  • target_company_sizes:', context.target_company_sizes || 'MISSING');
+
+    console.log('\n🎯 ideal_customer_profile (JSONB):');
+    console.log('  • target_audience:', icp.target_audience || 'MISSING');
+    console.log('  • brand_voice:', icp.brand_voice || 'MISSING');
+    console.log('  • icp_min_followers:', icp.icp_min_followers || 'MISSING');
+    console.log('  • icp_max_followers:', icp.icp_max_followers || 'MISSING');
+
+    console.log('\n📝 PROFILE DATA:');
+    console.log('  • username:', profile.username);
+    console.log('  • follower_count:', profile.follower_count.toLocaleString());
+    console.log('  • bio:', (profile.bio || 'No bio').substring(0, 100));
+    console.log('  • posts:', profile.posts.length);
+
+    console.log('\n🎨 PROMPTS SENT TO AI:');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('SYSTEM PROMPT:');
+    console.log(prompts.system);
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('USER PROMPT (first 500 chars):');
+    console.log(prompts.user.substring(0, 500) + '...');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('USER PROMPT (full length):', prompts.user.length, 'characters');
+    console.log('═══════════════════════════════════════════════════════════════\n');
 
     // Increase tokens on retry
     const maxTokens = attempt === 1 ? 800 : 1200;
@@ -89,13 +137,27 @@ export class AIAnalysisService {
         ? JSON.parse(response.content)
         : response.content;
 
-      return {
+      const result = {
         ...parsed,
         model_used: response.model_used,
         total_cost: response.usage.total_cost,
         input_tokens: response.usage.input_tokens,
         output_tokens: response.usage.output_tokens
       };
+
+      // Log AI response
+      console.log('═══════════════════════════════════════════════════════════════');
+      console.log('✅ AI ANALYSIS OUTPUT');
+      console.log('═══════════════════════════════════════════════════════════════');
+      console.log('📊 Result:');
+      console.log('  • overall_score:', result.overall_score);
+      console.log('  • summary_text:', result.summary_text);
+      console.log('  • model_used:', result.model_used);
+      console.log('  • total_cost: $' + result.total_cost.toFixed(6));
+      console.log('  • tokens:', result.input_tokens, 'in /', result.output_tokens, 'out');
+      console.log('═══════════════════════════════════════════════════════════════\n');
+
+      return result;
 
     } catch (error: any) {
       // Retry on parse error (likely truncation)

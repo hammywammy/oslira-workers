@@ -8,6 +8,7 @@ export interface BusinessProfile {
   account_id: string;
   full_name: string;
   signature_name: string;
+  business_name: string;  // Added - was missing from interface but exists in DB
   business_one_liner: string | null;
   business_summary_generated: string | null;
   business_context: any;

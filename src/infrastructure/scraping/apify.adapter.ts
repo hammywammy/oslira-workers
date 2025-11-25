@@ -90,23 +90,6 @@ export class ApifyAdapter {
     this.actorId = actorId || SCRAPER_CONFIG.actor_id;
   }
 
-  /**
-   * Scrape Instagram profile with retry logic
-   * @deprecated Use scrapeProfileWithMeta for better error handling
-   */
-  async scrapeProfile(
-    username: string,
-    postsLimit: number = 12
-  ): Promise<ProfileData> {
-    const result = await this.scrapeProfileWithMeta(username, postsLimit);
-
-    if (!result.success || !result.profile) {
-      const errorMsg = result.error?.errorDescription || result.error?.error || 'Profile not found or is private';
-      throw new Error(errorMsg);
-    }
-
-    return result.profile;
-  }
 
   /**
    * Scrape Instagram profile with metadata about errors
