@@ -102,7 +102,7 @@ export class AnalysisProgressDO extends DurableObject {
                   console.error('[AnalysisProgressDO] Heartbeat failed:', error.message);
                   if (heartbeatInterval) clearInterval(heartbeatInterval);
                 }
-              }, 15000) as unknown as number; // Every 15 seconds
+              }, 5000) as unknown as number; // Every 5 seconds
             } catch (error: any) {
               console.error(`[AnalysisProgressDO] SSE stream error: ${error.message}`);
               if (!isClosed) {
