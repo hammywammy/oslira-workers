@@ -12,6 +12,7 @@ export interface CreditBalance {
   account_id: string;
   credit_balance: number;
   light_analyses_balance: number;
+  deep_analyses_balance: number;
   last_transaction_at: string;
   created_at: string;
   updated_at: string;
@@ -173,6 +174,97 @@ export class CreditsRepository extends BaseRepository<CreditBalance> {
     description: string
   ): Promise<string> {
     return this.deductLightAnalyses(accountId, -amount, transactionType, description);
+  }
+
+  // ===============================================================================
+  // MODULAR ANALYSIS TYPE METHODS
+  // ===============================================================================
+
+  /**
+   * MODULAR: Deduct credits for any analysis type
+   * Automatically routes to the correct credit type RPC
+   */
+  async deductForAnalysis(
+    accountId: string,
+    analysisType: AnalysisType,
+    amount: number,
+    transactionType: string,
+    description: string
+  ): Promise<string> {
+    const creditType = getCreditType(analysisType);
+    const { deductRpc } = CREDIT_TYPE_RPC_MAP[creditType];
+
+    const { data, error } = await this.supabase
+      .rpc(deductRpc, {
+        p_account_id: accountId,
+        p_amount: -amount, // Negate: RPC adds p_amount, so negative = deduct
+        p_transaction_type: transactionType,
+        p_description: description
+      });
+
+    if (error) throw error;
+    return data;
+  }
+
+  /**
+   * MODULAR: Add credits for any analysis type (refunds)
+   * Automatically routes to the correct credit type RPC
+   */
+  async addForAnalysis(
+    accountId: string,
+    analysisType: AnalysisType,
+    amount: number,
+    transactionType: string,
+    description: string
+  ): Promise<string> {
+    return this.deductForAnalysis(accountId, analysisType, -amount, transactionType, description);
+  }
+
+  /**
+   * MODULAR: Check if account has sufficient balance for an analysis type
+   * Automatically routes to the correct credit type
+   */
+  async hasSufficientBalanceForAnalysis(
+    accountId: string,
+    analysisType: AnalysisType,
+    required: number
+  ): Promise<boolean> {
+    const balance = await this.getBalanceForAnalysisType(accountId, analysisType);
+    return balance >= required;
+  }
+
+  /**
+   * Deduct deep analyses (uses RPC function)
+   * Note: RPC does balance + p_amount, so we pass negative to deduct
+   */
+  async deductDeepAnalyses(
+    accountId: string,
+    amount: number,
+    transactionType: string,
+    description: string
+  ): Promise<string> {
+    const { data, error } = await this.supabase
+      .rpc('deduct_deep_analyses', {
+        p_account_id: accountId,
+        p_amount: -amount, // Negate: RPC adds p_amount, so negative = deduct
+        p_transaction_type: transactionType,
+        p_description: description
+      });
+
+    if (error) throw error;
+    return data;
+  }
+
+  /**
+   * Add deep analyses (for refunds)
+   */
+  async addDeepAnalyses(
+    accountId: string,
+    amount: number,
+    transactionType: string,
+    description: string
+  ): Promise<string> {
+    return this.deductDeepAnalyses(accountId, -amount, transactionType, description);
   }
 
   // ===============================================================================
