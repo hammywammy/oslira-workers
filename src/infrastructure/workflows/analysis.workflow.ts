@@ -92,33 +92,29 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         credits: creditsCost
       });
 
-      // Step 1: Initialize progress tracker
-      await step.do('initialize_progress', {
-        retries: { limit: 3, delay: '1 second', backoff: 'exponential' }
-      }, async () => {
+      // Step 1: Connect to pre-initialized progress tracker
+      // NOTE: DO is now initialized in the API handler BEFORE workflow starts
+      // This ensures SSE connections can establish without race conditions
+      await step.do('connect_progress', async () => {
         try {
-          console.log(`[Workflow][${params.run_id}] Initializing progress tracker`);
+          console.log(`[Workflow][${params.run_id}] Connecting to progress tracker`);
 
           const id = this.env.ANALYSIS_PROGRESS.idFromName(params.run_id);
           const progressDO = this.env.ANALYSIS_PROGRESS.get(id);
 
-          const initResponse = await progressDO.fetch('http://do/initialize', {
-            method: 'POST',
-            body: JSON.stringify({
-              run_id: params.run_id,
-              account_id: params.account_id,
-              username: params.username,
-              analysis_type: params.analysis_type
-            })
-          });
+          // Verify DO was initialized by checking for existing progress state
+          const progressResponse = await progressDO.fetch('http://do/progress');
+          const progress = await progressResponse.json();
 
-          if (!initResponse.ok) {
-            const error = await initResponse.text();
-            console.error(`[Workflow][${params.run_id}] Failed to initialize progress:`, error);
-            throw new Error(`Failed to initialize progress: ${error}`);
+          if (!progress) {
+            console.error(`[Workflow][${params.run_id}] Progress tracker not initialized!`);
+            throw new Error('Progress tracker not initialized by API handler');
           }
 
-          console.log(`[Workflow][${params.run_id}] Progress tracker initialized successfully`);
+          console.log(`[Workflow][${params.run_id}] Connected to progress tracker successfully`, {
+            status: progress.status,
+            progress: progress.progress
+          });
         } catch (error: any) {
           console.error(`[Workflow][${params.run_id}] Step 1 FAILED:`, this.serializeError(error));
           throw error;

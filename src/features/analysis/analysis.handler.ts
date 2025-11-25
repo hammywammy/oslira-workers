@@ -146,7 +146,30 @@ export async function analyzeInstagramLead(c: Context<{ Bindings: Env }>) {
       isNewLead: leadResult.is_new
     });
 
-    // Step 6: Trigger workflow
+    // Step 6a: Initialize progress DO IMMEDIATELY (before workflow)
+    // This ensures SSE connections can establish successfully with existing state
+    // CRITICAL: Prevents race condition where frontend SSE connects before DO is initialized
+    const progressId = c.env.ANALYSIS_PROGRESS.idFromName(runId);
+    const progressDO = c.env.ANALYSIS_PROGRESS.get(progressId);
+
+    try {
+      await progressDO.fetch('http://do/initialize', {
+        method: 'POST',
+        body: JSON.stringify({
+          run_id: runId,
+          account_id: auth.accountId,
+          username: input.username,
+          analysis_type: input.analysisType
+        })
+      });
+
+      console.log(`[Analyze][${requestId}] Progress tracker initialized`);
+    } catch (error: any) {
+      console.error(`[Analyze][${requestId}] Failed to initialize progress:`, error.message);
+      throw new Error('Failed to initialize progress tracker');
+    }
+
+    // Step 6b: NOW trigger workflow (workflow no longer needs to initialize DO)
     const workflowParams = {
       run_id: runId,
       account_id: auth.accountId,
