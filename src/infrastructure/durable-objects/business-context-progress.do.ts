@@ -59,16 +59,6 @@ export class BusinessContextProgressDO extends DurableObject {
       // WEBSOCKET UPGRADE HANDLER
       // =========================================================================
       if (request.headers.get('Upgrade') === 'websocket') {
-        // Check if generation already complete - reject new connections
-        const existingProgress = await this.getProgress();
-        if (existingProgress && (
-          existingProgress.status === 'complete' ||
-          existingProgress.status === 'failed'
-        )) {
-          console.log('[BusinessContextProgressDO] Rejecting WebSocket - generation already terminal:', existingProgress.status);
-          return new Response(`Generation already ${existingProgress.status}`, { status: 410 }); // 410 Gone
-        }
-
         const pair = new WebSocketPair();
         const [client, server] = Object.values(pair);
 
