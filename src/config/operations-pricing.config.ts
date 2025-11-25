@@ -21,7 +21,28 @@
 // TYPES
 // ===============================================================================
 
-export type AnalysisType = 'light';
+/**
+ * ANALYSIS TYPES
+ * Add new analysis tiers here. Each type maps to a credit type.
+ */
+export type AnalysisType = 'light' | 'deep';
+
+/**
+ * CREDIT TYPES
+ * Maps to database columns: light_analyses_balance, deep_analyses_balance
+ * Add new credit types here when expanding the credit system.
+ */
+export type CreditType = 'light_analyses' | 'deep_analyses';
+
+/**
+ * Maps each analysis type to its corresponding credit type.
+ * This allows flexible credit routing for different analysis tiers.
+ */
+export const ANALYSIS_TO_CREDIT_TYPE: Record<AnalysisType, CreditType> = {
+  light: 'light_analyses',
+  deep: 'deep_analyses'
+};
+
 export type AIProvider = 'openai' | 'anthropic';
 export type ScrapingVendor = 'apify';
 
@@ -40,6 +61,13 @@ export interface AnalysisTypeConfig {
     scraping: number;
     ai_analysis: number;
     teardown: number;
+  };
+  /** Prompt configuration */
+  prompt: {
+    /** Summary sentence range (e.g., "2-3" or "4-6") */
+    summary_sentences: string;
+    /** Maximum caption length to include per post */
+    caption_truncate_length: number;
   };
 }
 
@@ -85,6 +113,11 @@ export interface ScraperConfig {
 /**
  * Configuration for each analysis type.
  * Add new types here when implementing additional analysis tiers.
+ *
+ * MODULAR DESIGN:
+ * - Each type defines its own credit cost, AI model, and prompt config
+ * - Deep analysis = 2x summary length vs light
+ * - Future types can have completely different configurations
  */
 export const ANALYSIS_CONFIG: Record<AnalysisType, AnalysisTypeConfig> = {
   light: {
@@ -97,6 +130,26 @@ export const ANALYSIS_CONFIG: Record<AnalysisType, AnalysisTypeConfig> = {
       scraping: 7.5,   // Step 6: ~7.5 seconds average
       ai_analysis: 9,  // Step 7: ~9 seconds average
       teardown: 1      // Steps 8-11: ~1 second total
+    },
+    prompt: {
+      summary_sentences: '2-3',
+      caption_truncate_length: 200
+    }
+  },
+  deep: {
+    credit_cost: 1,    // Uses deep_analyses credits, same cost per credit
+    posts_limit: 6,    // Same posts for now, can be expanded
+    ai_model: 'gpt-5-nano',
+    ai_max_tokens: 1600, // 2x more tokens for deeper summary
+    timing: {
+      setup: 1,
+      scraping: 7.5,
+      ai_analysis: 12,   // Longer due to more detailed output
+      teardown: 1
+    },
+    prompt: {
+      summary_sentences: '4-6',    // 2x longer summary (4-6 vs 2-3)
+      caption_truncate_length: 400  // 2x more caption context
     }
   }
 };
@@ -146,6 +199,10 @@ export const AI_MODEL_PRICING: Record<string, AIModelPricing> = {
 export const SCRAPING_PRICING: Record<AnalysisType, ScrapingPricing> = {
   light: {
     fixed_cost_per_run: 0.003,  // $0.003 per light analysis scrape
+    vendor: 'apify'
+  },
+  deep: {
+    fixed_cost_per_run: 0.003,  // Same scraping cost (same posts_limit for now)
     vendor: 'apify'
   }
 };
@@ -242,6 +299,24 @@ export function getAIMaxTokens(analysisType: AnalysisType): number {
  */
 export function getAIModelPricing(model: string): AIModelPricing | null {
   return AI_MODEL_PRICING[model] || null;
+}
+
+/**
+ * Get the credit type for an analysis type
+ * Used for routing to the correct credit balance column
+ */
+export function getCreditType(analysisType: AnalysisType): CreditType {
+  return ANALYSIS_TO_CREDIT_TYPE[analysisType];
+}
+
+/**
+ * Get prompt configuration for an analysis type
+ */
+export function getPromptConfig(analysisType: AnalysisType): {
+  summary_sentences: string;
+  caption_truncate_length: number;
+} {
+  return ANALYSIS_CONFIG[analysisType].prompt;
 }
 
 /**

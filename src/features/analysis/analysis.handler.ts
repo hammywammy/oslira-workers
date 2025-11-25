@@ -11,6 +11,7 @@ import { CreditsRepository } from '@/infrastructure/database/repositories/credit
 import { AnalysisRepository } from '@/infrastructure/database/repositories/analysis.repository';
 import { LeadsRepository } from '@/infrastructure/database/repositories/leads.repository';
 import { z } from 'zod';
+import { getCreditCost, getCreditType, type AnalysisType } from '@/config/operations-pricing.config';
 
 /**
  * ASYNC ANALYSIS HANDLERS
@@ -28,7 +29,7 @@ import { z } from 'zod';
 const AnalyzeLeadSchema = z.object({
   username: z.string().min(1).max(50),
   businessProfileId: z.string().uuid(),
-  analysisType: z.enum(['light'])
+  analysisType: z.enum(['light', 'deep'])
 });
 
 const GetProgressParamsSchema = z.object({
@@ -39,9 +40,7 @@ const GetProgressParamsSchema = z.object({
 // HELPERS
 // ===============================================================================
 
-function getCreditCost(type: 'light'): number {
-  return 1;
-}
+// getCreditCost is now imported from @/config/operations-pricing.config
 
 // ===============================================================================
 // HANDLERS
@@ -62,22 +61,28 @@ export async function analyzeInstagramLead(c: Context<{ Bindings: Env }>) {
     const body = await c.req.json();
     const input = validateBody(AnalyzeLeadSchema, body);
 
-    // Step 3: Check light analyses balance BEFORE starting workflow
-    const analysisCost = getCreditCost(input.analysisType);
+    // Step 3: Check credit balance BEFORE starting workflow
+    // MODULAR: Uses analysis type to route to correct credit type
+    const analysisType = input.analysisType as AnalysisType;
+    const analysisCost = getCreditCost(analysisType);
+    const creditType = getCreditType(analysisType);
     const supabase = await SupabaseClientFactory.createAdminClient(c.env);
     const creditsRepo = new CreditsRepository(supabase);
 
-    const hasBalance = await creditsRepo.hasSufficientLightAnalyses(
+    const hasBalance = await creditsRepo.hasSufficientBalanceForAnalysis(
       auth.accountId,
+      analysisType,
       analysisCost
     );
 
     if (!hasBalance) {
-      console.warn(`[Analyze][${requestId}] Insufficient light analyses balance`, {
+      console.warn(`[Analyze][${requestId}] Insufficient ${creditType} balance`, {
         accountId: auth.accountId,
+        analysisType,
+        creditType,
         required: analysisCost
       });
-      return errorResponse(c, 'Insufficient light analyses balance', 'INSUFFICIENT_BALANCE', 402);
+      return errorResponse(c, `Insufficient ${creditType.replace('_', ' ')} balance`, 'INSUFFICIENT_BALANCE', 402);
     }
 
     // Step 3.5: Check for existing in-progress analysis BEFORE creating any records
@@ -203,7 +208,7 @@ export async function analyzeInstagramLead(c: Context<{ Bindings: Env }>) {
     });
 
     if (error.message.includes('Insufficient') && error.message.includes('balance')) {
-      return errorResponse(c, 'Insufficient light analyses balance', 'INSUFFICIENT_BALANCE', 402);
+      return errorResponse(c, error.message, 'INSUFFICIENT_BALANCE', 402);
     }
 
     if (error.message.includes('already in progress')) {

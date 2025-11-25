@@ -54,13 +54,14 @@ export interface Env {
 
 /**
  * Analysis Workflow Parameters
+ * MODULAR: Supports multiple analysis types
  */
 export interface AnalysisWorkflowParams {
   run_id: string;
   account_id: string;
   business_profile_id: string;
   username: string;
-  analysis_type: 'light';
+  analysis_type: 'light' | 'deep';
   requested_at: string;
 }
 

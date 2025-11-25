@@ -30,7 +30,7 @@ import { z } from 'zod';
 const BulkAnalyzeSchema = z.object({
   usernames: z.array(z.string().min(1).max(50)).min(1).max(50),
   businessProfileId: z.string().uuid(),
-  analysisType: z.enum(['light'])
+  analysisType: z.enum(['light', 'deep'])
 });
 
 const BatchProgressSchema = z.object({

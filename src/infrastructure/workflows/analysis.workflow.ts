@@ -162,24 +162,28 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           console.log(`[Workflow][${params.run_id}] Steps 3-4: Running setup in parallel`);
 
           const [_, businessProfile] = await Promise.all([
-            // Task 1: Verify & deduct balance
+            // Task 1: Verify & deduct balance (MODULAR - routes to correct credit type)
             (async () => {
-              console.log(`[Workflow][${params.run_id}] [Parallel] Verifying balance (cost: ${creditsCost})`);
+              console.log(`[Workflow][${params.run_id}] [Parallel] Verifying balance (cost: ${creditsCost}, type: ${params.analysis_type})`);
               const supabase = await SupabaseClientFactory.createAdminClient(this.env);
               const creditsRepo = new CreditsRepository(supabase);
 
-              const hasBalance = await creditsRepo.hasSufficientLightAnalyses(
+              // MODULAR: Uses analysis type to check correct credit balance
+              const hasBalance = await creditsRepo.hasSufficientBalanceForAnalysis(
                 params.account_id,
+                params.analysis_type as AnalysisType,
                 creditsCost
               );
 
               if (!hasBalance) {
-                console.error(`[Workflow][${params.run_id}] Insufficient light analyses balance`);
-                throw new Error('Insufficient light analyses balance');
+                console.error(`[Workflow][${params.run_id}] Insufficient ${params.analysis_type} analyses balance`);
+                throw new Error(`Insufficient ${params.analysis_type} analyses balance`);
               }
 
-              await creditsRepo.deductLightAnalyses(
+              // MODULAR: Deducts from correct credit type based on analysis type
+              await creditsRepo.deductForAnalysis(
                 params.account_id,
+                params.analysis_type as AnalysisType,
                 creditsCost,
                 'analysis',
                 `${params.analysis_type} analysis for @${params.username}`
@@ -350,23 +354,25 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         });
 
         // Step 6c: Refund if needed (the check said we should)
+        // MODULAR: Refunds to correct credit type based on analysis type
         if (failedCheck.shouldRefund) {
           await step.do('refund_for_bypass', {
             retries: { limit: 3, delay: '1 second', backoff: 'exponential' }
           }, async () => {
             try {
-              console.log(`[Workflow][${params.run_id}] Refunding ${creditsCost} light analyses for bypassed check`);
+              console.log(`[Workflow][${params.run_id}] Refunding ${creditsCost} ${params.analysis_type} analyses for bypassed check`);
               const supabase = await SupabaseClientFactory.createAdminClient(this.env);
               const creditsRepo = new CreditsRepository(supabase);
 
-              await creditsRepo.addLightAnalyses(
+              await creditsRepo.addForAnalysis(
                 params.account_id,
+                params.analysis_type as AnalysisType,
                 creditsCost,
                 'refund',
                 `Analysis bypassed (${failedCheck.resultType}): @${params.username}`
               );
 
-              console.log(`[Workflow][${params.run_id}] Light analyses refunded for bypass`);
+              console.log(`[Workflow][${params.run_id}] ${params.analysis_type} analyses refunded for bypass`);
             } catch (refundError: any) {
               console.error(`[Workflow][${params.run_id}] Refund failed:`, this.serializeError(refundError));
               // Continue anyway - don't fail the workflow for refund issues
@@ -497,12 +503,13 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       }
 
       // Step 7: Execute AI analysis
+      // MODULAR: Routes to correct analysis execution based on type
       const aiResult = await step.do('ai_analysis', {
         retries: { limit: 2, delay: '2 seconds', backoff: 'exponential' }
       }, async () => {
         try {
-          console.log(`[Workflow][${params.run_id}] Step 7: Executing AI analysis`);
-          const stepInfo = getStepProgress(params.analysis_type, 'ai_analysis');
+          console.log(`[Workflow][${params.run_id}] Step 7: Executing ${params.analysis_type} AI analysis`);
+          const stepInfo = getStepProgress(params.analysis_type as AnalysisType, 'ai_analysis');
           await this.updateProgress(params.run_id, stepInfo.percentage, stepInfo.description);
 
           const aiStart = Date.now();
@@ -510,10 +517,11 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           const aiProfile = toAIProfile(profile!);
 
           const aiService = await AIAnalysisService.create(this.env);
-          const result = await aiService.executeLightAnalysis(business, aiProfile);
+          // MODULAR: executeAnalysis routes to correct method based on analysis type
+          const result = await aiService.executeAnalysis(params.analysis_type as AnalysisType, business, aiProfile);
           timing.ai_analysis = Date.now() - aiStart;
 
-          console.log(`[Workflow][${params.run_id}] AI analysis complete:`, {
+          console.log(`[Workflow][${params.run_id}] ${params.analysis_type} AI analysis complete:`, {
             score: result.overall_score,
             model: result.model_used,
             cost: result.total_cost,
@@ -726,23 +734,25 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
       console.error(`[Workflow][${params.run_id}] FAILED`, errorDetails);
 
-      // Refund light analyses balance on failure (with retry limit)
+      // Refund analyses balance on failure (with retry limit)
+      // MODULAR: Refunds to correct credit type based on analysis type
       await step.do('refund_balance', {
         retries: { limit: 3, delay: '1 second', backoff: 'exponential' }
       }, async () => {
         try {
-          console.log(`[Workflow][${params.run_id}] Attempting to refund ${creditsCost} light analyses`);
+          console.log(`[Workflow][${params.run_id}] Attempting to refund ${creditsCost} ${params.analysis_type} analyses`);
           const supabase = await SupabaseClientFactory.createAdminClient(this.env);
           const creditsRepo = new CreditsRepository(supabase);
 
-          await creditsRepo.addLightAnalyses(
+          await creditsRepo.addForAnalysis(
             params.account_id,
+            params.analysis_type as AnalysisType,
             creditsCost,
             'refund',
             `Analysis failed: ${errorDetails.message}`
           );
 
-          console.log(`[Workflow][${params.run_id}] Light analyses refunded: ${creditsCost}`);
+          console.log(`[Workflow][${params.run_id}] ${params.analysis_type} analyses refunded: ${creditsCost}`);
         } catch (refundError: any) {
           console.error(`[Workflow][${params.run_id}] Refund failed:`, this.serializeError(refundError));
           // Don't throw - we still want to mark the analysis as failed even if refund fails
