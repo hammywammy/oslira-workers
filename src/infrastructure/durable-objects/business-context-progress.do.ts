@@ -35,6 +35,15 @@ export class BusinessContextProgressDO extends DurableObject {
   constructor(state: DurableObjectState, env: Env) {
     super(state, env);
     this.state = state;
+
+    // CRITICAL: Auto-respond to pings without waking from hibernation
+    // This prevents billable duration charges while keeping connections alive
+    this.ctx.setWebSocketAutoResponse(
+      new WebSocketRequestResponsePair(
+        JSON.stringify({ action: 'ping' }),
+        JSON.stringify({ type: 'pong', timestamp: Date.now() })
+      )
+    );
   }
 
   /**
