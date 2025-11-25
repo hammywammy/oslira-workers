@@ -5,25 +5,25 @@ import type { AnalysisProgressState } from '@/shared/types/env.types';
 
 /**
  * ANALYSIS PROGRESS DURABLE OBJECT
- * 
- * Manages real-time progress tracking for analysis runs
- * 
+ *
+ * Manages real-time progress tracking for analysis runs using WebSocket Hibernation API.
+ *
  * Features:
- * - Real-time progress updates (0-100%)
+ * - Real-time progress updates via WebSocket (0-100%)
+ * - Hibernation support for cost efficiency (DO sleeps when idle)
  * - Cancellation support
- * - WebSocket subscriptions for live updates (future)
  * - Automatic cleanup after 24 hours
- * 
- * Usage:
- * - Workflow updates progress as it executes steps
- * - Frontend polls GET /api/analysis/:runId/progress
- * - User can POST /api/analysis/:runId/cancel to stop
+ * - HTTP fallback endpoints for polling
+ *
+ * Architecture:
+ * - Frontend connects via WebSocket → Worker proxy → DO WebSocket server
+ * - Workflow updates progress → DO broadcasts to all connected WebSocket clients
+ * - Uses ctx.getWebSockets() for hibernation-safe WebSocket management
  */
 
 export class AnalysisProgressDO extends DurableObject {
   private state: DurableObjectState;
   private lastLoggedState: string | null = null; // For change detection
-  private sseConnections: Map<string, ReadableStreamDefaultController> = new Map(); // Active SSE streams
 
   constructor(state: DurableObjectState, env: Env) {
     super(state, env);
@@ -38,6 +38,43 @@ export class AnalysisProgressDO extends DurableObject {
     const method = request.method;
 
     try {
+      // =========================================================================
+      // WEBSOCKET UPGRADE HANDLER
+      // =========================================================================
+      if (request.headers.get('Upgrade') === 'websocket') {
+        const pair = new WebSocketPair();
+        const [client, server] = Object.values(pair);
+
+        // Accept with hibernation support (CRITICAL - enables DO to sleep)
+        this.ctx.acceptWebSocket(server);
+
+        // Attach runId metadata (survives hibernation, must be <2KB)
+        const runId = url.searchParams.get('runId');
+        if (runId) {
+          server.serializeAttachment({ runId, connectedAt: Date.now() });
+        }
+
+        console.log('[AnalysisProgressDO] WebSocket connected:', runId);
+
+        // Send initial progress immediately
+        const progress = await this.getProgress();
+        if (progress) {
+          const eventType = progress.status === 'pending' ? 'ready' : 'progress';
+          server.send(JSON.stringify({ type: eventType, data: progress }));
+
+          // If already terminal state, send that too
+          if (progress.status === 'complete' || progress.status === 'failed' || progress.status === 'cancelled') {
+            server.send(JSON.stringify({ type: progress.status, data: progress }));
+          }
+        }
+
+        return new Response(null, { status: 101, webSocket: client });
+      }
+
+      // =========================================================================
+      // HTTP ENDPOINTS (fallback & workflow communication)
+      // =========================================================================
+
       // POST /initialize - Initialize progress state (CRITICAL FIX: Added this route)
       if (method === 'POST' && url.pathname === '/initialize') {
         console.log('[AnalysisProgressDO] Initializing progress tracker');
@@ -47,98 +84,22 @@ export class AnalysisProgressDO extends DurableObject {
         return Response.json({ success: true });
       }
 
-      // GET /progress - Get current progress
+      // GET /progress - Get current progress (HTTP polling fallback)
       if (method === 'GET' && url.pathname === '/progress') {
         const progress = await this.getProgress();
         return Response.json(progress);
-      }
-
-      // GET /stream - SSE streaming endpoint
-      if (method === 'GET' && url.pathname === '/stream') {
-        console.log('[AnalysisProgressDO] SSE stream connection requested');
-
-        const connectionId = crypto.randomUUID();
-        let isClosed = false;
-
-        const stream = new ReadableStream({
-          start: async (controller) => {
-            try {
-              // Store connection
-              this.sseConnections.set(connectionId, controller);
-              console.log(`[AnalysisProgressDO] SSE connection established: ${connectionId}`);
-
-              const encoder = new TextEncoder();
-
-              // CRITICAL: Send SSE comment first (establishes stream as valid SSE)
-              controller.enqueue(encoder.encode(': stream-start\n\n'));
-
-              // Send current state immediately
-              const currentProgress = await this.getProgress();
-              if (currentProgress) {
-                // Send as 'ready' event if pending, 'progress' if already started
-                const eventType = currentProgress.status === 'pending' ? 'ready' : 'progress';
-                const progressEvent = `event: ${eventType}\ndata: ${JSON.stringify(currentProgress)}\n\n`;
-                controller.enqueue(encoder.encode(progressEvent));
-                console.log(`[AnalysisProgressDO] Sent initial ${eventType} event to ${connectionId}`);
-
-                // If already complete or failed, close stream
-                if (currentProgress.status === 'complete' || currentProgress.status === 'failed') {
-                  const completeEvent = `event: ${currentProgress.status}\ndata: ${JSON.stringify(currentProgress)}\n\n`;
-                  controller.enqueue(encoder.encode(completeEvent));
-                  controller.close();
-                  this.sseConnections.delete(connectionId);
-                  isClosed = true;
-                }
-              }
-            } catch (error: any) {
-              console.error(`[AnalysisProgressDO] SSE stream error: ${error.message}`);
-              if (!isClosed) {
-                controller.error(error);
-                this.sseConnections.delete(connectionId);
-              }
-            }
-          },
-          cancel: () => {
-            console.log(`[AnalysisProgressDO] SSE connection closed: ${connectionId}`);
-            this.sseConnections.delete(connectionId);
-            isClosed = true;
-          }
-        });
-
-        return new Response(stream, {
-          headers: {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-            'X-Accel-Buffering': 'no' // Disable nginx buffering
-          }
-        });
       }
 
       // POST /update - Update progress (called by workflow)
       if (method === 'POST' && url.pathname === '/update') {
         const update = await request.json();
         await this.updateProgress(update);
-
-        // Broadcast update to all SSE connections
-        const currentProgress = await this.getProgress();
-        if (currentProgress) {
-          this.broadcastToSSE(currentProgress);
-        }
-
         return Response.json({ success: true });
       }
 
       // POST /cancel - Cancel analysis
       if (method === 'POST' && url.pathname === '/cancel') {
         await this.cancelAnalysis();
-
-        // Broadcast cancellation to all SSE connections
-        const currentProgress = await this.getProgress();
-        if (currentProgress) {
-          this.broadcastToSSE(currentProgress, 'cancelled');
-        }
-
         return Response.json({ success: true, cancelled: true });
       }
 
@@ -146,13 +107,6 @@ export class AnalysisProgressDO extends DurableObject {
       if (method === 'POST' && url.pathname === '/complete') {
         const result = await request.json();
         await this.completeAnalysis(result);
-
-        // Broadcast completion to all SSE connections
-        const currentProgress = await this.getProgress();
-        if (currentProgress) {
-          this.broadcastToSSE(currentProgress, 'complete');
-        }
-
         return Response.json({ success: true });
       }
 
@@ -160,13 +114,6 @@ export class AnalysisProgressDO extends DurableObject {
       if (method === 'POST' && url.pathname === '/fail') {
         const error = await request.json();
         await this.failAnalysis(error.message);
-
-        // Broadcast failure to all SSE connections
-        const currentProgress = await this.getProgress();
-        if (currentProgress) {
-          this.broadcastToSSE(currentProgress, 'failed');
-        }
-
         return Response.json({ success: true });
       }
 
@@ -178,11 +125,95 @@ export class AnalysisProgressDO extends DurableObject {
         method,
         path: url.pathname,
         error: error.message,
-        stack: error.stack
+        stack: error.stack?.split('\n')[0]
       });
       return Response.json({ error: error.message }, { status: 500 });
     }
   }
+
+  // ===========================================================================
+  // WEBSOCKET HIBERNATION HANDLERS
+  // ===========================================================================
+
+  /**
+   * Called when WebSocket receives a message (hibernation-safe)
+   */
+  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    try {
+      const data = JSON.parse(message as string);
+      const attachment = ws.deserializeAttachment() as { runId?: string } | null;
+
+      if (data.action === 'ping') {
+        ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
+      } else if (data.action === 'get_progress') {
+        const progress = await this.getProgress();
+        ws.send(JSON.stringify({ type: 'progress', data: progress }));
+      }
+    } catch (error: any) {
+      console.error('[AnalysisProgressDO] WebSocket message error:', error.message);
+      ws.send(JSON.stringify({ type: 'error', message: 'Invalid message' }));
+    }
+  }
+
+  /**
+   * Called when WebSocket closes (hibernation-safe)
+   */
+  async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean): Promise<void> {
+    const attachment = ws.deserializeAttachment() as { runId?: string } | null;
+    console.log('[AnalysisProgressDO] WebSocket closed', {
+      runId: attachment?.runId,
+      code,
+      wasClean
+    });
+  }
+
+  /**
+   * Called when WebSocket errors (hibernation-safe)
+   */
+  async webSocketError(ws: WebSocket, error: unknown): Promise<void> {
+    const attachment = ws.deserializeAttachment() as { runId?: string } | null;
+    console.error('[AnalysisProgressDO] WebSocket error:', {
+      runId: attachment?.runId,
+      error
+    });
+  }
+
+  // ===========================================================================
+  // BROADCAST METHOD (HIBERNATION-SAFE)
+  // ===========================================================================
+
+  /**
+   * Broadcast progress update to all connected WebSocket clients
+   * Uses ctx.getWebSockets() which is hibernation-safe
+   */
+  private broadcastProgress(
+    progress: AnalysisProgressState,
+    eventType: 'ready' | 'progress' | 'complete' | 'failed' | 'cancelled' = 'progress'
+  ): void {
+    const message = JSON.stringify({ type: eventType, data: progress });
+
+    // Get ALL connected WebSockets (hibernation-safe)
+    const sockets = this.ctx.getWebSockets();
+
+    if (sockets.length === 0) {
+      console.log(`[AnalysisProgressDO] No WebSocket clients connected (event: ${eventType}, progress: ${progress.progress}%)`);
+      return;
+    }
+
+    console.log(`[AnalysisProgressDO] Broadcasting ${eventType} (${progress.progress}%) to ${sockets.length} client(s)`);
+
+    sockets.forEach(ws => {
+      try {
+        ws.send(message);
+      } catch (error: any) {
+        console.error('[AnalysisProgressDO] Send failed:', error.message);
+      }
+    });
+  }
+
+  // ===========================================================================
+  // PROGRESS STATE METHODS
+  // ===========================================================================
 
   /**
    * Initialize progress state
@@ -216,10 +247,9 @@ export class AnalysisProgressDO extends DurableObject {
     await this.state.storage.put('progress', initialState);
     console.log(`[AnalysisProgressDO][${params.run_id}] State saved to storage successfully`);
 
-    // Broadcast "ready" event to any SSE clients waiting for DO initialization
-    const clientCount = this.sseConnections.size;
-    this.broadcastToSSE(initialState, 'ready');
-    console.log(`[AnalysisProgressDO][${params.run_id}] Broadcasted ready event to ${clientCount} SSE client(s)`);
+    // Broadcast "ready" event to any WebSocket clients waiting
+    this.broadcastProgress(initialState, 'ready');
+    console.log(`[AnalysisProgressDO][${params.run_id}] Broadcasted ready event`);
 
     // Set automatic cleanup alarm (24 hours)
     await this.state.storage.setAlarm(Date.now() + 24 * 60 * 60 * 1000);
@@ -266,6 +296,9 @@ export class AnalysisProgressDO extends DurableObject {
 
     await this.state.storage.put('progress', updated);
     console.log(`[AnalysisProgressDO][${current.run_id}] Progress updated successfully`);
+
+    // Broadcast to all WebSocket clients
+    this.broadcastProgress(updated);
   }
 
   /**
@@ -273,7 +306,7 @@ export class AnalysisProgressDO extends DurableObject {
    */
   async cancelAnalysis(): Promise<void> {
     const current = await this.getProgress();
-    
+
     if (!current) {
       throw new Error('Progress not initialized');
     }
@@ -293,6 +326,9 @@ export class AnalysisProgressDO extends DurableObject {
     };
 
     await this.state.storage.put('progress', cancelled);
+
+    // Broadcast cancellation to all WebSocket clients
+    this.broadcastProgress(cancelled, 'cancelled');
   }
 
   /**
@@ -300,7 +336,7 @@ export class AnalysisProgressDO extends DurableObject {
    */
   async completeAnalysis(result: any): Promise<void> {
     const current = await this.getProgress();
-    
+
     if (!current) {
       throw new Error('Progress not initialized');
     }
@@ -319,6 +355,9 @@ export class AnalysisProgressDO extends DurableObject {
     };
 
     await this.state.storage.put('progress', completed);
+
+    // Broadcast completion to all WebSocket clients
+    this.broadcastProgress(completed, 'complete');
   }
 
   /**
@@ -326,7 +365,7 @@ export class AnalysisProgressDO extends DurableObject {
    */
   async failAnalysis(errorMessage: string): Promise<void> {
     const current = await this.getProgress();
-    
+
     if (!current) {
       throw new Error('Progress not initialized');
     }
@@ -341,51 +380,9 @@ export class AnalysisProgressDO extends DurableObject {
     };
 
     await this.state.storage.put('progress', failed);
-  }
 
-  /**
-   * Broadcast progress update to all active SSE connections
-   */
-  private broadcastToSSE(
-    progress: AnalysisProgressState,
-    eventType: 'ready' | 'progress' | 'complete' | 'failed' | 'cancelled' = 'progress'
-  ): void {
-    const clientCount = this.sseConnections.size;
-
-    if (clientCount === 0) {
-      console.log(`[AnalysisProgressDO] No SSE clients connected (event: ${eventType}, progress: ${progress.progress}%)`);
-      return;
-    }
-
-    console.log(`[AnalysisProgressDO] Broadcasting ${eventType} (${progress.progress}%) to ${clientCount} client(s)`);
-
-    const encoder = new TextEncoder();
-    const event = `event: ${eventType}\ndata: ${JSON.stringify(progress)}\n\n`;
-    const encoded = encoder.encode(event);
-
-    const connectionsToRemove: string[] = [];
-
-    this.sseConnections.forEach((controller, connectionId) => {
-      try {
-        controller.enqueue(encoded);
-
-        // Close connection if complete or failed
-        if (eventType === 'complete' || eventType === 'failed' || eventType === 'cancelled') {
-          controller.close();
-          connectionsToRemove.push(connectionId);
-        }
-      } catch (error: any) {
-        console.error(`[AnalysisProgressDO] Failed to send to SSE connection ${connectionId}:`, error.message);
-        connectionsToRemove.push(connectionId);
-      }
-    });
-
-    // Clean up closed/failed connections
-    connectionsToRemove.forEach(id => this.sseConnections.delete(id));
-
-    if (connectionsToRemove.length > 0) {
-      console.log(`[AnalysisProgressDO] Cleaned up ${connectionsToRemove.length} SSE connections`);
-    }
+    // Broadcast failure to all WebSocket clients
+    this.broadcastProgress(failed, 'failed');
   }
 
   /**
@@ -394,34 +391,16 @@ export class AnalysisProgressDO extends DurableObject {
   async alarm(): Promise<void> {
     console.log('[AnalysisProgressDO] Cleaning up old progress state');
 
-    // Close all active SSE connections before cleanup
-    this.sseConnections.forEach((controller, connectionId) => {
+    // Close all active WebSocket connections before cleanup
+    const sockets = this.ctx.getWebSockets();
+    sockets.forEach(ws => {
       try {
-        controller.close();
+        ws.close(1000, 'DO cleanup - session expired');
       } catch (error: any) {
-        console.error(`[AnalysisProgressDO] Error closing SSE connection ${connectionId}:`, error.message);
+        console.error('[AnalysisProgressDO] Error closing WebSocket:', error.message);
       }
     });
-    this.sseConnections.clear();
 
     await this.state.storage.deleteAll();
-  }
-
-  /**
-   * WebSocket handler (future feature for real-time updates)
-   */
-  async webSocketMessage(ws: WebSocket, message: string): Promise<void> {
-    // Future: Real-time progress updates via WebSocket
-    const data = JSON.parse(message);
-    
-    if (data.action === 'subscribe') {
-      const progress = await this.getProgress();
-      ws.send(JSON.stringify(progress));
-    }
-  }
-
-  async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
-    // Cleanup WebSocket connection
-    ws.close(code, reason);
   }
 }

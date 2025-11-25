@@ -9,6 +9,7 @@ import {
   analyzeInstagramLead,
   getAnalysisProgress,
   streamAnalysisProgress,
+  streamAnalysisProgressWS,
   cancelAnalysis,
   getAnalysisResult,
   getActiveAnalyses
@@ -16,18 +17,24 @@ import {
 
 /**
  * ANALYSIS ROUTES
- * 
+ *
  * Phase 4B: Async workflows
  * - POST /api/leads/analyze → Start analysis (returns immediately)
- * - GET /api/analysis/:runId/progress → Track progress
+ * - GET /api/analysis/:runId/progress → Track progress (HTTP polling fallback)
+ * - GET /api/analysis/:runId/ws → WebSocket real-time progress (recommended)
+ * - GET /api/analysis/:runId/stream → SSE progress (deprecated, use WebSocket)
  * - POST /api/analysis/:runId/cancel → Cancel analysis
  * - GET /api/analysis/:runId/result → Get final result
  */
 
 export function registerAnalysisRoutes(app: Hono<{ Bindings: Env }>) {
 
-  // SSE stream endpoint - MUST be registered BEFORE auth middleware
+  // WebSocket endpoint - MUST be registered BEFORE auth middleware
   // (runId serves as implicit authentication)
+  app.get('/api/analysis/:runId/ws', streamAnalysisProgressWS);
+
+  // SSE stream endpoint (deprecated - kept for backwards compatibility)
+  // MUST be registered BEFORE auth middleware (runId serves as implicit authentication)
   app.get('/api/analysis/:runId/stream', streamAnalysisProgress);
 
   // All analysis routes require authentication
