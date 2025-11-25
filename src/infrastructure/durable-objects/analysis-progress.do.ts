@@ -338,6 +338,16 @@ export class AnalysisProgressDO extends DurableObject {
 
     // Broadcast cancellation to all WebSocket clients
     this.broadcastProgress(cancelled, 'cancelled');
+
+    // CRITICAL: Close all WebSocket connections after broadcasting cancellation
+    const sockets = this.ctx.getWebSockets();
+    sockets.forEach(ws => {
+      try {
+        ws.close(1000, 'Analysis cancelled');
+      } catch (error: any) {
+        console.error('[AnalysisProgressDO] Error closing WebSocket:', error.message);
+      }
+    });
   }
 
   /**
@@ -367,6 +377,16 @@ export class AnalysisProgressDO extends DurableObject {
 
     // Broadcast completion to all WebSocket clients
     this.broadcastProgress(completed, 'complete');
+
+    // CRITICAL: Close all WebSocket connections after broadcasting completion
+    const sockets = this.ctx.getWebSockets();
+    sockets.forEach(ws => {
+      try {
+        ws.close(1000, 'Analysis complete');
+      } catch (error: any) {
+        console.error('[AnalysisProgressDO] Error closing WebSocket:', error.message);
+      }
+    });
   }
 
   /**
@@ -392,6 +412,16 @@ export class AnalysisProgressDO extends DurableObject {
 
     // Broadcast failure to all WebSocket clients
     this.broadcastProgress(failed, 'failed');
+
+    // CRITICAL: Close all WebSocket connections after broadcasting failure
+    const sockets = this.ctx.getWebSockets();
+    sockets.forEach(ws => {
+      try {
+        ws.close(1000, 'Analysis failed');
+      } catch (error: any) {
+        console.error('[AnalysisProgressDO] Error closing WebSocket:', error.message);
+      }
+    });
   }
 
   /**
