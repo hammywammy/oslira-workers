@@ -500,6 +500,8 @@ export async function handleBootstrap(c: Context<{ Bindings: Env }>) {
     const supabase = await SupabaseClientFactory.createAdminClient(c.env);
 
     // Single JOIN query to fetch all initialization data
+    // Use explicit FK syntax (fk_accounts_owner) to avoid PGRST201 ambiguity error
+    // (accounts table has two FKs to users: owner_id and suspended_by)
     const { data, error } = await supabase
       .from('users')
       .select(`
@@ -507,11 +509,11 @@ export async function handleBootstrap(c: Context<{ Bindings: Env }>) {
         email,
         full_name,
         avatar_url,
-        accounts!inner (
+        accounts!fk_accounts_owner (
           id,
           name
         ),
-        account:accounts!inner (
+        account:accounts!fk_accounts_owner (
           subscriptions (
             id,
             plan_type,
