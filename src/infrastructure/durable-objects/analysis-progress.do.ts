@@ -232,6 +232,10 @@ export class AnalysisProgressDO extends DurableObject {
     await this.state.storage.put('progress', initialState);
     console.log(`[AnalysisProgressDO][${params.run_id}] State saved to storage successfully`);
 
+    // ADDED: Broadcast "ready" event to any SSE clients waiting for DO initialization
+    this.broadcastToSSE(initialState, 'ready');
+    console.log(`[AnalysisProgressDO][${params.run_id}] Broadcasted ready event to SSE clients`);
+
     // Set automatic cleanup alarm (24 hours)
     await this.state.storage.setAlarm(Date.now() + 24 * 60 * 60 * 1000);
     console.log(`[AnalysisProgressDO][${params.run_id}] Cleanup alarm set for 24 hours`);
@@ -359,7 +363,7 @@ export class AnalysisProgressDO extends DurableObject {
    */
   private broadcastToSSE(
     progress: AnalysisProgressState,
-    eventType: 'progress' | 'complete' | 'failed' | 'cancelled' = 'progress'
+    eventType: 'ready' | 'progress' | 'complete' | 'failed' | 'cancelled' = 'progress'
   ): void {
     if (this.sseConnections.size === 0) {
       return;
