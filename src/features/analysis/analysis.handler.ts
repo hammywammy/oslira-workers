@@ -62,22 +62,22 @@ export async function analyzeInstagramLead(c: Context<{ Bindings: Env }>) {
     const body = await c.req.json();
     const input = validateBody(AnalyzeLeadSchema, body);
 
-    // Step 3: Check credits BEFORE starting workflow
-    const creditsCost = getCreditCost(input.analysisType);
+    // Step 3: Check light analyses balance BEFORE starting workflow
+    const analysisCost = getCreditCost(input.analysisType);
     const supabase = await SupabaseClientFactory.createAdminClient(c.env);
     const creditsRepo = new CreditsRepository(supabase);
-    
-    const hasCredits = await creditsRepo.hasSufficientCredits(
+
+    const hasBalance = await creditsRepo.hasSufficientLightAnalyses(
       auth.accountId,
-      creditsCost
+      analysisCost
     );
-    
-    if (!hasCredits) {
-      console.warn(`[Analyze][${requestId}] Insufficient credits`, {
+
+    if (!hasBalance) {
+      console.warn(`[Analyze][${requestId}] Insufficient light analyses balance`, {
         accountId: auth.accountId,
-        required: creditsCost
+        required: analysisCost
       });
-      return errorResponse(c, 'Insufficient credits', 'INSUFFICIENT_CREDITS', 402);
+      return errorResponse(c, 'Insufficient light analyses balance', 'INSUFFICIENT_BALANCE', 402);
     }
 
     // Step 3.5: Check for existing in-progress analysis BEFORE creating any records
@@ -185,7 +185,7 @@ export async function analyzeInstagramLead(c: Context<{ Bindings: Env }>) {
       runId,
       username: input.username,
       type: input.analysisType,
-      credits: creditsCost
+      analysisCost
     });
 
     return successResponse(c, {
@@ -202,8 +202,8 @@ export async function analyzeInstagramLead(c: Context<{ Bindings: Env }>) {
       stack: error.stack?.split('\n')[0]
     });
 
-    if (error.message.includes('Insufficient credits')) {
-      return errorResponse(c, 'Insufficient credits', 'INSUFFICIENT_CREDITS', 402);
+    if (error.message.includes('Insufficient') && error.message.includes('balance')) {
+      return errorResponse(c, 'Insufficient light analyses balance', 'INSUFFICIENT_BALANCE', 402);
     }
 
     if (error.message.includes('already in progress')) {
