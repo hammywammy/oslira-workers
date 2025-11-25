@@ -94,8 +94,7 @@ export class LeadsService {
         analysis_status: analysis?.status || null,
         analysis_completed_at: analysis?.completed_at || null,
         overall_score: analysis?.overall_score || null,
-        summary: analysis?.ai_response?.summary || null,
-        confidence: analysis?.ai_response?.confidence || null
+        summary: analysis?.ai_response?.summary || null
       };
     });
 
@@ -164,8 +163,7 @@ export class LeadsService {
       analysis_status: latestAnalysisData?.status || null,
       analysis_completed_at: latestAnalysisData?.completed_at || null,
       overall_score: latestAnalysisData?.overall_score || null,
-      summary: latestAnalysisData?.ai_response?.summary || null,
-      confidence: latestAnalysisData?.ai_response?.confidence || null
+      summary: latestAnalysisData?.ai_response?.summary || null
     };
   }
 
@@ -201,7 +199,6 @@ export class LeadsService {
       analysis_type: analysis.analysis_type,
       overall_score: analysis.overall_score,
       summary: analysis.ai_response?.summary || null,
-      confidence: analysis.ai_response?.confidence || null,
       status: analysis.status,
       error_message: analysis.error_message,
       started_at: analysis.started_at,

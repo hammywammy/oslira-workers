@@ -31,10 +31,9 @@ export function getLightAnalysisJsonSchema() {
       additionalProperties: false,
       properties: {
         score: { type: 'integer', minimum: 0, maximum: 100 },
-        summary: { type: 'string', maxLength: 400 },
-        confidence: { type: 'number', minimum: 0.0, maximum: 1.0 }
+        summary: { type: 'string', maxLength: 400 }
       },
-      required: ['score', 'summary', 'confidence']
+      required: ['score', 'summary']
     }
   };
 }
@@ -151,7 +150,6 @@ export function buildQuickSummaryPrompt(profile: ProfileData): string {
 @${profile.username} - ${profile.followersCount.toLocaleString()} followers
 Bio: "${profile.bio || 'No bio'}"
 Verified: ${profile.isVerified ? 'Yes' : 'No'}
-Engagement: ${profile.engagement?.engagementRate || 'Unknown'}%
 
 Create a brief summary suitable for dashboard lists. Focus on key characteristics and business potential. Maximum 150 characters.`;
 }
@@ -168,18 +166,7 @@ export function buildSpeedLightAnalysisPrompt(
 Bio: "${profile.bio || 'No bio'}"
 Business: ${profile.isBusinessAccount ? 'Yes' : 'No'}`;
 
-  // Only add basic engagement if available (no AI cost, just helps accuracy)
-  if (profile.engagement) {
-    const eng = profile.engagement;
-    prompt += `\nEngagement: ${eng.engagementRate}% ER (${eng.avgLikes} likes, ${eng.avgComments} comments from ${eng.postsAnalyzed} posts)`;
-    
-    // Add format info if available (free pre-processing)
-    if (eng.formatDistribution) {
-      prompt += ` | Primary format: ${eng.formatDistribution.primaryFormat}`;
-    }
-  }
-
-  prompt += `\n\nReturn JSON: {"score": 0-100, "summary": "one sentence why", "confidence": 0.8}`;
+  prompt += `\n\nReturn JSON: {"score": 0-100, "summary": "one sentence why"}`;
 
   return prompt;
 }
