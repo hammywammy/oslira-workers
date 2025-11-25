@@ -319,7 +319,11 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             username: params.username,
             accountId: params.account_id,
             businessProfileId: params.business_profile_id,
-            requestedAnalysisType: params.analysis_type as AnalysisType
+            requestedAnalysisType: params.analysis_type as AnalysisType,
+            icpSettings: businessProfile ? {
+              icp_min_followers: businessProfile.icp_min_followers,
+              icp_max_followers: businessProfile.icp_max_followers
+            } : null
           });
 
           timing.pre_checks = Date.now() - checksStart;
