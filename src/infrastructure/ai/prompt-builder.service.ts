@@ -1,6 +1,7 @@
 // infrastructure/ai/prompt-builder.service.ts
 
 import type { BusinessProfile } from '@/infrastructure/database/repositories/business.repository';
+import type { AIProfileData, AIPostData } from '@/shared/types/profile.types';
 
 /**
  * PROMPT BUILDER SERVICE
@@ -10,32 +11,9 @@ import type { BusinessProfile } from '@/infrastructure/database/repositories/bus
  * - Profile data: DYNAMIC (changes per request, never cached)
  *
  * Cache savings: 90% on business context (30-40% total cost reduction)
+ *
+ * Uses unified types from @/shared/types/profile.types
  */
-
-export interface ProfileData {
-  username: string;
-  display_name: string;
-  follower_count: number;
-  following_count: number;
-  post_count: number;
-  bio: string;
-  external_url: string | null;
-  is_verified: boolean;
-  is_private: boolean;
-  is_business_account: boolean;
-  profile_pic_url: string;
-  posts: PostData[];
-}
-
-export interface PostData {
-  id: string;
-  caption: string;
-  like_count: number;
-  comment_count: number;
-  timestamp: string;
-  media_type: 'photo' | 'video' | 'carousel';
-  media_url: string;
-}
 
 export class PromptBuilder {
 
@@ -72,7 +50,7 @@ ${icp.brand_voice || context.communication_tone || 'Professional and engaging'}
   /**
    * Build profile summary (DYNAMIC - never cached)
    */
-  buildProfileSummary(profile: ProfileData): string {
+  buildProfileSummary(profile: AIProfileData): string {
     const avgLikes = this.calculateAvgLikes(profile);
     const avgComments = this.calculateAvgComments(profile);
     const postingFrequency = this.estimatePostingFrequency(profile);
@@ -105,7 +83,7 @@ ${profile.external_url || 'None'}
   /**
    * Build recent posts section (DYNAMIC - never cached)
    */
-  buildRecentPosts(profile: ProfileData, limit: number = 6): string {
+  buildRecentPosts(profile: AIProfileData, limit: number = 6): string {
     const posts = profile.posts.slice(0, limit);
 
     let postsSection = `# RECENT POSTS (Last ${posts.length})\n\n`;
@@ -131,7 +109,7 @@ ${post.caption || 'No caption'}
    * Model: gpt-5-nano (fast, cheap, 6s avg)
    * Focus: Quick fit assessment - overall_score + summary only
    */
-  buildLightAnalysisPrompt(business: BusinessProfile, profile: ProfileData): {
+  buildLightAnalysisPrompt(business: BusinessProfile, profile: AIProfileData): {
     system: string;
     user: string;
   } {
@@ -171,21 +149,21 @@ Return JSON:
   // HELPER METHODS
   // ===============================================================================
 
-  private calculateAvgLikes(profile: ProfileData): number {
+  private calculateAvgLikes(profile: AIProfileData): number {
     if (!profile.posts.length) return 0;
 
     const totalLikes = profile.posts.reduce((sum, post) => sum + post.like_count, 0);
     return Math.round(totalLikes / profile.posts.length);
   }
 
-  private calculateAvgComments(profile: ProfileData): number {
+  private calculateAvgComments(profile: AIProfileData): number {
     if (!profile.posts.length) return 0;
 
     const totalComments = profile.posts.reduce((sum, post) => sum + post.comment_count, 0);
     return Math.round(totalComments / profile.posts.length);
   }
 
-  private estimatePostingFrequency(profile: ProfileData): string {
+  private estimatePostingFrequency(profile: AIProfileData): string {
     if (profile.posts.length < 2) return 'Unknown';
 
     const oldest = new Date(profile.posts[profile.posts.length - 1].timestamp);

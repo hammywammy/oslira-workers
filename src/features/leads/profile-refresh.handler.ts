@@ -67,8 +67,9 @@ export async function checkProfileRefresh(c: Context<{ Bindings: Env }>) {
     // Scrape fresh data (lightweight, just basic profile)
     const apifyKey = await getSecret('APIFY_API_TOKEN', c.env, c.env.APP_ENV);
     const apify = new ApifyAdapter(apifyKey);
-    
-    const freshProfile = await apify.scrapeProfile(lead.username, { postsLimit: 0 });
+
+    const scrapeResult = await apify.scrapeProfileWithMeta(lead.username, { postsLimit: 0 });
+    const freshProfile = scrapeResult.profile;
 
     // Compare with cached/stored data
     const cacheStrategy = new CacheStrategyService(c.env.R2_CACHE_BUCKET);

@@ -2,7 +2,7 @@
 
 import type { Env } from '@/shared/types/env.types';
 import type { BusinessProfile } from '@/infrastructure/database/repositories/business.repository';
-import type { ProfileData } from './prompt-builder.service';
+import type { AIProfileData } from '@/shared/types/profile.types';
 import { PromptBuilder } from './prompt-builder.service';
 import { AIGatewayClient } from './ai-gateway.client';
 import { getSecret } from '@/infrastructure/config/secrets';
@@ -66,7 +66,7 @@ export class AIAnalysisService {
 
   async executeLightAnalysis(
     business: BusinessProfile,
-    profile: ProfileData,
+    profile: AIProfileData,
     attempt: number = 1
   ): Promise<LightAnalysisResult> {
     const prompts = this.promptBuilder.buildLightAnalysisPrompt(business, profile);

@@ -8,12 +8,12 @@ import { LeadsRepository } from '@/infrastructure/database/repositories/leads.re
 import { AnalysisRepository } from '@/infrastructure/database/repositories/analysis.repository';
 import { BusinessRepository } from '@/infrastructure/database/repositories/business.repository';
 import { OperationsLedgerRepository } from '@/infrastructure/database/repositories/operations-ledger.repository';
-import { R2CacheService, type ProfileData as CacheProfileData } from '@/infrastructure/cache/r2-cache.service';
+import { R2CacheService, type ProfileData } from '@/infrastructure/cache/r2-cache.service';
 import { AvatarCacheService } from '@/infrastructure/cache/avatar-cache.service';
 import { ApifyAdapter, type ScrapeResult, type ApifyErrorItem } from '@/infrastructure/scraping/apify.adapter';
 import { AIAnalysisService } from '@/infrastructure/ai/ai-analysis.service';
 import { getSecret } from '@/infrastructure/config/secrets';
-import type { ProfileData as AIProfileData } from '@/infrastructure/ai/prompt-builder.service';
+import { toAIProfile, type AIProfileData } from '@/shared/types/profile.types';
 import { getStepProgress } from './workflow-progress.config';
 import {
   getCreditCost,
@@ -50,33 +50,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
     };
   }
 
-  /**
-   * Transform camelCase cache ProfileData to snake_case AI ProfileData
-   */
-  private transformToAIProfile(cacheProfile: CacheProfileData): AIProfileData {
-    return {
-      username: cacheProfile.username,
-      display_name: cacheProfile.displayName,
-      follower_count: cacheProfile.followersCount,
-      following_count: cacheProfile.followingCount,
-      post_count: cacheProfile.postsCount,
-      bio: cacheProfile.bio,
-      external_url: cacheProfile.externalUrl,
-      is_verified: cacheProfile.isVerified,
-      is_private: cacheProfile.isPrivate,
-      is_business_account: cacheProfile.isBusinessAccount,
-      profile_pic_url: cacheProfile.profilePicUrl,
-      posts: cacheProfile.latestPosts.map(post => ({
-        id: post.id,
-        caption: post.caption,
-        like_count: post.likeCount,
-        comment_count: post.commentCount,
-        timestamp: post.timestamp,
-        media_type: post.mediaType,
-        media_url: post.mediaUrl
-      }))
-    };
-  }
+  // Removed: transformToAIProfile method - now using toAIProfile() from @/shared/types/profile.types
 
   async run(event: WorkflowEvent<AnalysisWorkflowParams>, step: WorkflowStep) {
     const params = event.payload;
@@ -405,7 +379,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
               const supabase = await SupabaseClientFactory.createAdminClient(this.env);
               const leadsRepo = new LeadsRepository(supabase);
 
-              const aiProfile = this.transformToAIProfile(profile);
+              const aiProfile = toAIProfile(profile);
 
               const lead = await leadsRepo.upsertLead({
                 account_id: params.account_id,
@@ -527,7 +501,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
           const aiStart = Date.now();
           // Transform camelCase cache profile to snake_case AI profile
-          const aiProfile = this.transformToAIProfile(profile!);
+          const aiProfile = toAIProfile(profile!);
 
           const aiService = await AIAnalysisService.create(this.env);
           const result = await aiService.executeLightAnalysis(business, aiProfile);
@@ -561,7 +535,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           const leadsRepo = new LeadsRepository(supabase);
 
           // Transform to AI profile format for database (snake_case)
-          const aiProfile = this.transformToAIProfile(profile);
+          const aiProfile = toAIProfile(profile);
 
           // Step 8a: Upsert lead with Instagram URL first (to get lead_id)
           const lead = await leadsRepo.upsertLead({

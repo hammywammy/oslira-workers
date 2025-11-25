@@ -2,38 +2,19 @@
 
 import type { R2Bucket } from '@cloudflare/workers-types';
 import { CacheStrategyService, type CachedProfile } from './cache-strategy.service';
+import type { ProfileData, PostData } from '@/shared/types/profile.types';
 
 /**
  * R2 CACHE SERVICE (Facade)
  *
  * Wrapper around CacheStrategyService for backward compatibility
  * Now includes Phase 7 smart caching with TTL and invalidation
+ *
+ * Uses unified ProfileData type from @/shared/types/profile.types
  */
 
-export interface ProfileData {
-  username: string;
-  displayName: string;
-  bio: string;
-  followersCount: number;
-  followingCount: number;
-  postsCount: number;
-  isVerified: boolean;
-  isPrivate: boolean;
-  profilePicUrl: string;
-  externalUrl: string | null;
-  isBusinessAccount: boolean;
-  latestPosts: Array<{
-    id: string;
-    caption: string;
-    likeCount: number;
-    commentCount: number;
-    timestamp: string;
-    mediaType: 'photo' | 'video' | 'carousel';
-    mediaUrl: string;
-  }>;
-  scraperUsed: string;
-  dataQuality: 'high' | 'medium' | 'low';
-}
+// Re-export types for backward compatibility
+export type { ProfileData, PostData } from '@/shared/types/profile.types';
 
 export class R2CacheService {
   private strategy: CacheStrategyService;
