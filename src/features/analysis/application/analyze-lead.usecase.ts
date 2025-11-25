@@ -54,7 +54,6 @@ export interface AnalyzeLeadResult {
   overall_score: number;
   niche_fit_score: number;
   engagement_score: number;
-  confidence_level: number;
   summary_text: string;
   outreach_message?: string;  // Reserved for future analysis tiers
   actual_cost: number;
@@ -129,7 +128,6 @@ export class AnalyzeLeadUseCase {
         overall_score: analysisResult.aiResult.overall_score,
         niche_fit_score: analysisResult.aiResult.overall_score,  // Light analysis uses overall_score
         engagement_score: analysisResult.aiResult.overall_score,  // Light analysis uses overall_score
-        confidence_level: 0.85,  // Default confidence for light analysis
         summary_text: analysisResult.aiResult.summary_text,
         outreach_message: undefined,  // Reserved for future analysis tiers
         actual_cost: analysisResult.apifyCost + analysisResult.aiResult.total_cost,

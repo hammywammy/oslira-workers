@@ -136,7 +136,6 @@ ${this.getAnalysisInstructions(analysisType)}`;
 - Overall score (0-100)
 - Niche fit score (0-100)
 - Engagement score (0-100)
-- Confidence level (0-100)
 - Quick summary (2-3 sentences)
 - Key strengths (2-3 bullets)
 - Red flags (if any)

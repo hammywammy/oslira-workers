@@ -4,7 +4,6 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { Env } from '@/shared/types/env.types';
 import type { MessageBatch } from '@cloudflare/workers-types';
-import { registerTestEndpoints } from './test-endpoints';
 import { registerAuthRoutes } from './features/auth/auth.routes';
 import { registerLeadRoutes } from './features/leads/leads.routes';
 import { registerBusinessRoutes } from './features/business/business.routes';
@@ -139,12 +138,6 @@ registerOnboardingRoutes(app);
 
 // Billing endpoints
 registerBillingRoutes(app);
-
-// ===============================================================================
-// TEST ENDPOINTS (Disabled in production)
-// ===============================================================================
-
-registerTestEndpoints(app);
 
 // ===============================================================================
 // ERROR HANDLING
