@@ -3,13 +3,21 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { BaseRepository } from './base.repository';
 
+/**
+ * Analysis types:
+ * - 'light': Standard light analysis (AI-powered)
+ * - 'private': Profile was private, could not be analyzed
+ * - 'not_found': Profile doesn't exist or was deleted
+ */
+export type AnalysisTypeResult = 'light' | 'private' | 'not_found';
+
 export interface Analysis {
   id: string;
   run_id: string;
   lead_id: string;
   account_id: string;
   business_profile_id: string;
-  analysis_type: 'light';
+  analysis_type: AnalysisTypeResult;
   overall_score: number;
   ai_response: any;
   status: 'pending' | 'processing' | 'complete' | 'failed' | 'cancelled';
@@ -26,13 +34,14 @@ export interface CreateAnalysisData {
   lead_id: string;
   account_id: string;
   business_profile_id: string;
-  analysis_type: 'light';
+  analysis_type: AnalysisTypeResult;
   status?: 'pending' | 'processing';
 }
 
 export interface UpdateAnalysisData {
   overall_score?: number;
   ai_response?: any;
+  analysis_type?: AnalysisTypeResult;
   status?: 'complete' | 'failed' | 'cancelled';
   error_message?: string;
   completed_at?: string;

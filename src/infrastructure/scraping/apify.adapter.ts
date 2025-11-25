@@ -55,6 +55,31 @@ export interface ApifyRunResult {
   defaultDatasetId: string;
 }
 
+/**
+ * Apify error response when profile cannot be found/accessed
+ */
+export interface ApifyErrorItem {
+  url?: string;
+  username?: string;
+  error?: string;
+  errorDescription?: string;
+}
+
+/**
+ * Result from scrapeProfileWithMeta - includes both data and error info
+ * for pre-analysis checks to process
+ */
+export interface ScrapeResult {
+  /** Whether the scrape succeeded */
+  success: boolean;
+  /** Profile data if successful */
+  profile?: ProfileData;
+  /** Error information if failed */
+  error?: ApifyErrorItem;
+  /** Raw items from Apify (for debugging) */
+  rawItemCount?: number;
+}
+
 export class ApifyAdapter {
   private apiToken: string;
   private baseURL = 'https://api.apify.com/v2';
@@ -67,34 +92,70 @@ export class ApifyAdapter {
 
   /**
    * Scrape Instagram profile with retry logic
+   * @deprecated Use scrapeProfileWithMeta for better error handling
    */
   async scrapeProfile(
     username: string,
     postsLimit: number = 12
   ): Promise<ProfileData> {
+    const result = await this.scrapeProfileWithMeta(username, postsLimit);
+
+    if (!result.success || !result.profile) {
+      const errorMsg = result.error?.errorDescription || result.error?.error || 'Profile not found or is private';
+      throw new Error(errorMsg);
+    }
+
+    return result.profile;
+  }
+
+  /**
+   * Scrape Instagram profile with metadata about errors
+   * Returns a result object that includes error info for pre-analysis checks
+   *
+   * Use this method when you need to handle not-found or error profiles gracefully
+   * instead of throwing exceptions.
+   */
+  async scrapeProfileWithMeta(
+    username: string,
+    postsLimit: number = 12
+  ): Promise<ScrapeResult> {
     const maxRetries = SCRAPER_CONFIG.max_retries;
     let lastError: Error | null = null;
+    let lastErrorItem: ApifyErrorItem | undefined;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         console.log(`[Apify] Attempt ${attempt}/${maxRetries} for @${username} (actor: ${this.actorId})`);
 
-        const profile = await this.executeScrape(username, postsLimit);
+        const result = await this.executeScrapeWithMeta(username, postsLimit);
+
+        // Check if Apify returned an error item instead of profile data
+        if (result.error) {
+          console.log(`[Apify] Profile @${username} returned error:`, result.error);
+          return result; // Return the error result - don't retry user errors
+        }
 
         console.log(`[Apify] Success on attempt ${attempt} for @${username}`);
-        return profile;
+        return result;
 
       } catch (error: any) {
         lastError = error;
 
         // Don't retry on user errors (profile not found, private, etc)
         if (this.isUserError(error)) {
-          throw error;
+          return {
+            success: false,
+            error: {
+              username,
+              error: 'not_found',
+              errorDescription: error.message
+            }
+          };
         }
 
         // Retry on infrastructure errors
         if (attempt < maxRetries) {
-          const backoffMs = attempt * SCRAPER_CONFIG.retry_delay;
+          const backoffMs = attempt * SCRAPER_CONFIG.retry_delay_ms;
           console.warn(
             `[Apify] Attempt ${attempt} failed for @${username}, retrying in ${backoffMs}ms...`,
             error.message
@@ -104,10 +165,15 @@ export class ApifyAdapter {
       }
     }
 
-    // All retries exhausted
-    throw new Error(
-      `Apify scraping failed after ${maxRetries} attempts for @${username}: ${lastError?.message}`
-    );
+    // All retries exhausted - return as infrastructure error
+    return {
+      success: false,
+      error: lastErrorItem || {
+        username,
+        error: 'scrape_failed',
+        errorDescription: `Apify scraping failed after ${maxRetries} attempts: ${lastError?.message}`
+      }
+    };
   }
 
   /**
@@ -118,13 +184,73 @@ export class ApifyAdapter {
     const runResult = await this.startActorRun(username, postsLimit);
 
     // Step 2: Wait for completion (with timeout)
-    await this.waitForCompletion(runResult.id, SCRAPER_CONFIG.timeout);
+    await this.waitForCompletion(runResult.id, SCRAPER_CONFIG.timeout_ms);
 
     // Step 3: Fetch results from dataset
     const rawProfile = await this.fetchDatasetResults(runResult.defaultDatasetId);
 
     // Step 4: Transform to ProfileData format
     return this.transformProfile(rawProfile);
+  }
+
+  /**
+   * Execute single scrape attempt with metadata (for pre-analysis checks)
+   */
+  private async executeScrapeWithMeta(username: string, postsLimit: number): Promise<ScrapeResult> {
+    // Step 1: Start actor run
+    const runResult = await this.startActorRun(username, postsLimit);
+
+    // Step 2: Wait for completion (with timeout)
+    await this.waitForCompletion(runResult.id, SCRAPER_CONFIG.timeout_ms);
+
+    // Step 3: Fetch raw results from dataset
+    const rawItems = await this.fetchDatasetItems(runResult.defaultDatasetId);
+
+    // Step 4: Check if we got any results
+    if (!rawItems || rawItems.length === 0) {
+      return {
+        success: false,
+        rawItemCount: 0,
+        error: {
+          username,
+          error: 'not_found',
+          errorDescription: 'No data returned from scraper'
+        }
+      };
+    }
+
+    const firstItem = rawItems[0];
+
+    // Step 5: Check if the result is an error item (not_found, etc)
+    if (this.isErrorItem(firstItem)) {
+      return {
+        success: false,
+        rawItemCount: rawItems.length,
+        error: firstItem as ApifyErrorItem
+      };
+    }
+
+    // Step 6: Transform to ProfileData format
+    const profile = this.transformProfile(firstItem as ApifyRawProfile);
+
+    return {
+      success: true,
+      profile,
+      rawItemCount: rawItems.length
+    };
+  }
+
+  /**
+   * Check if an Apify result item is an error (not a profile)
+   */
+  private isErrorItem(item: any): boolean {
+    // Error items have 'error' or 'errorDescription' fields
+    // and typically lack profile data like 'fullName', 'followersCount'
+    return (
+      item.error !== undefined ||
+      item.errorDescription !== undefined ||
+      (item.username && !item.fullName && !item.followersCount)
+    );
   }
 
   /**
@@ -220,6 +346,26 @@ export class ApifyAdapter {
     }
 
     return items[0] as ApifyRawProfile;
+  }
+
+  /**
+   * Fetch raw items from dataset (for pre-analysis checks)
+   */
+  private async fetchDatasetItems(datasetId: string): Promise<any[]> {
+    const response = await fetch(
+      `${this.baseURL}/datasets/${datasetId}/items?format=json`,
+      {
+        headers: {
+          'Authorization': `Bearer ${this.apiToken}`
+        }
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch dataset: ${response.status}`);
+    }
+
+    return await response.json();
   }
 
   /**
