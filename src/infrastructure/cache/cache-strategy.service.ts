@@ -4,21 +4,19 @@ import type { R2Bucket } from '@cloudflare/workers-types';
 
 /**
  * CACHE STRATEGY SERVICE
- * 
+ *
  * Phase 7: Smart Caching with TTL and Invalidation
- * 
+ *
  * Strategy:
- * - LIGHT: 24h TTL (less critical, cost-optimized)
- * - DEEP: 12h TTL (balanced freshness vs cost)
- * - XRAY: 6h TTL (most critical, freshest data)
- * 
+ * - LIGHT: 24h TTL (extensible framework - add more TTL tiers as needed)
+ *
  * Invalidation Triggers:
  * - TTL expired (automatic)
  * - Follower count changed >10%
  * - Bio changed significantly (>30% different)
  * - Profile went private/public
  * - Verification status changed
- * 
+ *
  * Cache Key Format: `instagram:${username}:v1`
  */
 
@@ -49,7 +47,7 @@ export interface CachedProfile {
 export interface CacheMetadata {
   cached_at: number;
   ttl_seconds: number;
-  analysis_type: 'light' | 'deep' | 'xray';
+  analysis_type: 'light';  // Extensible - add more types as needed
   version: number;
 }
 
@@ -61,10 +59,9 @@ export interface InvalidationReason {
 export class CacheStrategyService {
   private bucket: R2Bucket;
   private readonly CACHE_VERSION = 1;
-  private readonly TTL_CONFIG = {
-    light: 24 * 60 * 60,  // 24 hours
-    deep: 12 * 60 * 60,   // 12 hours
-    xray: 6 * 60 * 60     // 6 hours
+  // TTL configuration - add more tiers as needed
+  private readonly TTL_CONFIG: Record<'light', number> = {
+    light: 24 * 60 * 60  // 24 hours
   };
 
   constructor(bucket: R2Bucket) {
@@ -76,7 +73,7 @@ export class CacheStrategyService {
    */
   async get(
     username: string,
-    analysisType: 'light' | 'deep' | 'xray'
+    analysisType: 'light'
   ): Promise<CachedProfile | null> {
     const key = this.buildCacheKey(username);
     
@@ -112,7 +109,7 @@ export class CacheStrategyService {
   async set(
     username: string,
     profile: CachedProfile,
-    analysisType: 'light' | 'deep' | 'xray'
+    analysisType: 'light'
   ): Promise<void> {
     const key = this.buildCacheKey(username);
     const ttl = this.TTL_CONFIG[analysisType];
@@ -146,7 +143,7 @@ export class CacheStrategyService {
   async shouldInvalidate(
     username: string,
     newProfile: CachedProfile,
-    analysisType: 'light' | 'deep' | 'xray'
+    analysisType: 'light'
   ): Promise<InvalidationReason | null> {
     const cachedProfile = await this.get(username, analysisType);
     
@@ -230,11 +227,10 @@ export class CacheStrategyService {
     avg_age_seconds: number;
   }> {
     const objects = await this.bucket.list({ prefix: 'instagram:' });
-    
+
+    // Extensible - add more types as needed
     const byType: Record<string, number> = {
-      light: 0,
-      deep: 0,
-      xray: 0
+      light: 0
     };
 
     let totalAge = 0;
@@ -280,7 +276,7 @@ export class CacheStrategyService {
   /**
    * Check if TTL expired
    */
-  private isTTLExpired(metadata: CacheMetadata, requestedType: 'light' | 'deep' | 'xray'): boolean {
+  private isTTLExpired(metadata: CacheMetadata, requestedType: 'light'): boolean {
     const age = this.getAge(metadata);
     const requiredTTL = this.TTL_CONFIG[requestedType];
     
@@ -344,27 +340,27 @@ export class CacheStrategyService {
 
 /**
  * Usage Example:
- * 
+ *
  * const cacheStrategy = new CacheStrategyService(env.R2_CACHE_BUCKET);
- * 
+ *
  * // Get with TTL check
- * const cached = await cacheStrategy.get('nike', 'deep');
- * 
+ * const cached = await cacheStrategy.get('nike', 'light');
+ *
  * if (!cached) {
  *   // Scrape fresh data
  *   const profile = await scrapeProfile('nike');
- *   
+ *
  *   // Check if should invalidate existing cache
- *   const invalidation = await cacheStrategy.shouldInvalidate('nike', profile, 'deep');
+ *   const invalidation = await cacheStrategy.shouldInvalidate('nike', profile, 'light');
  *   if (invalidation) {
  *     await cacheStrategy.invalidate('nike', invalidation);
  *   }
- *   
+ *
  *   // Set new cache
- *   await cacheStrategy.set('nike', profile, 'deep');
+ *   await cacheStrategy.set('nike', profile, 'light');
  * }
- * 
+ *
  * // Get statistics
  * const stats = await cacheStrategy.getStatistics();
- * // { total_cached: 150, by_type: { light: 50, deep: 75, xray: 25 }, avg_age_seconds: 18000 }
+ * // { total_cached: 150, by_type: { light: 150 }, avg_age_seconds: 18000 }
  */

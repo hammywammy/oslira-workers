@@ -52,7 +52,7 @@ export class PromptCachingService {
   buildCachedAnalysisPrompt(
     business: BusinessProfile,
     profileData: string,
-    analysisType: 'light' | 'deep' | 'xray'
+    analysisType: 'light'
   ): CachedPrompt {
     
     // CACHED SECTION (reused across all analyses for this business)
@@ -128,9 +128,10 @@ ${this.getAnalysisInstructions(analysisType)}`;
 
   /**
    * Get analysis-specific instructions
+   * Extensible - add more instruction sets here when implementing additional analysis tiers
    */
   private getAnalysisInstructions(type: string): string {
-    const instructions = {
+    const instructions: Record<string, string> = {
       light: `Provide a quick fit assessment:
 - Overall score (0-100)
 - Niche fit score (0-100)
@@ -139,29 +140,10 @@ ${this.getAnalysisInstructions(analysisType)}`;
 - Quick summary (2-3 sentences)
 - Key strengths (2-3 bullets)
 - Red flags (if any)
-- Recommended action (pursue/maybe/skip)`,
-      
-      deep: `Provide detailed analysis:
-- All metrics from light analysis
-- Audience quality score
-- Content quality score
-- Improvement areas
-- Partnership opportunities
-- Outreach angles
-- Urgency level (high/medium/low)`,
-      
-      xray: `Provide psychographic deep dive:
-- All metrics from deep analysis
-- Psychographic fit score
-- OCEAN personality traits
-- Communication style
-- Motivation drivers
-- Decision-making style
-- Psychological hooks
-- Outreach strategy`
+- Recommended action (pursue/maybe/skip)`
     };
 
-    return instructions[type as keyof typeof instructions] || instructions.light;
+    return instructions[type] || instructions.light;
   }
 
   /**
@@ -285,14 +267,14 @@ ${this.getAnalysisInstructions(analysisType)}`;
 
 /**
  * Usage example:
- * 
+ *
  * const cachingService = new PromptCachingService();
- * 
+ *
  * // First request (writes to cache)
- * const cachedPrompt = cachingService.buildCachedAnalysisPrompt(business, profileData, 'deep');
+ * const cachedPrompt = cachingService.buildCachedAnalysisPrompt(business, profileData, 'light');
  * const result1 = await cachingService.callClaudeWithCache(cachedPrompt, ...);
  * // Cost: $0.003 (full price + 25% cache write)
- * 
+ *
  * // Second request within 5 min (reads from cache)
  * const result2 = await cachingService.callClaudeWithCache(cachedPrompt, ...);
  * // Cost: $0.0006 (90% discount on cached 800 tokens)

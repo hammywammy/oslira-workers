@@ -91,7 +91,7 @@ export async function checkProfileRefresh(c: Context<{ Bindings: Env }>) {
         scraper_used: 'apify',
         data_quality: 'high'
       },
-      'deep'
+      'light'
     );
 
     // Calculate changes
@@ -188,9 +188,8 @@ export async function getCacheStatistics(c: Context<{ Bindings: Env }>) {
     return successResponse(c, {
       cache_statistics: stats,
       ttl_config: {
-        light: '24 hours',
-        deep: '12 hours',
-        xray: '6 hours'
+        light: '24 hours'
+        // Add more TTL tiers here when implementing additional analysis types
       },
       invalidation_triggers: [
         'Follower count changed >10%',

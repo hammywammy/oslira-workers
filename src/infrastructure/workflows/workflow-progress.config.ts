@@ -12,7 +12,9 @@
  * - Progress percentages should sum to a flow that ends at 100%
  */
 
-export type AnalysisType = 'light' | 'deep' | 'xray';
+// Extensible type - currently only 'light' is supported
+// Additional types can be added here when implementing new analysis tiers
+export type AnalysisType = 'light';
 
 export interface StepProgress {
   step: string;
@@ -37,7 +39,7 @@ export interface AnalysisTimingProfile {
 
 /**
  * Timing profiles for each analysis type
- * Update these when adding new analysis types or when timing changes
+ * Add new profiles here when implementing additional analysis tiers
  */
 export const ANALYSIS_TIMING_PROFILES: Record<AnalysisType, AnalysisTimingProfile> = {
   light: {
@@ -47,22 +49,6 @@ export const ANALYSIS_TIMING_PROFILES: Record<AnalysisType, AnalysisTimingProfil
     teardown_time: 1,     // Steps 8-11: ~1 second total
     posts_limit: 6,
     credit_cost: 1
-  },
-  deep: {
-    setup_time: 1,        // Steps 1-5: ~1 second total
-    scraping_time: 10,    // Step 6: ~10 seconds (more posts)
-    ai_analysis_time: 15, // Step 7: ~15 seconds (deeper analysis)
-    teardown_time: 1,     // Steps 8-11: ~1 second total
-    posts_limit: 12,
-    credit_cost: 3
-  },
-  xray: {
-    setup_time: 1,        // Steps 1-5: ~1 second total
-    scraping_time: 10,    // Step 6: ~10 seconds (more posts)
-    ai_analysis_time: 25, // Step 7: ~25 seconds (comprehensive analysis)
-    teardown_time: 1,     // Steps 8-11: ~1 second total
-    posts_limit: 12,
-    credit_cost: 5
   }
 };
 
@@ -112,18 +98,11 @@ function calculateProgressPercentages(profile: AnalysisTimingProfile): StepProgr
 
 /**
  * Pre-calculated progress maps for each analysis type
+ * Add new maps here when implementing additional analysis tiers
  */
 export const WORKFLOW_PROGRESS: Record<AnalysisType, Map<string, StepProgress>> = {
   light: new Map(
     calculateProgressPercentages(ANALYSIS_TIMING_PROFILES.light)
-      .map(step => [step.step, step])
-  ),
-  deep: new Map(
-    calculateProgressPercentages(ANALYSIS_TIMING_PROFILES.deep)
-      .map(step => [step.step, step])
-  ),
-  xray: new Map(
-    calculateProgressPercentages(ANALYSIS_TIMING_PROFILES.xray)
       .map(step => [step.step, step])
   )
 };

@@ -16,7 +16,7 @@ import { generateId } from '@/shared/utils/id.util';
 
 /**
  * ANALYZE LEAD USE CASE
- * 
+ *
  * Orchestrates the complete 12-step analysis flow:
  * 1. Generate run_id
  * 2. Check for duplicate in-progress analysis
@@ -25,12 +25,12 @@ import { generateId } from '@/shared/utils/id.util';
  * 5. Check R2 cache for profile
  * 6. [Cache miss] Scrape profile via Apify
  * 7. Store scraped profile in R2 cache
- * 8. Execute AI analysis (light/deep/xray)
+ * 8. Execute AI analysis (light only - extensible framework)
  * 9. Upsert lead record
  * 10. Save analysis results
  * 11. Track costs & performance
  * 12. Return formatted response
- * 
+ *
  * Error Handling:
  * - Duplicate analysis → 409 Conflict
  * - Insufficient credits → 402 Payment Required
@@ -42,7 +42,7 @@ export interface AnalyzeLeadParams {
   accountId: string;
   businessProfileId: string;
   username: string;
-  analysisType: 'light' | 'deep' | 'xray';
+  analysisType: 'light';  // Extensible - add more types as needed
 }
 
 export interface AnalyzeLeadResult {
@@ -55,7 +55,7 @@ export interface AnalyzeLeadResult {
   engagement_score: number;
   confidence_level: number;
   summary_text: string;
-  outreach_message?: string; // Only for deep/xray
+  outreach_message?: string;  // Reserved for future analysis tiers
   actual_cost: number;
   processing_time_ms: number;
   cache_hit: boolean;
@@ -126,11 +126,11 @@ export class AnalyzeLeadUseCase {
         analysis_id: analysisId,
         status: 'complete',
         overall_score: analysisResult.aiResult.overall_score,
-        niche_fit_score: analysisResult.aiResult.niche_fit_score,
-        engagement_score: analysisResult.aiResult.engagement_score,
-        confidence_level: analysisResult.aiResult.confidence_level,
+        niche_fit_score: analysisResult.aiResult.overall_score,  // Light analysis uses overall_score
+        engagement_score: analysisResult.aiResult.overall_score,  // Light analysis uses overall_score
+        confidence_level: 0.85,  // Default confidence for light analysis
         summary_text: analysisResult.aiResult.summary_text,
-        outreach_message: analysisResult.aiResult.outreach_message,
+        outreach_message: undefined,  // Reserved for future analysis tiers
         actual_cost: analysisResult.apifyCost + analysisResult.aiResult.total_cost,
         processing_time_ms: processingTime,
         cache_hit: analysisResult.cacheHit
@@ -177,7 +177,7 @@ export class AnalyzeLeadUseCase {
   private async deductCredits(
     accountId: string,
     amount: number,
-    analysisType: 'light' | 'deep' | 'xray'
+    analysisType: 'light'
   ): Promise<void> {
     this.perfTracker.startStep('deduct_credits');
 
@@ -257,22 +257,10 @@ export class AnalyzeLeadUseCase {
       this.perfTracker.endStep('store_cache');
     }
 
-    // Execute AI analysis
+    // Execute AI analysis (extensible - add more cases when implementing additional tiers)
     this.perfTracker.startStep('ai_analysis');
     const aiService = await AIAnalysisService.create(this.env);
-    let aiResult;
-
-    switch (params.analysisType) {
-      case 'light':
-        aiResult = await aiService.executeLightAnalysis(business, profile);
-        break;
-      case 'deep':
-        aiResult = await aiService.executeDeepAnalysis(business, profile);
-        break;
-      case 'xray':
-        aiResult = await aiService.executeXRayAnalysis(business, profile);
-        break;
-    }
+    const aiResult = await aiService.executeLightAnalysis(business, profile);
 
     this.costTracker.recordCost('ai', aiResult.total_cost);
     this.perfTracker.endStep('ai_analysis');
@@ -313,7 +301,7 @@ export class AnalyzeLeadUseCase {
     leadId: string;
     accountId: string;
     businessProfileId: string;
-    analysisType: 'light' | 'deep' | 'xray';
+    analysisType: 'light';
     result: any;
     creditsCharged: number;
   }): Promise<string> {
@@ -357,17 +345,19 @@ export class AnalyzeLeadUseCase {
 
   /**
    * Get credit cost by analysis type
+   * Extensible - add more costs when implementing additional tiers
    */
-  private getCreditCost(type: 'light' | 'deep' | 'xray'): number {
-    const costs = { light: 1, deep: 3, xray: 5 };
+  private getCreditCost(type: 'light'): number {
+    const costs: Record<'light', number> = { light: 1 };
     return costs[type];
   }
 
   /**
    * Get posts limit by analysis type
+   * Extensible - add more limits when implementing additional tiers
    */
-  private getPostsLimit(type: 'light' | 'deep' | 'xray'): number {
-    const limits = { light: 6, deep: 12, xray: 12 };
+  private getPostsLimit(type: 'light'): number {
+    const limits: Record<'light', number> = { light: 6 };
     return limits[type];
   }
 }

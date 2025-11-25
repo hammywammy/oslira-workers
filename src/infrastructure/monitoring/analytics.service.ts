@@ -22,7 +22,7 @@ export interface AnalysisCostMetric {
   run_id: string;
   account_id: string;
   business_profile_id: string;
-  analysis_type: 'light' | 'deep' | 'xray';
+  analysis_type: 'light';  // Extensible - add more types as needed
   username: string;
 
   // Costs
@@ -43,7 +43,7 @@ export interface PerformanceMetric {
   timestamp: Date;
   run_id: string;
   account_id: string;
-  analysis_type: 'light' | 'deep' | 'xray';
+  analysis_type: 'light';  // Extensible - add more types as needed
   
   // Timings
   total_duration_ms: number;
@@ -80,7 +80,7 @@ export interface CreditUsageMetric {
   transaction_type: 'purchase' | 'analysis' | 'refund' | 'subscription' | 'bonus';
   credits_amount: number;
   credits_balance_after: number;
-  analysis_type?: 'light' | 'deep' | 'xray';
+  analysis_type?: 'light';  // Extensible - add more types as needed
   cost_usd?: number;
 }
 
@@ -94,7 +94,7 @@ export class AnalyticsService {
     run_id: string;
     account_id: string;
     business_profile_id: string;
-    analysis_type: 'light' | 'deep' | 'xray';
+    analysis_type: 'light';
     username: string;
     cost_breakdown: CostBreakdown;
     cache_hit: boolean;
@@ -134,7 +134,7 @@ export class AnalyticsService {
   async writePerformance(data: {
     run_id: string;
     account_id: string;
-    analysis_type: 'light' | 'deep' | 'xray';
+    analysis_type: 'light';
     performance: PerformanceBreakdown;
     status: 'complete' | 'failed' | 'cancelled';
   }): Promise<void> {
@@ -208,7 +208,7 @@ export class AnalyticsService {
     transaction_type: 'purchase' | 'analysis' | 'refund' | 'subscription' | 'bonus';
     credits_amount: number;
     credits_balance_after: number;
-    analysis_type?: 'light' | 'deep' | 'xray';
+    analysis_type?: 'light';
     cost_usd?: number;
   }): Promise<void> {
     try {

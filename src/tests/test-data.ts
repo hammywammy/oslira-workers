@@ -134,9 +134,9 @@ export function registerTestDataEndpoints(app: Hono<{ Bindings: Env }>) {
 
       await supabase.rpc('deduct_credits', {
         p_account_id: account.id,
-        p_amount: -2,
+        p_amount: -1,
         p_transaction_type: 'analysis',
-        p_description: 'Deep analysis of @nike'
+        p_description: 'Light analysis of @nike'
       });
 
       await supabase.rpc('deduct_credits', {
@@ -159,7 +159,7 @@ export function registerTestDataEndpoints(app: Hono<{ Bindings: Env }>) {
           account_id: account.id,
           business_profile_id: business.id,
           requested_by: testUserId,
-          analysis_type: 'deep',
+          analysis_type: 'light',
           status: 'completed',
           overall_score: 85,
           niche_fit_score: 90,
@@ -211,7 +211,7 @@ export function registerTestDataEndpoints(app: Hono<{ Bindings: Env }>) {
             status: a.status
           })),
           credits_balance: finalBalance.credit_balance,
-          credits_flow: '100 (initial) - 2 (nike) - 1 (adidas) + 50 (bonus) = 147'
+          credits_flow: '100 (initial) - 1 (nike) - 1 (adidas) + 50 (bonus) = 148'
         }
       });
 
