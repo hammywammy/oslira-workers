@@ -261,9 +261,9 @@ export async function getAnalysisProgress(c: Context<{ Bindings: Env }>) {
  * Real-time alternative to polling /progress endpoint.
  * Automatically closes when analysis completes or fails.
  *
- * ARCHITECTURE: Creates its own SSE stream with built-in heartbeat,
- * polling the DO for updates. This is more robust than forwarding the
- * DO's stream directly, as it maintains keep-alive during long operations.
+ * ARCHITECTURE: Uses TransformStream pattern (NOT ReadableStream with controller)
+ * which is the only reliable way to stream SSE on Cloudflare Workers.
+ * The async polling loop runs via ctx.waitUntil() to keep the connection alive.
  *
  * NOTE: No authentication required - the cryptographically random runId
  * serves as implicit authentication (only the user who initiated the request knows it).
@@ -280,43 +280,45 @@ export async function streamAnalysisProgress(c: Context<{ Bindings: Env }>) {
     const progressId = c.env.ANALYSIS_PROGRESS.idFromName(runId);
     const progressDO = c.env.ANALYSIS_PROGRESS.get(progressId);
 
-    // Track stream state
-    let isStreamClosed = false;
-    let lastProgress = -1;
-    let lastStatus = '';
-    let pollInterval: ReturnType<typeof setInterval> | null = null;
-    let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
-
+    // Use TransformStream - the ONLY reliable pattern for SSE on Cloudflare Workers
+    // ReadableStream with controller causes immediate connection cancellation
+    const { readable, writable } = new TransformStream();
+    const writer = writable.getWriter();
     const encoder = new TextEncoder();
 
-    // Create our own SSE stream with heartbeat
-    const stream = new ReadableStream({
-      start: async (controller) => {
-        // Helper to send SSE event
-        const sendEvent = (eventType: string, data: object) => {
-          if (isStreamClosed) return;
-          try {
-            const event = `event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
-            controller.enqueue(encoder.encode(event));
-          } catch (e) {
-            // Stream might be closed
-          }
-        };
+    // Helper to write SSE event
+    const writeEvent = async (eventType: string, data: object): Promise<boolean> => {
+      try {
+        const event = `event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
+        await writer.write(encoder.encode(event));
+        return true;
+      } catch (e) {
+        // Stream closed by client
+        return false;
+      }
+    };
 
-        // Helper to send heartbeat comment (keeps connection alive)
-        const sendHeartbeat = () => {
-          if (isStreamClosed) return;
-          try {
-            controller.enqueue(encoder.encode(': heartbeat\n\n'));
-          } catch (e) {
-            // Stream might be closed
-          }
-        };
+    // Helper to write SSE comment (heartbeat)
+    const writeComment = async (comment: string): Promise<boolean> => {
+      try {
+        await writer.write(encoder.encode(`: ${comment}\n\n`));
+        return true;
+      } catch (e) {
+        return false;
+      }
+    };
 
+    // The async streaming loop - runs in background via waitUntil
+    const streamLoop = async () => {
+      let lastProgress = -1;
+      let lastStatus = '';
+      let isComplete = false;
+
+      try {
         // Initial SSE comment to establish stream
-        controller.enqueue(encoder.encode(': stream-start\n\n'));
+        if (!await writeComment('stream-start')) return;
 
-        // Fetch initial state
+        // Fetch and send initial state
         try {
           const response = await progressDO.fetch('http://do/progress');
           if (response.ok) {
@@ -326,15 +328,13 @@ export async function streamAnalysisProgress(c: Context<{ Bindings: Env }>) {
               lastStatus = progress.status;
 
               const eventType = progress.status === 'pending' ? 'ready' : 'progress';
-              sendEvent(eventType, progress);
+              if (!await writeEvent(eventType, progress)) return;
               console.log(`[SSE] Initial state: ${progress.status} ${progress.progress}%`);
 
-              // If already terminal, close stream
+              // If already terminal, send final event and exit
               if (progress.status === 'complete' || progress.status === 'failed' || progress.status === 'cancelled') {
-                sendEvent(progress.status, progress);
-                controller.close();
-                isStreamClosed = true;
-                return;
+                await writeEvent(progress.status, progress);
+                isComplete = true;
               }
             }
           }
@@ -342,66 +342,71 @@ export async function streamAnalysisProgress(c: Context<{ Bindings: Env }>) {
           console.error('[SSE] Failed to fetch initial state:', e);
         }
 
-        // Poll for updates every second
-        pollInterval = setInterval(async () => {
-          if (isStreamClosed) {
-            if (pollInterval) clearInterval(pollInterval);
-            return;
+        // Poll loop until terminal state
+        let heartbeatCounter = 0;
+        while (!isComplete) {
+          // Wait 1 second between polls
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          heartbeatCounter++;
+
+          // Send heartbeat every 15 seconds (every 15 iterations)
+          if (heartbeatCounter >= 15) {
+            if (!await writeComment('heartbeat')) {
+              console.log('[SSE] Client disconnected during heartbeat');
+              return;
+            }
+            heartbeatCounter = 0;
           }
 
           try {
             const response = await progressDO.fetch('http://do/progress');
-            if (!response.ok) return;
+            if (!response.ok) continue;
 
             const progress = await response.json() as { status: string; progress: number } | null;
-            if (!progress) return;
+            if (!progress) continue;
 
             // Only send if progress or status changed
             if (progress.progress !== lastProgress || progress.status !== lastStatus) {
               lastProgress = progress.progress;
               lastStatus = progress.status;
 
-              sendEvent('progress', progress);
+              if (!await writeEvent('progress', progress)) {
+                console.log('[SSE] Client disconnected during progress update');
+                return;
+              }
 
-              // If terminal state, send final event and close
+              // If terminal state, send final event and exit
               if (progress.status === 'complete' || progress.status === 'failed' || progress.status === 'cancelled') {
-                sendEvent(progress.status, progress);
+                await writeEvent(progress.status, progress);
                 console.log(`[SSE] Terminal state: ${progress.status}`);
-
-                // Clean up intervals
-                if (pollInterval) clearInterval(pollInterval);
-                if (heartbeatInterval) clearInterval(heartbeatInterval);
-                pollInterval = null;
-                heartbeatInterval = null;
-
-                controller.close();
-                isStreamClosed = true;
+                isComplete = true;
               }
             }
           } catch (e) {
-            // Ignore polling errors, will retry next interval
+            // Ignore polling errors, will retry next iteration
           }
-        }, 1000);
-
-        // Send heartbeat every 15 seconds to keep connection alive
-        heartbeatInterval = setInterval(() => {
-          sendHeartbeat();
-        }, 15000);
-      },
-
-      cancel: () => {
-        console.log('[SSE] Client disconnected:', runId);
-        isStreamClosed = true;
-        if (pollInterval) clearInterval(pollInterval);
-        if (heartbeatInterval) clearInterval(heartbeatInterval);
+        }
+      } catch (e) {
+        console.error('[SSE] Stream loop error:', e);
+      } finally {
+        try {
+          await writer.close();
+        } catch (e) {
+          // Writer might already be closed
+        }
+        console.log('[SSE] Stream closed:', runId);
       }
-    });
+    };
 
-    return new Response(stream, {
+    // CRITICAL: Use waitUntil to keep the async loop running
+    // Without this, Cloudflare Workers will terminate the request immediately
+    c.executionCtx.waitUntil(streamLoop());
+
+    // Return response immediately - the stream will be populated by streamLoop
+    return new Response(readable, {
       headers: {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
         'X-Accel-Buffering': 'no'
       }
     });
