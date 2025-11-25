@@ -1,12 +1,16 @@
 // infrastructure/scraping/apify.config.ts
 
 /**
- * APIFY SCRAPER CONFIGURATION
+ * @deprecated This file is deprecated. Use centralized config instead:
+ * import { SCRAPER_CONFIG, getScrapingCost } from '@/config/operations-pricing.config';
  *
- * Currently using single scraper (ds_basic).
- * Future: Can add multiple scrapers for fallback or different channels (Brightdata, etc)
+ * This file re-exports for backward compatibility only.
  */
 
+// Re-export from centralized config for backward compatibility
+export { SCRAPER_CONFIG } from '@/config/operations-pricing.config';
+
+// Legacy interface kept for type compatibility
 export interface ScraperConfig {
   name: string;
   actor_id: string;
@@ -16,23 +20,12 @@ export interface ScraperConfig {
 }
 
 /**
- * PRIMARY SCRAPER CONFIGURATION
- * Updated: 2025-01-20
- */
-export const SCRAPER_CONFIG: ScraperConfig = {
-  name: 'dS_basic',
-  actor_id: 'dSCLg0C3YEZ83HzYX',
-  timeout: 60000,      // 60 seconds
-  max_retries: 3,
-  retry_delay: 2000    // 2 seconds
-};
-
-/**
- * Calculate Apify cost from duration
- * Apify charges $0.25 per compute unit (1 CU = 1 hour)
+ * @deprecated Use getScrapingCost() from centralized config instead.
+ * Apify costs are now fixed per-run, not calculated from duration.
  */
 export function calculateApifyCost(durationMs: number): number {
-  const computeUnits = durationMs / (1000 * 60 * 60);  // ms to hours
-  const cost = computeUnits * 0.25;
-  return parseFloat(cost.toFixed(6));
+  console.warn('[DEPRECATED] calculateApifyCost() is deprecated. Use getScrapingCost() from @/config/operations-pricing.config');
+  // Return fixed cost regardless of duration - Apify costs are untrackable
+  const { getScrapingCost } = require('@/config/operations-pricing.config');
+  return getScrapingCost('light');
 }

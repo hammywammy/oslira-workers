@@ -12,6 +12,12 @@ export type { RateLimitConfig } from '@/config/rate-limits.config';
  */
 export function rateLimitMiddleware(config: RateLimitConfig) {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
+    // Skip rate limiting in staging
+    if (c.env.APP_ENV === 'staging') {
+      console.log('[RateLimit] Skipped (staging environment)');
+      return await next();
+    }
+
     // Get identifier (user ID or IP address)
     const auth = c.get('auth') as { userId?: string } | undefined;
     const ip = c.req.header('cf-connecting-ip');
@@ -27,25 +33,26 @@ export function rateLimitMiddleware(config: RateLimitConfig) {
         count: number;
         resetAt: number;
       } | null;
-      
+
       let count = 0;
       let resetAt = now + windowMs;
-      
+      let shouldWrite = false;
+
       if (stored && stored.resetAt > now) {
-        // Within current window
+        // Within window - increment in-memory only (no write)
         count = stored.count + 1;
         resetAt = stored.resetAt;
-        
+
         if (count > config.requests) {
           const retryAfter = Math.ceil((resetAt - now) / 1000);
-          
+
           console.warn(`[RateLimit] BLOCKED`, {
             identifier: identifier.substring(0, 8),
             path: c.req.path,
             count,
             limit: config.requests
           });
-          
+
           return c.json({
             success: false,
             error: 'Rate limit exceeded',
@@ -59,33 +66,44 @@ export function rateLimitMiddleware(config: RateLimitConfig) {
           });
         }
       } else {
-        // New window
+        // New window - write once
         count = 1;
         resetAt = now + windowMs;
+        shouldWrite = true;
       }
-      
-      // Update count in KV
-      await c.env.OSLIRA_KV.put(
-        key,
-        JSON.stringify({ count, resetAt }),
-        { expirationTtl }
-      );
-      
+
+      // Only write to KV for new windows
+      if (shouldWrite) {
+        try {
+          await c.env.OSLIRA_KV.put(
+            key,
+            JSON.stringify({ count, resetAt }),
+            { expirationTtl }
+          );
+          console.log(`[RateLimit] New window started for ${identifier.substring(0, 8)}`);
+        } catch (kvError: any) {
+          console.error(`[RateLimit] KV PUT failed (non-fatal):`, {
+            identifier: identifier.substring(0, 8),
+            error: kvError.message
+          });
+        }
+      }
+
       // Add rate limit headers
       const remaining = Math.max(0, config.requests - count);
       c.header('X-RateLimit-Limit', config.requests.toString());
       c.header('X-RateLimit-Remaining', remaining.toString());
       c.header('X-RateLimit-Reset', resetAt.toString());
-      
+
       await next();
-      
+
     } catch (error: any) {
       console.error(`[RateLimit] ERROR:`, {
         identifier: identifier.substring(0, 8),
         error: error.message
       });
-      
-      // Fail open - allow request if rate limiting fails
+
+      // Fail open
       await next();
     }
   };

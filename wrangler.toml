@@ -83,10 +83,6 @@ binding = "STRIPE_WEBHOOK_QUEUE"
 queue = "stripe-webhooks"
 
 [[queues.producers]]
-binding = "ANALYSIS_QUEUE"
-queue = "analysis-jobs"
-
-[[queues.producers]]
 binding = "BUSINESS_CONTEXT_QUEUE"
 queue = "business-context-jobs"
 
@@ -97,13 +93,6 @@ max_batch_size = 10
 max_batch_timeout = 30
 max_retries = 3
 dead_letter_queue = "stripe-webhooks-dlq"
-
-[[queues.consumers]]
-queue = "analysis-jobs"
-max_batch_size = 1
-max_batch_timeout = 5
-max_retries = 3
-dead_letter_queue = "analysis-jobs-dlq"
 
 [[queues.consumers]]
 queue = "business-context-jobs"
@@ -121,6 +110,7 @@ dead_letter_queue = "business-context-jobs-dlq"
 [triggers]
 crons = [
   "0 0 * * *",   # Daily free plan credit reset (midnight UTC)
+  "0 1 * * *",   # Daily refresh token cleanup (1 AM UTC)
   "0 3 1 * *",   # Monthly renewal (1st of month, 3 AM UTC)
   "0 2 * * *",   # Daily cleanup (2 AM UTC)
   "0 * * * *"    # Hourly failed analysis cleanup
@@ -203,10 +193,6 @@ binding = "STRIPE_WEBHOOK_QUEUE"
 queue = "stripe-webhooks-staging"
 
 [[env.staging.queues.producers]]
-binding = "ANALYSIS_QUEUE"
-queue = "analysis-jobs-staging"
-
-[[env.staging.queues.producers]]
 binding = "BUSINESS_CONTEXT_QUEUE"
 queue = "business-context-jobs-staging"
 
@@ -219,13 +205,6 @@ max_batch_size = 10
 max_batch_timeout = 30
 max_retries = 3
 dead_letter_queue = "stripe-webhooks-dlq-staging"
-
-[[env.staging.queues.consumers]]
-queue = "analysis-jobs-staging"
-max_batch_size = 1
-max_batch_timeout = 5
-max_retries = 3
-dead_letter_queue = "analysis-jobs-dlq-staging"
 
 [[env.staging.queues.consumers]]
 queue = "business-context-jobs-staging"

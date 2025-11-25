@@ -14,9 +14,9 @@ export const CommonSchemas = {
     .max(30, 'Username too long')
     .regex(/^[a-zA-Z0-9._]+$/, 'Invalid Instagram username format'),
   
-  // Analysis type
-  analysisType: z.enum(['light', 'deep', 'xray'], {
-    errorMap: () => ({ message: 'Analysis type must be light, deep, or xray' })
+  // Analysis type (extensible framework - currently only 'light' is supported)
+  analysisType: z.enum(['light'], {
+    errorMap: () => ({ message: 'Analysis type must be light' })
   }),
   
   // Pagination

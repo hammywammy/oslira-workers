@@ -82,7 +82,6 @@ ${contextPack.outreach_goals || 'Build partnerships and drive conversions'}
    * Build profile summary (DYNAMIC - never cached)
    */
   buildProfileSummary(profile: ProfileData): string {
-    const engagementRate = this.calculateEngagementRate(profile);
     const avgLikes = this.calculateAvgLikes(profile);
     const avgComments = this.calculateAvgComments(profile);
     const postingFrequency = this.estimatePostingFrequency(profile);
@@ -104,8 +103,7 @@ ${profile.bio || 'No bio'}
 ## External Link
 ${profile.external_url || 'None'}
 
-## Engagement Metrics (Last ${profile.posts.length} posts)
-- **Engagement Rate:** ${engagementRate.toFixed(2)}%
+## Post Metrics (Last ${profile.posts.length} posts)
 - **Avg Likes per Post:** ${avgLikes.toLocaleString()}
 - **Avg Comments per Post:** ${avgComments.toLocaleString()}
 - **Estimated Posting Frequency:** ${postingFrequency}
@@ -122,12 +120,9 @@ ${profile.external_url || 'None'}
     let postsSection = `# RECENT POSTS (Last ${posts.length})\n\n`;
 
     posts.forEach((post, index) => {
-      const engagement = ((post.like_count + post.comment_count) / profile.follower_count * 100).toFixed(2);
-
       postsSection += `## Post ${index + 1} (${post.media_type})
 **Posted:** ${new Date(post.timestamp).toLocaleDateString()}
 **Likes:** ${post.like_count.toLocaleString()} | **Comments:** ${post.comment_count.toLocaleString()}
-**Engagement:** ${engagement}%
 
 **Caption:**
 ${post.caption || 'No caption'}
@@ -150,7 +145,6 @@ ${post.caption || 'No caption'}
     user: string;
   } {
     const businessContext = this.buildBusinessContext(business);
-    const engagementRate = this.calculateEngagementRate(profile);
     const recentPosts = this.buildRecentPosts(profile, 6);
 
     return {
@@ -166,7 +160,6 @@ Respond in JSON format with these exact fields:
 # PROFILE TO ANALYZE
 **Username:** @${profile.username}
 **Follower Count:** ${profile.follower_count.toLocaleString()}
-**Engagement Rate:** ${engagementRate.toFixed(2)}%
 **Bio:** ${profile.bio || 'No bio'}
 
 ${recentPosts}
@@ -186,18 +179,6 @@ Return JSON:
   // ===============================================================================
   // HELPER METHODS
   // ===============================================================================
-
-  private calculateEngagementRate(profile: ProfileData): number {
-    if (!profile.posts.length || !profile.follower_count) return 0;
-
-    const totalEngagement = profile.posts.reduce(
-      (sum, post) => sum + post.like_count + post.comment_count,
-      0
-    );
-
-    const avgEngagementPerPost = totalEngagement / profile.posts.length;
-    return (avgEngagementPerPost / profile.follower_count) * 100;
-  }
 
   private calculateAvgLikes(profile: ProfileData): number {
     if (!profile.posts.length) return 0;

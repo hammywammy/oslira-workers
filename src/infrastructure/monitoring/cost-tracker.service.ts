@@ -1,9 +1,14 @@
 // infrastructure/monitoring/cost-tracker.service.ts
 
+import { CREDIT_REVENUE } from '@/config/operations-pricing.config';
+
 /**
  * COST TRACKER SERVICE
  * Tracks all costs per analysis: Apify + AI calls
  * Calculates profit margins based on credit pricing
+ *
+ * NOTE: Credit price comes from centralized config
+ * See: @/config/operations-pricing.config → CREDIT_REVENUE
  */
 
 export interface CostBreakdown {
@@ -115,10 +120,8 @@ export class CostTracker {
    * Calculate profit margins
    */
   calculateMargin(creditsUsed: number): MarginAnalysis {
-    const CREDIT_PRICE = 0.97;  // $0.97 per credit
-    
     const breakdown = this.getBreakdown();
-    const revenue = creditsUsed * CREDIT_PRICE;
+    const revenue = creditsUsed * CREDIT_REVENUE.per_credit_usd;
     const totalCost = breakdown.total_cost;
     const grossProfit = revenue - totalCost;
     const marginPercentage = revenue > 0 ? (grossProfit / revenue) * 100 : 0;

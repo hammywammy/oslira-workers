@@ -49,7 +49,6 @@ export interface Env {
   
   // Queues (async message processing)
   STRIPE_WEBHOOK_QUEUE: Queue;
-  ANALYSIS_QUEUE: Queue;
   BUSINESS_CONTEXT_QUEUE: Queue;
 }
 

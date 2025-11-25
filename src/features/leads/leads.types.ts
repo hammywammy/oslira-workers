@@ -55,7 +55,6 @@ export interface LeadListItem {
   analysis_completed_at: string | null;
   overall_score: number | null;
   summary: string | null;
-  confidence: number | null;
 }
 
 export interface LeadDetail {
@@ -84,7 +83,6 @@ export interface LeadDetail {
   analysis_completed_at: string | null;
   overall_score: number | null;
   summary: string | null;
-  confidence: number | null;
 }
 
 export interface LeadAnalysis {
@@ -93,7 +91,6 @@ export interface LeadAnalysis {
   analysis_type: 'light';
   overall_score: number;
   summary: string | null;
-  confidence: number | null;
   status: string;
   error_message: string | null;
   started_at: string | null;

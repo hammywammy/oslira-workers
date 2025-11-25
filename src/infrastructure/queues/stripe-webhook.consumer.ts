@@ -4,6 +4,8 @@ import type { Env } from '@/shared/types/env.types';
 import type { MessageBatch, Message } from '@cloudflare/workers-types';
 import { SupabaseClientFactory } from '@/infrastructure/database/supabase.client';
 import { CreditsRepository } from '@/infrastructure/database/repositories/credits.repository';
+import Stripe from 'stripe';
+import { getSecret } from '@/infrastructure/config/secrets';
 
 /**
  * STRIPE WEBHOOK CONSUMER
@@ -69,9 +71,9 @@ async function processWebhookMessage(
   const supabase = await SupabaseClientFactory.createAdminClient(env);
   const { data: existing } = await supabase
     .from('webhook_events')
-    .select('id')
-    .eq('event_id', data.event_id)
-    .eq('status', 'processed')
+    .select('stripe_event_id')
+    .eq('stripe_event_id', data.event_id)
+    .not('processed_at', 'is', null)
     .single();
 
   if (existing) {
@@ -81,11 +83,10 @@ async function processWebhookMessage(
 
   // Store webhook event
   await supabase.from('webhook_events').insert({
-    event_id: data.event_id,
+    stripe_event_id: data.event_id,
     event_type: data.event_type,
-    payload: data.payload,
-    status: 'processing',
-    received_at: data.received_at
+    account_id: data.account_id,
+    payload: data.payload
   });
 
   // Route to appropriate handler
@@ -113,15 +114,13 @@ async function processWebhookMessage(
   // Mark as processed
   await supabase
     .from('webhook_events')
-    .update({ status: 'processed', processed_at: new Date().toISOString() })
-    .eq('event_id', data.event_id);
+    .update({ processed_at: new Date().toISOString() })
+    .eq('stripe_event_id', data.event_id);
 }
 
 /**
  * Handle checkout.session.completed
- * Handles both:
- * - Subscription upgrades (mode: 'subscription')
- * - One-time credit purchases (mode: 'payment')
+ * Handles both subscription upgrades and one-time credit purchases
  */
 async function handleCheckoutCompleted(data: StripeWebhookMessage, env: Env): Promise<void> {
   const session = data.payload;
@@ -133,54 +132,120 @@ async function handleCheckoutCompleted(data: StripeWebhookMessage, env: Env): Pr
     mode: session.mode,
   });
 
-  const supabase = await SupabaseClientFactory.createAdminClient(env);
-
-  // Handle subscription checkout (upgrades)
-  if (session.mode === 'subscription' && session.subscription) {
-    const newTier = session.metadata?.new_tier;
-    const stripeSubscriptionId = session.subscription;
-
-    if (newTier && accountId) {
-      // Update subscription in database
-      const { error: updateError } = await supabase
-        .from('subscriptions')
-        .update({
-          plan_type: newTier,
-          stripe_subscription_id: stripeSubscriptionId,
-          status: 'active',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('account_id', accountId);
-
-      if (updateError) {
-        console.error('[StripeWebhook] Failed to update subscription:', updateError);
-        throw updateError;
-      }
-
-      // Get new tier limits from plans table
-      const { data: plan } = await supabase
-        .from('plans')
-        .select('credits_per_month, features')
-        .eq('name', newTier)
-        .single();
-
-      if (plan) {
-        // Reset balances to new tier limits
-        await supabase
-          .from('balances')
-          .update({
-            credit_balance: plan.credits_per_month,
-            light_analyses_balance: parseInt(plan.features?.light_analyses || '0'),
-            updated_at: new Date().toISOString(),
-          })
-          .eq('account_id', accountId);
-      }
-
-      console.log(`[StripeWebhook] Upgraded account ${accountId} to ${newTier}`);
-    }
+  if (!accountId) {
+    console.error('[StripeWebhook] No account_id in session metadata');
+    return;
   }
 
-  // Handle one-time credit purchases (existing logic)
+  const supabase = await SupabaseClientFactory.createAdminClient(env);
+
+  // ===============================================================================
+  // HANDLE SUBSCRIPTION UPGRADES (mode: 'subscription')
+  // ===============================================================================
+  if (session.mode === 'subscription' && session.subscription) {
+    const newTier = session.metadata?.new_tier;
+    const stripeSubscriptionId = session.subscription as string;
+
+    if (!newTier) {
+      console.error('[StripeWebhook] No new_tier in session metadata');
+      return;
+    }
+
+    // Fetch full subscription details from Stripe API
+    const stripeKey = await getSecret('STRIPE_SECRET_KEY', env, env.APP_ENV);
+    const stripe = new Stripe(stripeKey, { apiVersion: '2024-12-18.acacia' });
+
+    const stripeSubscription = await stripe.subscriptions.retrieve(stripeSubscriptionId);
+
+    // Extract subscription details
+    const subscriptionItem = stripeSubscription.items.data[0];
+    const priceId = subscriptionItem?.price?.id || null;
+    const priceCents = subscriptionItem?.price?.unit_amount || 0;
+    const periodStart = new Date(stripeSubscription.current_period_start * 1000).toISOString();
+    const periodEnd = new Date(stripeSubscription.current_period_end * 1000).toISOString();
+
+    console.log('[StripeWebhook] Subscription details from Stripe:', {
+      subscription_id: stripeSubscriptionId,
+      price_id: priceId,
+      price_cents: priceCents,
+      period_start: periodStart,
+      period_end: periodEnd,
+      new_tier: newTier,
+    });
+
+    // UPDATE 1: subscriptions table
+    // Determine environment-specific subscription ID column
+    const isProduction = env.APP_ENV === 'production';
+    const subscriptionUpdateData: any = {
+      plan_type: newTier,
+      stripe_price_id: priceId,
+      price_cents: priceCents,
+      status: 'active',
+      current_period_start: periodStart,
+      current_period_end: periodEnd,
+      updated_at: new Date().toISOString(),
+    };
+
+    // Write to environment-specific column
+    if (isProduction) {
+      subscriptionUpdateData.stripe_subscription_id_live = stripeSubscriptionId;
+    } else {
+      subscriptionUpdateData.stripe_subscription_id_test = stripeSubscriptionId;
+    }
+
+    const { error: updateError } = await supabase
+      .from('subscriptions')
+      .update(subscriptionUpdateData)
+      .eq('account_id', accountId);
+
+    if (updateError) {
+      console.error('[StripeWebhook] Failed to update subscriptions table:', updateError);
+      throw updateError;
+    }
+
+    console.log('[StripeWebhook] subscriptions table updated');
+
+    // UPDATE 2: balances table (get quotas from plans table)
+    const { data: plan, error: planError } = await supabase
+      .from('plans')
+      .select('credits_per_month, light_analyses_per_month')
+      .ilike('name', newTier)
+      .single();
+
+    if (planError || !plan) {
+      console.error('[StripeWebhook] Failed to fetch plan details:', planError);
+      throw new Error(`Plan not found: ${newTier}`);
+    }
+
+    const creditsQuota = plan.credits_per_month;
+    const lightQuota = plan.light_analyses_per_month;
+
+    const { error: balanceError } = await supabase
+      .from('balances')
+      .update({
+        credit_balance: creditsQuota,
+        light_analyses_balance: lightQuota,
+        last_transaction_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('account_id', accountId);
+
+    if (balanceError) {
+      console.error('[StripeWebhook] Failed to update balances table:', balanceError);
+      throw balanceError;
+    }
+
+    console.log('[StripeWebhook] balances table updated:', {
+      credit_balance: creditsQuota,
+      light_analyses_balance: lightQuota,
+    });
+
+    console.log(`[StripeWebhook] ✅ Successfully upgraded account ${accountId} to ${newTier}`);
+  }
+
+  // ===============================================================================
+  // HANDLE ONE-TIME CREDIT PURCHASES (mode: 'payment')
+  // ===============================================================================
   const creditsAmount = session.metadata?.credits_amount;
   if (creditsAmount && parseInt(creditsAmount) > 0) {
     const creditsRepo = new CreditsRepository(supabase);
@@ -205,9 +270,13 @@ async function handleInvoicePaymentSucceeded(data: StripeWebhookMessage, env: En
   // Only process subscription invoices (not one-time purchases)
   if (invoice.subscription) {
     const subscriptionId = invoice.subscription;
-    
+
     const supabase = await SupabaseClientFactory.createAdminClient(env);
-    
+
+    // Determine environment-specific column for subscription ID lookup
+    const isProduction = env.APP_ENV === 'production';
+    const subscriptionIdColumn = isProduction ? 'stripe_subscription_id_live' : 'stripe_subscription_id_test';
+
     // Get subscription with plan details
     const { data: subscription, error } = await supabase
       .from('subscriptions')
@@ -215,10 +284,10 @@ async function handleInvoicePaymentSucceeded(data: StripeWebhookMessage, env: En
         plan_type,
         plans!inner(
           credits_per_month,
-          features
+          light_analyses_per_month
         )
       `)
-      .eq('stripe_subscription_id', subscriptionId)
+      .eq(subscriptionIdColumn, subscriptionId)
       .eq('status', 'active')
       .single();
 
@@ -227,9 +296,9 @@ async function handleInvoicePaymentSucceeded(data: StripeWebhookMessage, env: En
       return;
     }
 
-    const plan = subscription.plans;
-    const creditsQuota = plan.credits_per_month;
-    const lightQuota = parseInt(plan.features.light_analyses);
+    const plan = subscription.plans as any;
+    const creditsQuota = plan.credits_per_month as number;
+    const lightQuota = plan.light_analyses_per_month as number;
 
     // Reset balances (monthly renewal via Stripe invoice)
     await supabase
@@ -241,6 +310,16 @@ async function handleInvoicePaymentSucceeded(data: StripeWebhookMessage, env: En
         updated_at: new Date().toISOString()
       })
       .eq('account_id', accountId);
+
+    // Update subscription period dates
+    await supabase
+      .from('subscriptions')
+      .update({
+        current_period_start: new Date().toISOString(),
+        current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq(subscriptionIdColumn, subscriptionId);
 
     console.log(
       `[StripeWebhook] Reset balances for ${accountId} (${subscription.plan_type}): ` +
@@ -257,15 +336,34 @@ async function handleSubscriptionUpdated(data: StripeWebhookMessage, env: Env): 
   const accountId = data.account_id;
 
   const supabase = await SupabaseClientFactory.createAdminClient(env);
-  
+
+  // Determine environment-specific column for subscription ID lookup
+  const isProduction = env.APP_ENV === 'production';
+  const subscriptionIdColumn = isProduction ? 'stripe_subscription_id_live' : 'stripe_subscription_id_test';
+
+  // Build update object with safe date conversions
+  const updateData: any = {
+    status: subscription.status,
+    updated_at: new Date().toISOString()
+  };
+
+  // Only update dates if they exist (avoid "Invalid time value" errors)
+  if (subscription.current_period_start) {
+    updateData.current_period_start = new Date(subscription.current_period_start * 1000).toISOString();
+  }
+
+  if (subscription.current_period_end) {
+    updateData.current_period_end = new Date(subscription.current_period_end * 1000).toISOString();
+  }
+
+  if (subscription.canceled_at) {
+    updateData.canceled_at = new Date(subscription.canceled_at * 1000).toISOString();
+  }
+
   await supabase
     .from('subscriptions')
-    .update({
-      status: subscription.status,
-      current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
-      updated_at: new Date().toISOString()
-    })
-    .eq('stripe_subscription_id', subscription.id)
+    .update(updateData)
+    .eq(subscriptionIdColumn, subscription.id)
     .eq('account_id', accountId);
 
   console.log(`[StripeWebhook] Updated subscription ${subscription.id} status to ${subscription.status}`);
@@ -279,16 +377,29 @@ async function handleSubscriptionDeleted(data: StripeWebhookMessage, env: Env): 
   const accountId = data.account_id;
 
   const supabase = await SupabaseClientFactory.createAdminClient(env);
-  
+
+  // Determine environment-specific column for subscription ID lookup
+  const isProduction = env.APP_ENV === 'production';
+  const subscriptionIdColumn = isProduction ? 'stripe_subscription_id_live' : 'stripe_subscription_id_test';
+
   await supabase
     .from('subscriptions')
     .update({
       status: 'cancelled',
-      cancelled_at: new Date().toISOString(),
+      canceled_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     })
-    .eq('stripe_subscription_id', subscription.id)
+    .eq(subscriptionIdColumn, subscription.id)
     .eq('account_id', accountId);
 
   console.log(`[StripeWebhook] Cancelled subscription ${subscription.id}`);
 }
+
+/**
+ * Default export for queue binding
+ */
+export default {
+  async queue(batch: MessageBatch<StripeWebhookMessage>, env: Env): Promise<void> {
+    return handleStripeWebhookQueue(batch, env);
+  }
+};

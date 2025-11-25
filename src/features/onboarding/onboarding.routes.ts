@@ -37,8 +37,8 @@ export function registerOnboardingRoutes(app: Hono<{ Bindings: Env }>) {
   app.get('/api/business/generate-context/:runId/stream', streamGenerationProgress);
 
   // All other onboarding routes require authentication
+  // Note: Hono's app.use() with a path matches as a prefix, so this covers all sub-paths
   app.use('/api/business/generate-context', authMiddleware);
-  app.use('/api/business/generate-context/*', authMiddleware);
 
   // Rate limiting (50 generations per hour per user)
   app.use('/api/business/generate-context', rateLimitMiddleware({
@@ -59,13 +59,6 @@ export function registerOnboardingRoutes(app: Hono<{ Bindings: Env }>) {
    * Poll this endpoint to track status
    */
   app.get('/api/business/generate-context/:runId/progress', getGenerationProgress);
-
-  /**
-   * GET /api/business/generate-context/:runId/stream
-   * Stream generation progress via Server-Sent Events (SSE)
-   * Real-time alternative to polling - automatically closes on completion
-   */
-  app.get('/api/business/generate-context/:runId/stream', streamGenerationProgress);
 
   /**
    * GET /api/business/generate-context/:runId/result

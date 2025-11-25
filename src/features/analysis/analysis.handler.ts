@@ -146,7 +146,30 @@ export async function analyzeInstagramLead(c: Context<{ Bindings: Env }>) {
       isNewLead: leadResult.is_new
     });
 
-    // Step 6: Trigger workflow
+    // Step 6a: Initialize progress DO IMMEDIATELY (before workflow)
+    // This ensures SSE connections can establish successfully with existing state
+    // CRITICAL: Prevents race condition where frontend SSE connects before DO is initialized
+    const progressId = c.env.ANALYSIS_PROGRESS.idFromName(runId);
+    const progressDO = c.env.ANALYSIS_PROGRESS.get(progressId);
+
+    try {
+      await progressDO.fetch('http://do/initialize', {
+        method: 'POST',
+        body: JSON.stringify({
+          run_id: runId,
+          account_id: auth.accountId,
+          username: input.username,
+          analysis_type: input.analysisType
+        })
+      });
+
+      console.log(`[Analyze][${requestId}] Progress tracker initialized`);
+    } catch (error: any) {
+      console.error(`[Analyze][${requestId}] Failed to initialize progress:`, error.message);
+      throw new Error('Failed to initialize progress tracker');
+    }
+
+    // Step 6b: NOW trigger workflow (workflow no longer needs to initialize DO)
     const workflowParams = {
       run_id: runId,
       account_id: auth.accountId,
@@ -228,6 +251,226 @@ export async function getAnalysisProgress(c: Context<{ Bindings: Env }>) {
     }
 
     return errorResponse(c, 'Failed to get progress', 'PROGRESS_ERROR', 500);
+  }
+}
+
+/**
+ * GET /api/analysis/:runId/ws
+ * WebSocket proxy to Durable Object for real-time progress updates.
+ *
+ * Uses WebSocket Hibernation API for cost efficiency.
+ * Forwards WebSocket upgrade request directly to DO.
+ *
+ * NOTE: No authentication required - the cryptographically random runId
+ * serves as implicit authentication (only the user who initiated the request knows it).
+ */
+export async function streamAnalysisProgressWS(c: Context<{ Bindings: Env }>) {
+  try {
+    const runId = c.req.param('runId');
+
+    // Validate WebSocket upgrade
+    if (c.req.header('Upgrade') !== 'websocket') {
+      return errorResponse(c, 'Expected WebSocket upgrade', 'BAD_REQUEST', 400);
+    }
+
+    // Validate runId format
+    validateBody(GetProgressParamsSchema, { runId });
+
+    console.log('[WebSocket] Proxying to DO:', runId);
+
+    // Get DO stub
+    const progressId = c.env.ANALYSIS_PROGRESS.idFromName(runId);
+    const progressDO = c.env.ANALYSIS_PROGRESS.get(progressId);
+
+    // Build DO URL with runId parameter
+    const url = new URL(c.req.url);
+    url.pathname = '/ws';
+    url.searchParams.set('runId', runId);
+
+    // Forward upgrade request to DO
+    return await progressDO.fetch(url.toString(), {
+      headers: c.req.raw.headers
+    });
+
+  } catch (error: any) {
+    console.error('[WebSocket] Proxy error:', error);
+
+    if (error.name === 'ZodError') {
+      return errorResponse(c, 'Invalid run ID', 'VALIDATION_ERROR', 400);
+    }
+
+    return errorResponse(c, 'WebSocket connection failed', 'WEBSOCKET_ERROR', 500);
+  }
+}
+
+/**
+ * GET /api/analysis/:runId/stream
+ * Stream analysis progress via Server-Sent Events (SSE)
+ *
+ * @deprecated Use streamAnalysisProgressWS (WebSocket) instead for better real-time performance.
+ * This SSE endpoint is kept for backwards compatibility but uses polling internally.
+ *
+ * Real-time alternative to polling /progress endpoint.
+ * Automatically closes when analysis completes or fails.
+ *
+ * ARCHITECTURE: Uses TransformStream pattern (NOT ReadableStream with controller)
+ * which is the only reliable way to stream SSE on Cloudflare Workers.
+ * The async polling loop runs via ctx.waitUntil() to keep the connection alive.
+ *
+ * NOTE: No authentication required - the cryptographically random runId
+ * serves as implicit authentication (only the user who initiated the request knows it).
+ */
+export async function streamAnalysisProgress(c: Context<{ Bindings: Env }>) {
+  try {
+    const runId = c.req.param('runId');
+
+    // Validate runId format
+    validateBody(GetProgressParamsSchema, { runId });
+
+    console.log('[SSE] Starting stream:', runId);
+
+    const progressId = c.env.ANALYSIS_PROGRESS.idFromName(runId);
+    const progressDO = c.env.ANALYSIS_PROGRESS.get(progressId);
+
+    // Use TransformStream - the ONLY reliable pattern for SSE on Cloudflare Workers
+    // ReadableStream with controller causes immediate connection cancellation
+    const { readable, writable } = new TransformStream();
+    const writer = writable.getWriter();
+    const encoder = new TextEncoder();
+
+    // Helper to write SSE event
+    const writeEvent = async (eventType: string, data: object): Promise<boolean> => {
+      try {
+        const event = `event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
+        await writer.write(encoder.encode(event));
+        return true;
+      } catch (e) {
+        // Stream closed by client
+        return false;
+      }
+    };
+
+    // Helper to write SSE comment (heartbeat)
+    const writeComment = async (comment: string): Promise<boolean> => {
+      try {
+        await writer.write(encoder.encode(`: ${comment}\n\n`));
+        return true;
+      } catch (e) {
+        return false;
+      }
+    };
+
+    // The async streaming loop - runs in background via waitUntil
+    const streamLoop = async () => {
+      let lastProgress = -1;
+      let lastStatus = '';
+      let isComplete = false;
+
+      try {
+        // Initial SSE comment to establish stream
+        if (!await writeComment('stream-start')) return;
+
+        // Fetch and send initial state
+        try {
+          const response = await progressDO.fetch('http://do/progress');
+          if (response.ok) {
+            const progress = await response.json() as { status: string; progress: number } | null;
+            if (progress) {
+              lastProgress = progress.progress;
+              lastStatus = progress.status;
+
+              const eventType = progress.status === 'pending' ? 'ready' : 'progress';
+              if (!await writeEvent(eventType, progress)) return;
+              console.log(`[SSE] Initial state: ${progress.status} ${progress.progress}%`);
+
+              // If already terminal, send final event and exit
+              if (progress.status === 'complete' || progress.status === 'failed' || progress.status === 'cancelled') {
+                await writeEvent(progress.status, progress);
+                isComplete = true;
+              }
+            }
+          }
+        } catch (e) {
+          console.error('[SSE] Failed to fetch initial state:', e);
+        }
+
+        // Poll loop until terminal state
+        let heartbeatCounter = 0;
+        while (!isComplete) {
+          // Wait 1 second between polls
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          heartbeatCounter++;
+
+          // Send heartbeat every 15 seconds (every 15 iterations)
+          if (heartbeatCounter >= 15) {
+            if (!await writeComment('heartbeat')) {
+              console.log('[SSE] Client disconnected during heartbeat');
+              return;
+            }
+            heartbeatCounter = 0;
+          }
+
+          try {
+            const response = await progressDO.fetch('http://do/progress');
+            if (!response.ok) continue;
+
+            const progress = await response.json() as { status: string; progress: number } | null;
+            if (!progress) continue;
+
+            // Only send if progress or status changed
+            if (progress.progress !== lastProgress || progress.status !== lastStatus) {
+              lastProgress = progress.progress;
+              lastStatus = progress.status;
+
+              if (!await writeEvent('progress', progress)) {
+                console.log('[SSE] Client disconnected during progress update');
+                return;
+              }
+
+              // If terminal state, send final event and exit
+              if (progress.status === 'complete' || progress.status === 'failed' || progress.status === 'cancelled') {
+                await writeEvent(progress.status, progress);
+                console.log(`[SSE] Terminal state: ${progress.status}`);
+                isComplete = true;
+              }
+            }
+          } catch (e) {
+            // Ignore polling errors, will retry next iteration
+          }
+        }
+      } catch (e) {
+        console.error('[SSE] Stream loop error:', e);
+      } finally {
+        try {
+          await writer.close();
+        } catch (e) {
+          // Writer might already be closed
+        }
+        console.log('[SSE] Stream closed:', runId);
+      }
+    };
+
+    // CRITICAL: Use waitUntil to keep the async loop running
+    // Without this, Cloudflare Workers will terminate the request immediately
+    c.executionCtx.waitUntil(streamLoop());
+
+    // Return response immediately - the stream will be populated by streamLoop
+    return new Response(readable, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no'
+      }
+    });
+
+  } catch (error: any) {
+    console.error('[SSE] Error:', error);
+
+    if (error.name === 'ZodError') {
+      return errorResponse(c, 'Invalid run ID', 'VALIDATION_ERROR', 400);
+    }
+
+    return errorResponse(c, 'Failed to stream progress', 'STREAM_ERROR', 500);
   }
 }
 

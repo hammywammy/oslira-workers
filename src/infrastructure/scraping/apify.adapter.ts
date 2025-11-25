@@ -1,7 +1,7 @@
 // infrastructure/scraping/apify.adapter.ts
 
 import type { ProfileData } from '@/infrastructure/cache/r2-cache.service';
-import { SCRAPER_CONFIG } from './apify.config';
+import { SCRAPER_CONFIG } from '@/config/operations-pricing.config';
 
 /**
  * APIFY ADAPTER
@@ -311,17 +311,6 @@ export class ApifyAdapter {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  /**
-   * Estimate cost of scrape
-   * Based on Apify pricing: ~$0.001 per profile scrape
-   */
-  static estimateCost(postsLimit: number): number {
-    // Base cost: $0.001
-    // Additional cost for more posts: $0.0001 per post over 12
-    const baseCost = 0.001;
-    const extraPosts = Math.max(0, postsLimit - 12);
-    const extraCost = extraPosts * 0.0001;
-    
-    return baseCost + extraCost;
-  }
+  // NOTE: Cost estimation moved to centralized config
+  // Use getScrapingCost() from '@/config/operations-pricing.config'
 }

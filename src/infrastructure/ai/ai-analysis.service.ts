@@ -66,30 +66,46 @@ export class AIAnalysisService {
 
   async executeLightAnalysis(
     business: BusinessProfile,
-    profile: ProfileData
+    profile: ProfileData,
+    attempt: number = 1
   ): Promise<LightAnalysisResult> {
     const prompts = this.promptBuilder.buildLightAnalysisPrompt(business, profile);
 
-    const response = await this.aiClient.call({
-      model: 'gpt-5-nano',
-      system_prompt: prompts.system,
-      user_prompt: prompts.user,
-      max_tokens: 400,
-      reasoning_effort: 'low',
-      json_schema: this.getLightAnalysisSchema()
-    });
+    // Increase tokens on retry
+    const maxTokens = attempt === 1 ? 800 : 1200;
 
-    const parsed = typeof response.content === 'string'
-      ? JSON.parse(response.content)
-      : response.content;
+    try {
+      const response = await this.aiClient.call({
+        model: 'gpt-5-nano',
+        system_prompt: prompts.system,
+        user_prompt: prompts.user,
+        max_tokens: maxTokens,
+        reasoning_effort: 'low',
+        json_schema: this.getLightAnalysisSchema()
+      });
 
-    return {
-      ...parsed,
-      model_used: response.model_used,
-      total_cost: response.usage.total_cost,
-      input_tokens: response.usage.input_tokens,
-      output_tokens: response.usage.output_tokens
-    };
+      // Parse response
+      const parsed = typeof response.content === 'string'
+        ? JSON.parse(response.content)
+        : response.content;
+
+      return {
+        ...parsed,
+        model_used: response.model_used,
+        total_cost: response.usage.total_cost,
+        input_tokens: response.usage.input_tokens,
+        output_tokens: response.usage.output_tokens
+      };
+
+    } catch (error: any) {
+      // Retry on parse error (likely truncation)
+      if (error.name === 'SyntaxError' && attempt < 3) {
+        console.warn(`[AIAnalysis] Parse failed on attempt ${attempt}, retrying with more tokens`);
+        return this.executeLightAnalysis(business, profile, attempt + 1);
+      }
+
+      throw error;
+    }
   }
 
   // ===============================================================================

@@ -1,113 +1,58 @@
 // infrastructure/ai/pricing.config.ts
 
 /**
- * SINGLE SOURCE OF TRUTH - AI Model Pricing & Configuration
- * Update costs here when providers change pricing
+ * @deprecated This file is deprecated. Use centralized config instead:
+ * import { AI_MODEL_PRICING, calculateAICost, getAIModel } from '@/config/operations-pricing.config';
+ *
+ * This file re-exports for backward compatibility only.
  */
 
-export interface ModelPricing {
-  per_1m_input: number;   // Cost per 1M input tokens
-  per_1m_output: number;  // Cost per 1M output tokens
-  provider: 'openai' | 'anthropic';
-  max_tokens: number;     // Maximum output tokens
-  supports_json_schema: boolean;
-  reasoning_effort?: 'low' | 'medium' | 'high'; // OpenAI o1 only
-}
+// Re-export from centralized config for backward compatibility
+export {
+  AI_MODEL_PRICING as AI_PRICING,
+  calculateAICost,
+  getAIModel,
+  getAIMaxTokens,
+  type AIModelPricing as ModelPricing
+} from '@/config/operations-pricing.config';
 
-/**
- * ALL MODEL COSTS
- * Last updated: 2025-01-20
- * Source: OpenAI pricing page, Anthropic pricing page
- */
-export const AI_PRICING: Record<string, ModelPricing> = {
-
-  'gpt-5-nano': {
-    per_1m_input: 0.15,
-    per_1m_output: 0.60,
-    provider: 'openai',
-    max_tokens: 16384,
-    supports_json_schema: true,
-    reasoning_effort: 'low'
-  },
-
-  'gpt-5-mini': {
-    per_1m_input: 0.30,
-    per_1m_output: 1.20,
-    provider: 'openai',
-    max_tokens: 16384,
-    supports_json_schema: true,
-    reasoning_effort: 'medium'
-  },
-
-  // Anthropic Models (kept for future use)
-  'claude-3-5-sonnet-20241022': {
-    per_1m_input: 3.00,
-    per_1m_output: 15.00,
-    provider: 'anthropic',
-    max_tokens: 8192,
-    supports_json_schema: false
-  }
-};
-
-/**
- * ANALYSIS TYPE → MODEL MAPPING
- * Defines which model to use for each analysis type
- */
+// Legacy interface alias
 export interface AnalysisModelConfig {
   model: string;
   reasoning_effort?: 'low' | 'medium' | 'high';
   max_tokens: number;
 }
 
-export const ANALYSIS_MODEL_MAPPING: Record<string, AnalysisModelConfig> = {
-  'light': {
-    model: 'gpt-5-nano',
-    reasoning_effort: 'low',
-    max_tokens: 400
-  }
-};
+// NOTE: ANALYSIS_MODEL_MAPPING removed - use ANALYSIS_CONFIG from centralized config instead
+// import { ANALYSIS_CONFIG } from '@/config/operations-pricing.config';
+// const model = ANALYSIS_CONFIG.light.ai_model;
+// const maxTokens = ANALYSIS_CONFIG.light.ai_max_tokens;
 
 /**
- * Calculate cost for a completed AI call
- */
-export function calculateAICost(
-  model: string,
-  inputTokens: number,
-  outputTokens: number
-): number {
-  const pricing = AI_PRICING[model];
-  if (!pricing) {
-    console.warn(`Unknown model: ${model}, cost set to 0`);
-    return 0;
-  }
-
-  const inputCost = (inputTokens / 1_000_000) * pricing.per_1m_input;
-  const outputCost = (outputTokens / 1_000_000) * pricing.per_1m_output;
-
-  return parseFloat((inputCost + outputCost).toFixed(6));
-}
-
-/**
- * Get model config for analysis type
+ * @deprecated Use getAIModel() from centralized config
  */
 export function getModelConfig(analysisType: string): AnalysisModelConfig {
-  const config = ANALYSIS_MODEL_MAPPING[analysisType];
+  // Import dynamically to avoid circular deps
+  const { ANALYSIS_CONFIG } = require('@/config/operations-pricing.config');
+  const config = ANALYSIS_CONFIG[analysisType];
   if (!config) {
     throw new Error(`Unknown analysis type: ${analysisType}`);
   }
-  return config;
+  return {
+    model: config.ai_model,
+    max_tokens: config.ai_max_tokens
+  };
 }
 
 /**
- * Estimate cost before making call (rough estimate)
- * Assumes ~1000 input tokens + configured output tokens
+ * @deprecated Use calculateAICost() from centralized config
  */
 export function estimateCost(analysisType: string): number {
   const config = getModelConfig(analysisType);
-  const pricing = AI_PRICING[config.model];
+  const { calculateAICost: calcCost } = require('@/config/operations-pricing.config');
 
-  const estimatedInput = 1000; // Rough estimate
+  const estimatedInput = 1000;
   const estimatedOutput = config.max_tokens;
 
-  return calculateAICost(config.model, estimatedInput, estimatedOutput);
+  return calcCost(config.model, estimatedInput, estimatedOutput);
 }

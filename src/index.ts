@@ -4,7 +4,6 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { Env } from '@/shared/types/env.types';
 import type { MessageBatch } from '@cloudflare/workers-types';
-import { registerTestEndpoints } from './test-endpoints';
 import { registerAuthRoutes } from './features/auth/auth.routes';
 import { registerLeadRoutes } from './features/leads/leads.routes';
 import { registerBusinessRoutes } from './features/business/business.routes';
@@ -15,7 +14,6 @@ import { registerProfileRefreshRoutes } from './features/leads/profile-refresh.r
 import { registerOnboardingRoutes } from './features/onboarding/onboarding.routes';
 import { registerBillingRoutes } from './features/billing/billing.routes';
 import { handleStripeWebhookQueue } from './infrastructure/queues/stripe-webhook.consumer';
-import { handleAnalysisQueue } from './infrastructure/queues/analysis.consumer';
 import { handleBusinessContextQueue } from './infrastructure/queues/business-context.consumer';
 import AnalysisWorkflow from './infrastructure/workflows/analysis.workflow';
 import BusinessContextWorkflow from './infrastructure/workflows/business-context.workflow';
@@ -76,7 +74,7 @@ app.get('/', (c) => {
     features: {
       workflows: !!c.env.ANALYSIS_WORKFLOW && !!c.env.BUSINESS_CONTEXT_WORKFLOW,
       durable_objects: !!c.env.ANALYSIS_PROGRESS && !!c.env.BUSINESS_CONTEXT_PROGRESS,
-      queues: !!c.env.ANALYSIS_QUEUE && !!c.env.BUSINESS_CONTEXT_QUEUE,
+      queues: !!c.env.BUSINESS_CONTEXT_QUEUE,
       r2_cache: !!c.env.R2_CACHE_BUCKET,
       analytics: !!c.env.ANALYTICS_ENGINE,
       sentry: true,
@@ -109,7 +107,6 @@ app.get('/health', async (c) => {
       },
       queues: {
         stripe_webhooks: !!c.env.STRIPE_WEBHOOK_QUEUE,
-        analysis: !!c.env.ANALYSIS_QUEUE,
         business_context: !!c.env.BUSINESS_CONTEXT_QUEUE
       }
     }
@@ -141,12 +138,6 @@ registerOnboardingRoutes(app);
 
 // Billing endpoints
 registerBillingRoutes(app);
-
-// ===============================================================================
-// TEST ENDPOINTS (Disabled in production)
-// ===============================================================================
-
-registerTestEndpoints(app);
 
 // ===============================================================================
 // ERROR HANDLING
@@ -227,8 +218,6 @@ export default {
   async queue(batch: MessageBatch, env: Env, ctx: ExecutionContext): Promise<void> {
     if (batch.queue === 'stripe-webhooks' || batch.queue === 'stripe-webhooks-staging') {
       await handleStripeWebhookQueue(batch, env);
-    } else if (batch.queue === 'analysis-jobs' || batch.queue === 'analysis-jobs-staging') {
-      await handleAnalysisQueue(batch, env);
     } else if (batch.queue === 'business-context-jobs' || batch.queue === 'business-context-jobs-staging') {
       await handleBusinessContextQueue(batch, env);
     }
