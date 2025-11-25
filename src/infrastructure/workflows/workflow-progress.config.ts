@@ -3,18 +3,19 @@
 /**
  * WORKFLOW PROGRESS CONFIGURATION
  *
- * Centralized configuration for workflow step progress percentages.
+ * Configuration for workflow step progress percentages ONLY.
  * Percentages are time-weighted based on actual step execution times.
  *
- * Usage:
- * - Each analysis type has its own timing profile
- * - Update percentages here when adding new analysis types
- * - Progress percentages should sum to a flow that ends at 100%
+ * NOTE: Pricing/costs/limits are in centralized config:
+ * - Credit costs: @/config/operations-pricing.config → getCreditCost()
+ * - Posts limits: @/config/operations-pricing.config → getPostsLimit()
+ * - Scraping costs: @/config/operations-pricing.config → getScrapingCost()
  */
 
-// Extensible type - currently only 'light' is supported
-// Additional types can be added here when implementing new analysis tiers
-export type AnalysisType = 'light';
+import { ANALYSIS_CONFIG, type AnalysisType } from '@/config/operations-pricing.config';
+
+// Re-export AnalysisType for convenience
+export type { AnalysisType };
 
 export interface StepProgress {
   step: string;
@@ -22,50 +23,27 @@ export interface StepProgress {
   description: string;
 }
 
-export interface AnalysisTimingProfile {
-  /** Expected time for steps 1-5 (DB checks, cache) in seconds */
-  setup_time: number;
-  /** Expected time for scraping (step 6) in seconds */
-  scraping_time: number;
-  /** Expected time for AI analysis (step 7) in seconds */
-  ai_analysis_time: number;
-  /** Expected time for steps 8-11 (DB saves, logging) in seconds */
-  teardown_time: number;
-  /** Number of posts to scrape */
-  posts_limit: number;
-  /** Credit cost for this analysis type */
-  credit_cost: number;
+interface TimingProfile {
+  setup: number;
+  scraping: number;
+  ai_analysis: number;
+  teardown: number;
 }
-
-/**
- * Timing profiles for each analysis type
- * Add new profiles here when implementing additional analysis tiers
- */
-export const ANALYSIS_TIMING_PROFILES: Record<AnalysisType, AnalysisTimingProfile> = {
-  light: {
-    setup_time: 1,        // Steps 1-5: ~1 second total
-    scraping_time: 7.5,   // Step 6: ~7.5 seconds average
-    ai_analysis_time: 9,  // Step 7: ~9 seconds average
-    teardown_time: 1,     // Steps 8-11: ~1 second total
-    posts_limit: 6,
-    credit_cost: 1
-  }
-};
 
 /**
  * Calculate time-weighted progress percentages for an analysis type
  */
-function calculateProgressPercentages(profile: AnalysisTimingProfile): StepProgress[] {
+function calculateProgressPercentages(timing: TimingProfile): StepProgress[] {
   const totalTime =
-    profile.setup_time +
-    profile.scraping_time +
-    profile.ai_analysis_time +
-    profile.teardown_time;
+    timing.setup +
+    timing.scraping +
+    timing.ai_analysis +
+    timing.teardown;
 
   // Calculate percentage weights
-  const setupWeight = (profile.setup_time / totalTime);
-  const scrapingWeight = (profile.scraping_time / totalTime);
-  const aiWeight = (profile.ai_analysis_time / totalTime);
+  const setupWeight = (timing.setup / totalTime);
+  const scrapingWeight = (timing.scraping / totalTime);
+  const aiWeight = (timing.ai_analysis / totalTime);
 
   // Distribute setup percentage across steps 1-5
   const step2_pct = Math.round(setupWeight * 100 * 0.2);  // 20% of setup time
@@ -102,7 +80,7 @@ function calculateProgressPercentages(profile: AnalysisTimingProfile): StepProgr
  */
 export const WORKFLOW_PROGRESS: Record<AnalysisType, Map<string, StepProgress>> = {
   light: new Map(
-    calculateProgressPercentages(ANALYSIS_TIMING_PROFILES.light)
+    calculateProgressPercentages(ANALYSIS_CONFIG.light.timing)
       .map(step => [step.step, step])
   )
 };
@@ -124,27 +102,11 @@ export function getStepProgress(
   return step;
 }
 
-/**
- * Get credit cost for an analysis type
- */
-export function getCreditCost(analysisType: AnalysisType): number {
-  return ANALYSIS_TIMING_PROFILES[analysisType].credit_cost;
-}
-
-/**
- * Get posts limit for an analysis type
- */
-export function getPostsLimit(analysisType: AnalysisType): number {
-  return ANALYSIS_TIMING_PROFILES[analysisType].posts_limit;
-}
-
-/**
- * Get estimated total time for an analysis type (in seconds)
- */
-export function getEstimatedDuration(analysisType: AnalysisType): number {
-  const profile = ANALYSIS_TIMING_PROFILES[analysisType];
-  return profile.setup_time + profile.scraping_time + profile.ai_analysis_time + profile.teardown_time;
-}
+// NOTE: Cost/duration functions moved to centralized config
+// Use the following from '@/config/operations-pricing.config':
+// - getCreditCost(analysisType)
+// - getPostsLimit(analysisType)
+// - getEstimatedDuration(analysisType)
 
 /**
  * REFERENCE: Light Analysis Progress Flow (18.5s total)

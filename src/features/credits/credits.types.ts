@@ -1,6 +1,7 @@
 // features/credits/credits.types.ts
 
 import { z } from 'zod';
+import { CREDIT_REVENUE } from '@/config/operations-pricing.config';
 
 // ===============================================================================
 // REQUEST SCHEMAS
@@ -69,8 +70,9 @@ export interface PurchaseResult {
 // PRICING
 // ===============================================================================
 
+// Uses centralized per_credit price from operations-pricing.config
 export const CREDIT_PRICING = {
-  per_credit: 0.97,  // $0.97 per credit
+  per_credit: CREDIT_REVENUE.per_credit_usd,
   bulk_discounts: [
     { min: 100, discount: 0.05 },   // 5% off for 100+
     { min: 500, discount: 0.10 },   // 10% off for 500+

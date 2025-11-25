@@ -14,11 +14,13 @@ import { ApifyAdapter } from '@/infrastructure/scraping/apify.adapter';
 import { AIAnalysisService } from '@/infrastructure/ai/ai-analysis.service';
 import { getSecret } from '@/infrastructure/config/secrets';
 import type { ProfileData as AIProfileData } from '@/infrastructure/ai/prompt-builder.service';
+import { getStepProgress } from './workflow-progress.config';
 import {
-  getStepProgress,
   getCreditCost,
-  getPostsLimit
-} from './workflow-progress.config';
+  getPostsLimit,
+  buildOperationsMetrics,
+  type AnalysisType
+} from '@/config/operations-pricing.config';
 
 /**
  * ANALYSIS WORKFLOW
@@ -445,7 +447,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         }
       });
 
-      // Step 11: Log to operations ledger
+      // Step 11: Log to operations ledger (using centralized pricing config)
       await step.do('log_operations', {
         retries: { limit: 2, delay: '500 milliseconds' }
       }, async () => {
@@ -456,7 +458,23 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           const operationsRepo = new OperationsLedgerRepository(supabase);
 
           const totalDuration = Date.now() - workflowStartTime;
-          const apifyCost = timing.cache_hit ? 0 : ApifyAdapter.estimateCost(getPostsLimit(params.analysis_type));
+
+          // Build metrics using centralized config (handles pricing, actor ID, etc.)
+          const metrics = buildOperationsMetrics({
+            analysisType: params.analysis_type as AnalysisType,
+            aiCost: aiResult.total_cost,
+            aiModel: aiResult.model_used,
+            tokensIn: aiResult.input_tokens,
+            tokensOut: aiResult.output_tokens,
+            cacheHit: timing.cache_hit,
+            timing: {
+              cache_check: timing.cache_check,
+              scraping: timing.scraping > 0 ? timing.scraping : undefined,
+              ai_analysis: timing.ai_analysis,
+              db_upsert: timing.db_upsert,
+              total_ms: totalDuration
+            }
+          });
 
           await operationsRepo.logOperation({
             account_id: params.account_id,
@@ -464,39 +482,13 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             operation_id: params.run_id,
             analysis_type: params.analysis_type,
             username: params.username,
-            metrics: {
-              cost: {
-                total_usd: apifyCost + aiResult.total_cost,
-                items: {
-                  ai: {
-                    vendor: 'openai',
-                    usd: aiResult.total_cost,
-                    model: aiResult.model_used,
-                    tokens_in: aiResult.input_tokens,
-                    tokens_out: aiResult.output_tokens
-                  },
-                  scraping: {
-                    vendor: 'apify',
-                    usd: apifyCost,
-                    cached: timing.cache_hit,
-                    actor: 'dSCLg0C3YEZ83HzYX'
-                  }
-                }
-              },
-              duration: {
-                total_ms: totalDuration,
-                steps: {
-                  cache_check: timing.cache_check,
-                  cache_hit: timing.cache_hit,
-                  ...(timing.scraping > 0 ? { scraping: timing.scraping } : {}),
-                  ai_analysis: timing.ai_analysis,
-                  db_upsert: timing.db_upsert
-                }
-              }
-            }
+            metrics
           });
 
-          console.log(`[Workflow][${params.run_id}] Operations logged`);
+          console.log(`[Workflow][${params.run_id}] Operations logged`, {
+            total_cost: metrics.cost.total_usd,
+            total_duration_ms: metrics.duration.total_ms
+          });
         } catch (error: any) {
           console.error(`[Workflow][${params.run_id}] Step 11 FAILED (non-fatal):`, this.serializeError(error));
           // Don't throw - logging failures shouldn't break the workflow
