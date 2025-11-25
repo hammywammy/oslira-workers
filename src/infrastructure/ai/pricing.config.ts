@@ -63,7 +63,7 @@ export const ANALYSIS_MODEL_MAPPING: Record<string, AnalysisModelConfig> = {
   'light': {
     model: 'gpt-5-nano',
     reasoning_effort: 'low',
-    max_tokens: 400
+    max_tokens: 800  // FIXED: Increased from 400 to prevent truncation on complex profiles
   }
 };
 
