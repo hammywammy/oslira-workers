@@ -19,7 +19,7 @@ export function registerRepositoryTests(app: Hono<{ Bindings: Env }>) {
       const creditsRepo = new CreditsRepository(supabase);
 
       const balance = await creditsRepo.getBalance(accountId);
-      const hasSufficient = await creditsRepo.hasSufficientCredits(accountId, 5);
+      const hasSufficient = await creditsRepo.hasSufficientCredits(accountId, 1);
       const transactions = await creditsRepo.getTransactions(accountId, { limit: 5 });
 
       return c.json({
@@ -27,7 +27,7 @@ export function registerRepositoryTests(app: Hono<{ Bindings: Env }>) {
         test: 'Credits Repository',
         account_id: accountId,
         current_balance: balance,
-        has_sufficient_for_deep: hasSufficient,
+        has_sufficient_for_analysis: hasSufficient,
         recent_transactions: transactions.length,
         transactions: transactions.map(t => ({
           amount: t.amount,

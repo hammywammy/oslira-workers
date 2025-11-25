@@ -80,14 +80,14 @@ export function registerProfileRefreshRoutes(app: Hono<{ Bindings: Env }>) {
   /**
    * GET /api/cache/statistics
    * Get cache statistics (admin/debug endpoint)
-   * 
+   *
    * Returns:
    * - total_cached: number
-   * - by_type: { light, deep, xray }
+   * - by_type: { light }  (extensible for more types)
    * - avg_age_seconds: number
-   * - ttl_config: { light: "24h", deep: "12h", xray: "6h" }
+   * - ttl_config: { light: "24h" }
    * - invalidation_triggers: string[]
-   * 
+   *
    * Useful for:
    * - Monitoring cache hit rates
    * - Debugging cache issues

@@ -31,7 +31,7 @@ export function registerLeadRoutes(app: Hono<{ Bindings: Env }>) {
   /**
    * GET /api/leads/:leadId/analyses
    * Get analysis history for lead
-   * Query params: ?limit=10&analysisType=deep
+   * Query params: ?limit=10&analysisType=light
    */
   app.get('/api/leads/:leadId/analyses', getLeadAnalyses);
 
