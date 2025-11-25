@@ -174,18 +174,28 @@ async function handleCheckoutCompleted(data: StripeWebhookMessage, env: Env): Pr
     });
 
     // UPDATE 1: subscriptions table
+    // Determine environment-specific subscription ID column
+    const isProduction = env.APP_ENV === 'production';
+    const subscriptionUpdateData: any = {
+      plan_type: newTier,
+      stripe_price_id: priceId,
+      price_cents: priceCents,
+      status: 'active',
+      current_period_start: periodStart,
+      current_period_end: periodEnd,
+      updated_at: new Date().toISOString(),
+    };
+
+    // Write to environment-specific column
+    if (isProduction) {
+      subscriptionUpdateData.stripe_subscription_id_live = stripeSubscriptionId;
+    } else {
+      subscriptionUpdateData.stripe_subscription_id_test = stripeSubscriptionId;
+    }
+
     const { error: updateError } = await supabase
       .from('subscriptions')
-      .update({
-        plan_type: newTier,
-        stripe_subscription_id: stripeSubscriptionId,
-        stripe_price_id: priceId,
-        price_cents: priceCents,
-        status: 'active',
-        current_period_start: periodStart,
-        current_period_end: periodEnd,
-        updated_at: new Date().toISOString(),
-      })
+      .update(subscriptionUpdateData)
       .eq('account_id', accountId);
 
     if (updateError) {
@@ -260,9 +270,13 @@ async function handleInvoicePaymentSucceeded(data: StripeWebhookMessage, env: En
   // Only process subscription invoices (not one-time purchases)
   if (invoice.subscription) {
     const subscriptionId = invoice.subscription;
-    
+
     const supabase = await SupabaseClientFactory.createAdminClient(env);
-    
+
+    // Determine environment-specific column for subscription ID lookup
+    const isProduction = env.APP_ENV === 'production';
+    const subscriptionIdColumn = isProduction ? 'stripe_subscription_id_live' : 'stripe_subscription_id_test';
+
     // Get subscription with plan details
     const { data: subscription, error } = await supabase
       .from('subscriptions')
@@ -273,7 +287,7 @@ async function handleInvoicePaymentSucceeded(data: StripeWebhookMessage, env: En
           light_analyses_per_month
         )
       `)
-      .eq('stripe_subscription_id', subscriptionId)
+      .eq(subscriptionIdColumn, subscriptionId)
       .eq('status', 'active')
       .single();
 
@@ -305,7 +319,7 @@ async function handleInvoicePaymentSucceeded(data: StripeWebhookMessage, env: En
         current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
         updated_at: new Date().toISOString(),
       })
-      .eq('stripe_subscription_id', subscriptionId);
+      .eq(subscriptionIdColumn, subscriptionId);
 
     console.log(
       `[StripeWebhook] Reset balances for ${accountId} (${subscription.plan_type}): ` +
@@ -322,6 +336,10 @@ async function handleSubscriptionUpdated(data: StripeWebhookMessage, env: Env): 
   const accountId = data.account_id;
 
   const supabase = await SupabaseClientFactory.createAdminClient(env);
+
+  // Determine environment-specific column for subscription ID lookup
+  const isProduction = env.APP_ENV === 'production';
+  const subscriptionIdColumn = isProduction ? 'stripe_subscription_id_live' : 'stripe_subscription_id_test';
 
   // Build update object with safe date conversions
   const updateData: any = {
@@ -345,7 +363,7 @@ async function handleSubscriptionUpdated(data: StripeWebhookMessage, env: Env): 
   await supabase
     .from('subscriptions')
     .update(updateData)
-    .eq('stripe_subscription_id', subscription.id)
+    .eq(subscriptionIdColumn, subscription.id)
     .eq('account_id', accountId);
 
   console.log(`[StripeWebhook] Updated subscription ${subscription.id} status to ${subscription.status}`);
@@ -359,7 +377,11 @@ async function handleSubscriptionDeleted(data: StripeWebhookMessage, env: Env): 
   const accountId = data.account_id;
 
   const supabase = await SupabaseClientFactory.createAdminClient(env);
-  
+
+  // Determine environment-specific column for subscription ID lookup
+  const isProduction = env.APP_ENV === 'production';
+  const subscriptionIdColumn = isProduction ? 'stripe_subscription_id_live' : 'stripe_subscription_id_test';
+
   await supabase
     .from('subscriptions')
     .update({
@@ -367,7 +389,7 @@ async function handleSubscriptionDeleted(data: StripeWebhookMessage, env: Env): 
       canceled_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     })
-    .eq('stripe_subscription_id', subscription.id)
+    .eq(subscriptionIdColumn, subscription.id)
     .eq('account_id', accountId);
 
   console.log(`[StripeWebhook] Cancelled subscription ${subscription.id}`);

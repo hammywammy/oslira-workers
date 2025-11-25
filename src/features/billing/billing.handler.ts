@@ -52,13 +52,18 @@ export async function getSubscription(c: Context<{ Bindings: Env }>) {
       .eq('account_id', accountId)
       .single();
 
+    // Determine environment-specific Stripe IDs
+    const isProduction = c.env.APP_ENV === 'production';
+
     return successResponse(c, {
       id: subscription.id,
       accountId: subscription.account_id,
       tier: subscription.plan_type,
       status: subscription.status,
-      stripeSubscriptionId: subscription.stripe_subscription_id,
-      stripeCustomerId: c.env.APP_ENV === 'production'
+      stripeSubscriptionId: isProduction
+        ? subscription.stripe_subscription_id_live
+        : subscription.stripe_subscription_id_test,
+      stripeCustomerId: isProduction
         ? subscription.stripe_customer_id_live
         : subscription.stripe_customer_id_test,
       currentPeriodStart: subscription.current_period_start,
