@@ -10,6 +10,7 @@
  * Current checks:
  * - ProfileNotFoundCheck: Detects deleted/non-existent profiles
  * - PrivateProfileCheck: Detects private accounts
+ * - ICPFollowerLimitCheck: Validates follower count against ICP bounds
  *
  * To add a new check:
  * 1. Create a new file in ./checks/ implementing IPreAnalysisCheck
@@ -29,10 +30,12 @@ export type {
   PreAnalysisChecksConfig,
   AnalysisResultType,
   ExtendedAnalysisType,
-  ApifyErrorResponse
+  ApifyErrorResponse,
+  ICPSettings
 } from './types';
 export { DEFAULT_CHECKS_CONFIG } from './types';
 
 // Individual checks (for custom registration or testing)
 export { PrivateProfileCheck } from './checks/private-profile.check';
 export { ProfileNotFoundCheck } from './checks/profile-not-found.check';
+export { ICPFollowerLimitCheck } from './checks/icp-follower-limit.check';

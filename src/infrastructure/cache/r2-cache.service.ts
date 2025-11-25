@@ -26,7 +26,7 @@ export class R2CacheService {
   /**
    * Get cached profile (Phase 7: with TTL check)
    */
-  async get(username: string, analysisType: 'light'): Promise<ProfileData | null> {
+  async get(username: string, analysisType: 'light' | 'deep'): Promise<ProfileData | null> {
     const cached = await this.strategy.get(username, analysisType);
 
     if (!cached) {
@@ -63,7 +63,7 @@ export class R2CacheService {
   /**
    * Set cached profile (Phase 7: with TTL)
    */
-  async set(username: string, profile: ProfileData, analysisType: 'light' = 'light'): Promise<void> {
+  async set(username: string, profile: ProfileData, analysisType: 'light' | 'deep' = 'light'): Promise<void> {
     const cachedProfile: CachedProfile = {
       username: profile.username,
       display_name: profile.displayName,
@@ -101,7 +101,7 @@ export class R2CacheService {
   /**
    * Check if should invalidate
    */
-  async shouldInvalidate(username: string, newProfile: ProfileData, analysisType: 'light') {
+  async shouldInvalidate(username: string, newProfile: ProfileData, analysisType: 'light' | 'deep') {
     const cachedProfile: CachedProfile = {
       username: newProfile.username,
       display_name: newProfile.displayName,

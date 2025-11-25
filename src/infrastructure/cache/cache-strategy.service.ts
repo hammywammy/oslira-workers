@@ -47,7 +47,7 @@ export interface CachedProfile {
 export interface CacheMetadata {
   cached_at: number;
   ttl_seconds: number;
-  analysis_type: 'light';  // Extensible - add more types as needed
+  analysis_type: 'light' | 'deep';  // Extensible - add more types as needed
   version: number;
 }
 
@@ -60,8 +60,9 @@ export class CacheStrategyService {
   private bucket: R2Bucket;
   private readonly CACHE_VERSION = 1;
   // TTL configuration - add more tiers as needed
-  private readonly TTL_CONFIG: Record<'light', number> = {
-    light: 24 * 60 * 60  // 24 hours
+  private readonly TTL_CONFIG: Record<'light' | 'deep', number> = {
+    light: 24 * 60 * 60,  // 24 hours
+    deep: 24 * 60 * 60    // 24 hours (same as light for now)
   };
 
   constructor(bucket: R2Bucket) {
@@ -73,7 +74,7 @@ export class CacheStrategyService {
    */
   async get(
     username: string,
-    analysisType: 'light'
+    analysisType: 'light' | 'deep'
   ): Promise<CachedProfile | null> {
     const key = this.buildCacheKey(username);
     
@@ -109,7 +110,7 @@ export class CacheStrategyService {
   async set(
     username: string,
     profile: CachedProfile,
-    analysisType: 'light'
+    analysisType: 'light' | 'deep'
   ): Promise<void> {
     const key = this.buildCacheKey(username);
     const ttl = this.TTL_CONFIG[analysisType];
@@ -143,7 +144,7 @@ export class CacheStrategyService {
   async shouldInvalidate(
     username: string,
     newProfile: CachedProfile,
-    analysisType: 'light'
+    analysisType: 'light' | 'deep'
   ): Promise<InvalidationReason | null> {
     const cachedProfile = await this.get(username, analysisType);
     
@@ -276,7 +277,7 @@ export class CacheStrategyService {
   /**
    * Check if TTL expired
    */
-  private isTTLExpired(metadata: CacheMetadata, requestedType: 'light'): boolean {
+  private isTTLExpired(metadata: CacheMetadata, requestedType: 'light' | 'deep'): boolean {
     const age = this.getAge(metadata);
     const requiredTTL = this.TTL_CONFIG[requestedType];
     

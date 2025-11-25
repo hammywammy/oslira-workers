@@ -15,7 +15,15 @@ import type { AnalysisType } from '@/config/operations-pricing.config';
  * Result types that bypass AI analysis
  * These represent terminal states where analysis cannot proceed normally
  */
-export type AnalysisResultType = 'private' | 'not_found';
+export type AnalysisResultType = 'private' | 'not_found' | 'icp_violation';
+
+/**
+ * ICP (Ideal Customer Profile) settings for checks
+ */
+export interface ICPSettings {
+  icp_min_followers?: number | null;
+  icp_max_followers?: number | null;
+}
 
 /**
  * All valid analysis types including bypassed results
@@ -39,6 +47,8 @@ export interface PreAnalysisCheckContext {
   businessProfileId: string;
   /** Original analysis type requested */
   requestedAnalysisType: AnalysisType;
+  /** ICP settings for validation (optional for backward compatibility) */
+  icpSettings?: ICPSettings | null;
 }
 
 /**
