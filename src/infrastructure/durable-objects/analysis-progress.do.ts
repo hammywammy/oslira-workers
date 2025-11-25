@@ -59,7 +59,6 @@ export class AnalysisProgressDO extends DurableObject {
 
         const connectionId = crypto.randomUUID();
         let isClosed = false;
-        let heartbeatInterval: number | null = null;
 
         const stream = new ReadableStream({
           start: async (controller) => {
@@ -87,22 +86,6 @@ export class AnalysisProgressDO extends DurableObject {
                   isClosed = true;
                 }
               }
-
-              // Keepalive heartbeat - prevent connection timeout
-              heartbeatInterval = setInterval(() => {
-                if (isClosed) {
-                  if (heartbeatInterval) clearInterval(heartbeatInterval);
-                  return;
-                }
-
-                try {
-                  // Send comment (ignored by EventSource, keeps connection alive)
-                  controller.enqueue(encoder.encode(': heartbeat\n\n'));
-                } catch (error: any) {
-                  console.error('[AnalysisProgressDO] Heartbeat failed:', error.message);
-                  if (heartbeatInterval) clearInterval(heartbeatInterval);
-                }
-              }, 5000) as unknown as number; // Every 5 seconds
             } catch (error: any) {
               console.error(`[AnalysisProgressDO] SSE stream error: ${error.message}`);
               if (!isClosed) {
@@ -115,9 +98,6 @@ export class AnalysisProgressDO extends DurableObject {
             console.log(`[AnalysisProgressDO] SSE connection closed: ${connectionId}`);
             this.sseConnections.delete(connectionId);
             isClosed = true;
-            if (heartbeatInterval) {
-              clearInterval(heartbeatInterval);  // ADDED: Clean up heartbeat
-            }
           }
         });
 
