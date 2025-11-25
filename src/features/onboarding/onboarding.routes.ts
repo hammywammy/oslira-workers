@@ -8,7 +8,7 @@ import {
   generateBusinessContext,
   getGenerationProgress,
   getGenerationResult,
-  streamGenerationProgress
+  streamBusinessContextWebSocket
 } from './onboarding.handler';
 
 /**
@@ -25,16 +25,15 @@ export function registerOnboardingRoutes(app: Hono<{ Bindings: Env }>) {
   console.log('[Routes] Registering onboarding routes');
 
   /**
-   * GET /api/business/generate-context/:runId/stream
-   * Stream generation progress via Server-Sent Events (SSE)
-   * Real-time alternative to polling - automatically closes on completion
+   * GET /api/business/generate-context/:runId/ws
+   * WebSocket proxy for real-time progress updates
+   * Forwards WebSocket upgrade to BusinessContextProgressDO
    *
-   * NOTE: Registered BEFORE auth middleware because EventSource cannot send custom headers.
+   * NOTE: Registered BEFORE auth middleware because WebSocket cannot send custom headers.
    * Authentication is implicit via the cryptographically random runId UUID that only the
    * authenticated user who initiated the request knows (returned from POST endpoint).
-   * This follows industry patterns used by Stripe/GitHub webhooks where the secret URL is the auth.
    */
-  app.get('/api/business/generate-context/:runId/stream', streamGenerationProgress);
+  app.get('/api/business/generate-context/:runId/ws', streamBusinessContextWebSocket);
 
   // All other onboarding routes require authentication
   // Note: Hono's app.use() with a path matches as a prefix, so this covers all sub-paths

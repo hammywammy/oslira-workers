@@ -179,53 +179,50 @@ export async function getGenerationResult(c: Context<{ Bindings: Env }>) {
 }
 
 /**
- * GET /api/business/generate-context/:runId/stream
- * Stream generation progress via Server-Sent Events (SSE)
+ * GET /api/business/generate-context/:runId/ws
+ * WebSocket proxy to Durable Object for real-time progress updates.
  *
- * Real-time alternative to polling /progress endpoint.
- * Automatically closes when generation completes or fails.
+ * Uses WebSocket Hibernation API for cost efficiency.
+ * Forwards WebSocket upgrade request directly to DO.
  *
  * NOTE: No authentication required - the cryptographically random runId UUID
  * serves as implicit authentication (only the user who initiated the request knows it).
  */
-export async function streamGenerationProgress(c: Context<{ Bindings: Env }>) {
+export async function streamBusinessContextWebSocket(c: Context<{ Bindings: Env }>) {
   try {
     const runId = c.req.param('runId');
 
-    // Validate runId format
+    // Validate WebSocket upgrade
+    if (c.req.header('Upgrade') !== 'websocket') {
+      return errorResponse(c, 'Expected WebSocket upgrade', 'BAD_REQUEST', 400);
+    }
+
+    // Validate runId format (UUID)
     validateBody(GetProgressParamsSchema, { runId });
 
-    console.log('[StreamGenerationProgress] Starting SSE stream:', runId);
+    console.log('[WebSocket] Proxying to BusinessContextProgressDO:', runId);
 
-    // Connect to Durable Object's SSE stream endpoint
+    // Get DO stub
     const progressId = c.env.BUSINESS_CONTEXT_PROGRESS.idFromName(runId);
     const progressDO = c.env.BUSINESS_CONTEXT_PROGRESS.get(progressId);
 
-    // Fetch the SSE stream from Durable Object
-    const doResponse = await progressDO.fetch('http://do/stream');
+    // Build DO URL with runId parameter
+    const url = new URL(c.req.url);
+    url.pathname = '/ws';
+    url.searchParams.set('runId', runId);
 
-    if (!doResponse.ok || !doResponse.body) {
-      console.error('[StreamGenerationProgress] Failed to connect to DO stream');
-      return errorResponse(c, 'Failed to establish stream', 'STREAM_ERROR', 500);
-    }
-
-    // Return the DO's SSE stream directly to the client
-    return new Response(doResponse.body, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'X-Accel-Buffering': 'no'
-      }
+    // Forward upgrade request to DO
+    return await progressDO.fetch(url.toString(), {
+      headers: c.req.raw.headers
     });
 
   } catch (error: any) {
-    console.error('[StreamGenerationProgress] Error:', error);
+    console.error('[WebSocket] BusinessContext proxy error:', error);
 
     if (error.name === 'ZodError') {
       return errorResponse(c, 'Invalid run ID', 'VALIDATION_ERROR', 400);
     }
 
-    return errorResponse(c, 'Failed to stream progress', 'STREAM_ERROR', 500);
+    return errorResponse(c, 'WebSocket connection failed', 'WEBSOCKET_ERROR', 500);
   }
 }
