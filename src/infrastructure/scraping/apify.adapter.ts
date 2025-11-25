@@ -224,22 +224,23 @@ export class ApifyAdapter {
 
   /**
    * Transform Apify response to ProfileData format (camelCase for R2CacheService)
+   * CRITICAL: All numeric fields MUST have defaults to prevent toLocaleString() crashes
    */
   private transformProfile(raw: ApifyRawProfile): ProfileData {
     const latestPosts = this.transformPosts(raw.latestPosts || []);
 
     return {
-      username: raw.username,
-      displayName: raw.fullName || raw.username,
-      followersCount: raw.followersCount,
-      followingCount: raw.followsCount,
-      postsCount: raw.postsCount,
+      username: raw.username || 'unknown',
+      displayName: raw.fullName || raw.username || 'Unknown User',
+      followersCount: raw.followersCount ?? 0,  // Use nullish coalescing for 0 values
+      followingCount: raw.followsCount ?? 0,
+      postsCount: raw.postsCount ?? 0,
       bio: raw.biography || '',
-      externalUrl: raw.externalUrl,
-      isVerified: raw.verified,
-      isPrivate: raw.private,
+      externalUrl: raw.externalUrl || null,
+      isVerified: raw.verified ?? false,
+      isPrivate: raw.private ?? false,
       isBusinessAccount: !!raw.businessCategoryName,
-      profilePicUrl: raw.profilePicUrl,
+      profilePicUrl: raw.profilePicUrl || '',
       latestPosts: latestPosts,
       scraperUsed: this.actorId,
       dataQuality: this.determineDataQuality(latestPosts.length)

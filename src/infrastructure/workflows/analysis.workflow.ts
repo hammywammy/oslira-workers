@@ -45,28 +45,29 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
   /**
    * Transform camelCase cache ProfileData to snake_case AI ProfileData
+   * CRITICAL: Add defensive defaults for all fields to prevent PromptBuilder crashes
    */
   private transformToAIProfile(cacheProfile: CacheProfileData): AIProfileData {
     return {
-      username: cacheProfile.username,
-      display_name: cacheProfile.displayName,
-      follower_count: cacheProfile.followersCount,
-      following_count: cacheProfile.followingCount,
-      post_count: cacheProfile.postsCount,
-      bio: cacheProfile.bio,
-      external_url: cacheProfile.externalUrl,
-      is_verified: cacheProfile.isVerified,
-      is_private: cacheProfile.isPrivate,
-      is_business_account: cacheProfile.isBusinessAccount,
-      profile_pic_url: cacheProfile.profilePicUrl,
-      posts: cacheProfile.latestPosts.map(post => ({
-        id: post.id,
-        caption: post.caption,
-        like_count: post.likeCount,
-        comment_count: post.commentCount,
-        timestamp: post.timestamp,
-        media_type: post.mediaType,
-        media_url: post.mediaUrl
+      username: cacheProfile.username || 'unknown',
+      display_name: cacheProfile.displayName || cacheProfile.username || 'Unknown User',
+      follower_count: cacheProfile.followersCount ?? 0,
+      following_count: cacheProfile.followingCount ?? 0,
+      post_count: cacheProfile.postsCount ?? 0,
+      bio: cacheProfile.bio || '',
+      external_url: cacheProfile.externalUrl || null,
+      is_verified: cacheProfile.isVerified ?? false,
+      is_private: cacheProfile.isPrivate ?? false,
+      is_business_account: cacheProfile.isBusinessAccount ?? false,
+      profile_pic_url: cacheProfile.profilePicUrl || '',
+      posts: (cacheProfile.latestPosts || []).map(post => ({
+        id: post.id || '',
+        caption: post.caption || '',
+        like_count: post.likeCount ?? 0,
+        comment_count: post.commentCount ?? 0,
+        timestamp: post.timestamp || new Date().toISOString(),
+        media_type: post.mediaType || 'photo',
+        media_url: post.mediaUrl || ''
       }))
     };
   }

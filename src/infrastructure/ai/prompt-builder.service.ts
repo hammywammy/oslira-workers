@@ -80,6 +80,7 @@ ${contextPack.outreach_goals || 'Build partnerships and drive conversions'}
 
   /**
    * Build profile summary (DYNAMIC - never cached)
+   * DEFENSIVE: All numeric fields have fallbacks to prevent toLocaleString crashes
    */
   buildProfileSummary(profile: ProfileData): string {
     const engagementRate = this.calculateEngagementRate(profile);
@@ -87,13 +88,19 @@ ${contextPack.outreach_goals || 'Build partnerships and drive conversions'}
     const avgComments = this.calculateAvgComments(profile);
     const postingFrequency = this.estimatePostingFrequency(profile);
 
+    // Safe numeric values with defaults
+    const safeFollowerCount = profile.follower_count ?? 0;
+    const safeFollowingCount = profile.following_count ?? 0;
+    const safePostCount = profile.post_count ?? 0;
+    const safePosts = profile.posts || [];
+
     return `# INSTAGRAM PROFILE TO ANALYZE
 
-**Username:** @${profile.username}
-**Display Name:** ${profile.display_name}
-**Follower Count:** ${profile.follower_count.toLocaleString()}
-**Following Count:** ${profile.following_count.toLocaleString()}
-**Total Posts:** ${profile.post_count.toLocaleString()}
+**Username:** @${profile.username || 'unknown'}
+**Display Name:** ${profile.display_name || profile.username || 'Unknown'}
+**Follower Count:** ${safeFollowerCount.toLocaleString()}
+**Following Count:** ${safeFollowingCount.toLocaleString()}
+**Total Posts:** ${safePostCount.toLocaleString()}
 **Verified:** ${profile.is_verified ? 'Yes' : 'No'}
 **Business Account:** ${profile.is_business_account ? 'Yes' : 'No'}
 **Private:** ${profile.is_private ? 'Yes' : 'No'}
@@ -104,7 +111,7 @@ ${profile.bio || 'No bio'}
 ## External Link
 ${profile.external_url || 'None'}
 
-## Engagement Metrics (Last ${profile.posts.length} posts)
+## Engagement Metrics (Last ${safePosts.length} posts)
 - **Engagement Rate:** ${engagementRate.toFixed(2)}%
 - **Avg Likes per Post:** ${avgLikes.toLocaleString()}
 - **Avg Comments per Post:** ${avgComments.toLocaleString()}
@@ -115,18 +122,33 @@ ${profile.external_url || 'None'}
 
   /**
    * Build recent posts section (DYNAMIC - never cached)
+   * DEFENSIVE: Handle missing/undefined values gracefully
    */
   buildRecentPosts(profile: ProfileData, limit: number = 6): string {
-    const posts = profile.posts.slice(0, limit);
+    const safePosts = profile.posts || [];
+    const posts = safePosts.slice(0, limit);
+    const safeFollowerCount = profile.follower_count ?? 0;
+
+    if (posts.length === 0) {
+      return `# RECENT POSTS\n\nNo posts available for analysis.\n\n---\n\n`;
+    }
 
     let postsSection = `# RECENT POSTS (Last ${posts.length})\n\n`;
 
     posts.forEach((post, index) => {
-      const engagement = ((post.like_count + post.comment_count) / profile.follower_count * 100).toFixed(2);
+      const safeLikeCount = post.like_count ?? 0;
+      const safeCommentCount = post.comment_count ?? 0;
+      const engagement = safeFollowerCount > 0
+        ? ((safeLikeCount + safeCommentCount) / safeFollowerCount * 100).toFixed(2)
+        : '0.00';
 
-      postsSection += `## Post ${index + 1} (${post.media_type})
-**Posted:** ${new Date(post.timestamp).toLocaleDateString()}
-**Likes:** ${post.like_count.toLocaleString()} | **Comments:** ${post.comment_count.toLocaleString()}
+      const postDate = post.timestamp
+        ? new Date(post.timestamp).toLocaleDateString()
+        : 'Unknown date';
+
+      postsSection += `## Post ${index + 1} (${post.media_type || 'photo'})
+**Posted:** ${postDate}
+**Likes:** ${safeLikeCount.toLocaleString()} | **Comments:** ${safeCommentCount.toLocaleString()}
 **Engagement:** ${engagement}%
 
 **Caption:**
@@ -150,6 +172,9 @@ ${post.caption || 'No caption'}
     user: string;
   } {
     const businessContext = this.buildBusinessContext(business);
+
+    // DEFENSIVE: Ensure all numeric fields have defaults before using toLocaleString
+    const safeFollowerCount = profile.follower_count ?? 0;
     const engagementRate = this.calculateEngagementRate(profile);
     const recentPosts = this.buildRecentPosts(profile, 6);
 
@@ -164,8 +189,8 @@ Respond in JSON format with these exact fields:
       user: `${businessContext}
 
 # PROFILE TO ANALYZE
-**Username:** @${profile.username}
-**Follower Count:** ${profile.follower_count.toLocaleString()}
+**Username:** @${profile.username || 'unknown'}
+**Follower Count:** ${safeFollowerCount.toLocaleString()}
 **Engagement Rate:** ${engagementRate.toFixed(2)}%
 **Bio:** ${profile.bio || 'No bio'}
 
@@ -184,45 +209,56 @@ Return JSON:
   }
 
   // ===============================================================================
-  // HELPER METHODS
+  // HELPER METHODS (All defensive against undefined/null values)
   // ===============================================================================
 
   private calculateEngagementRate(profile: ProfileData): number {
-    if (!profile.posts.length || !profile.follower_count) return 0;
+    const safePosts = profile.posts || [];
+    const safeFollowerCount = profile.follower_count ?? 0;
 
-    const totalEngagement = profile.posts.reduce(
-      (sum, post) => sum + post.like_count + post.comment_count,
+    if (safePosts.length === 0 || safeFollowerCount === 0) return 0;
+
+    const totalEngagement = safePosts.reduce(
+      (sum, post) => sum + (post.like_count ?? 0) + (post.comment_count ?? 0),
       0
     );
 
-    const avgEngagementPerPost = totalEngagement / profile.posts.length;
-    return (avgEngagementPerPost / profile.follower_count) * 100;
+    const avgEngagementPerPost = totalEngagement / safePosts.length;
+    return (avgEngagementPerPost / safeFollowerCount) * 100;
   }
 
   private calculateAvgLikes(profile: ProfileData): number {
-    if (!profile.posts.length) return 0;
+    const safePosts = profile.posts || [];
+    if (safePosts.length === 0) return 0;
 
-    const totalLikes = profile.posts.reduce((sum, post) => sum + post.like_count, 0);
-    return Math.round(totalLikes / profile.posts.length);
+    const totalLikes = safePosts.reduce((sum, post) => sum + (post.like_count ?? 0), 0);
+    return Math.round(totalLikes / safePosts.length);
   }
 
   private calculateAvgComments(profile: ProfileData): number {
-    if (!profile.posts.length) return 0;
+    const safePosts = profile.posts || [];
+    if (safePosts.length === 0) return 0;
 
-    const totalComments = profile.posts.reduce((sum, post) => sum + post.comment_count, 0);
-    return Math.round(totalComments / profile.posts.length);
+    const totalComments = safePosts.reduce((sum, post) => sum + (post.comment_count ?? 0), 0);
+    return Math.round(totalComments / safePosts.length);
   }
 
   private estimatePostingFrequency(profile: ProfileData): string {
-    if (profile.posts.length < 2) return 'Unknown';
+    const safePosts = profile.posts || [];
+    if (safePosts.length < 2) return 'Unknown';
 
-    const oldest = new Date(profile.posts[profile.posts.length - 1].timestamp);
-    const newest = new Date(profile.posts[0].timestamp);
+    const oldestPost = safePosts[safePosts.length - 1];
+    const newestPost = safePosts[0];
+
+    if (!oldestPost?.timestamp || !newestPost?.timestamp) return 'Unknown';
+
+    const oldest = new Date(oldestPost.timestamp);
+    const newest = new Date(newestPost.timestamp);
     const daysDiff = (newest.getTime() - oldest.getTime()) / (1000 * 60 * 60 * 24);
 
     if (daysDiff === 0) return 'Multiple posts per day';
 
-    const postsPerDay = profile.posts.length / daysDiff;
+    const postsPerDay = safePosts.length / daysDiff;
 
     if (postsPerDay >= 1) return `${postsPerDay.toFixed(1)} posts/day`;
     if (postsPerDay >= 0.5) return 'Several posts per week';
