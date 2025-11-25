@@ -5,11 +5,12 @@ import { BaseRepository } from './base.repository';
 
 /**
  * Analysis types:
- * - 'light': Standard light analysis (AI-powered)
+ * - 'light': Standard light analysis (AI-powered, quick assessment)
+ * - 'deep': Deep analysis (AI-powered, in-depth assessment with 2x summary)
  * - 'private': Profile was private, could not be analyzed
  * - 'not_found': Profile doesn't exist or was deleted
  */
-export type AnalysisTypeResult = 'light' | 'private' | 'not_found';
+export type AnalysisTypeResult = 'light' | 'deep' | 'private' | 'not_found';
 
 export interface Analysis {
   id: string;
