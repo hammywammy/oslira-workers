@@ -82,6 +82,7 @@ ${profile.external_url || 'None'}
 
   /**
    * Build recent posts section (DYNAMIC - never cached)
+   * OPTIMIZED: Captions truncated to 200 chars (saves 100-200 tokens per analysis)
    */
   buildRecentPosts(profile: AIProfileData, limit: number = 6): string {
     const posts = profile.posts.slice(0, limit);
@@ -89,12 +90,17 @@ ${profile.external_url || 'None'}
     let postsSection = `# RECENT POSTS (Last ${posts.length})\n\n`;
 
     posts.forEach((post, index) => {
+      // Truncate caption to 200 chars to reduce token usage
+      const caption = post.caption
+        ? (post.caption.length > 200 ? post.caption.substring(0, 200) + '...' : post.caption)
+        : 'No caption';
+
       postsSection += `## Post ${index + 1} (${post.media_type})
 **Posted:** ${new Date(post.timestamp).toLocaleDateString()}
 **Likes:** ${post.like_count.toLocaleString()} | **Comments:** ${post.comment_count.toLocaleString()}
 
 **Caption:**
-${post.caption || 'No caption'}
+${caption}
 
 ---
 
