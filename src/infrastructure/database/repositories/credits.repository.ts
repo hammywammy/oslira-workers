@@ -66,6 +66,7 @@ export class CreditsRepository extends BaseRepository<CreditBalance> {
 
   /**
    * Deduct credits (MUST use RPC function for safety)
+   * Note: RPC does balance + p_amount, so we pass negative to deduct
    */
   async deductCredits(
     accountId: string,
@@ -76,7 +77,7 @@ export class CreditsRepository extends BaseRepository<CreditBalance> {
     const { data, error } = await this.supabase
       .rpc('deduct_credits', {
         p_account_id: accountId,
-        p_amount: amount,
+        p_amount: -amount, // Negate: RPC adds p_amount, so negative = deduct
         p_transaction_type: transactionType,
         p_description: description
       });
@@ -87,6 +88,7 @@ export class CreditsRepository extends BaseRepository<CreditBalance> {
 
   /**
    * Deduct light analyses (uses RPC function)
+   * Note: RPC does balance + p_amount, so we pass negative to deduct
    */
   async deductLightAnalyses(
     accountId: string,
@@ -97,7 +99,7 @@ export class CreditsRepository extends BaseRepository<CreditBalance> {
     const { data, error } = await this.supabase
       .rpc('deduct_light_analyses', {
         p_account_id: accountId,
-        p_amount: amount,
+        p_amount: -amount, // Negate: RPC adds p_amount, so negative = deduct
         p_transaction_type: transactionType,
         p_description: description
       });

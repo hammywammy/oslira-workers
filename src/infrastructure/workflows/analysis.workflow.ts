@@ -161,35 +161,35 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         }
       });
 
-      // Step 3: Verify & deduct credits (no retries - fail fast on insufficient credits)
-      await step.do('deduct_credits', async () => {
+      // Step 3: Verify & deduct light analyses balance (no retries - fail fast on insufficient balance)
+      await step.do('deduct_balance', async () => {
         try {
-          console.log(`[Workflow][${params.run_id}] Step 3: Verifying credits (cost: ${creditsCost})`);
+          console.log(`[Workflow][${params.run_id}] Step 3: Verifying light analyses balance (cost: ${creditsCost})`);
           const stepInfo = getStepProgress(params.analysis_type, 'deduct_credits');
           await this.updateProgress(params.run_id, stepInfo.percentage, stepInfo.description);
 
           const supabase = await SupabaseClientFactory.createAdminClient(this.env);
           const creditsRepo = new CreditsRepository(supabase);
 
-          const hasCredits = await creditsRepo.hasSufficientCredits(
+          const hasBalance = await creditsRepo.hasSufficientLightAnalyses(
             params.account_id,
             creditsCost
           );
 
-          if (!hasCredits) {
-            console.error(`[Workflow][${params.run_id}] Insufficient credits`);
+          if (!hasBalance) {
+            console.error(`[Workflow][${params.run_id}] Insufficient light analyses balance`);
             // Non-retriable error - fail immediately
-            throw new Error('Insufficient credits');
+            throw new Error('Insufficient light analyses balance');
           }
 
-          await creditsRepo.deductCredits(
+          await creditsRepo.deductLightAnalyses(
             params.account_id,
             creditsCost,
             'analysis',
             `${params.analysis_type} analysis for @${params.username}`
           );
 
-          console.log(`[Workflow][${params.run_id}] Credits deducted successfully`);
+          console.log(`[Workflow][${params.run_id}] Light analysis balance deducted successfully`);
         } catch (error: any) {
           console.error(`[Workflow][${params.run_id}] Step 3 FAILED:`, this.serializeError(error));
           throw error;
@@ -514,23 +514,23 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
       console.error(`[Workflow][${params.run_id}] FAILED`, errorDetails);
 
-      // Refund credits on failure (with retry limit)
-      await step.do('refund_credits', {
+      // Refund light analyses balance on failure (with retry limit)
+      await step.do('refund_balance', {
         retries: { limit: 3, delay: '1 second', backoff: 'exponential' }
       }, async () => {
         try {
-          console.log(`[Workflow][${params.run_id}] Attempting to refund ${creditsCost} credits`);
+          console.log(`[Workflow][${params.run_id}] Attempting to refund ${creditsCost} light analyses`);
           const supabase = await SupabaseClientFactory.createAdminClient(this.env);
           const creditsRepo = new CreditsRepository(supabase);
 
-          await creditsRepo.addCredits(
+          await creditsRepo.addLightAnalyses(
             params.account_id,
             creditsCost,
             'refund',
             `Analysis failed: ${errorDetails.message}`
           );
 
-          console.log(`[Workflow][${params.run_id}] Credits refunded: ${creditsCost}`);
+          console.log(`[Workflow][${params.run_id}] Light analyses refunded: ${creditsCost}`);
         } catch (refundError: any) {
           console.error(`[Workflow][${params.run_id}] Refund failed:`, this.serializeError(refundError));
           // Don't throw - we still want to mark the analysis as failed even if refund fails
