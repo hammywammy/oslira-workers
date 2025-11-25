@@ -67,15 +67,19 @@ export class AnalysisProgressDO extends DurableObject {
               this.sseConnections.set(connectionId, controller);
               console.log(`[AnalysisProgressDO] SSE connection established: ${connectionId}`);
 
-              // Send initial connection event
               const encoder = new TextEncoder();
-              controller.enqueue(encoder.encode(`event: connected\ndata: ${JSON.stringify({ connectionId })}\n\n`));
+
+              // CRITICAL: Send SSE comment first (establishes stream as valid SSE)
+              controller.enqueue(encoder.encode(': stream-start\n\n'));
 
               // Send current state immediately
               const currentProgress = await this.getProgress();
               if (currentProgress) {
-                const progressEvent = `event: progress\ndata: ${JSON.stringify(currentProgress)}\n\n`;
+                // Send as 'ready' event if pending, 'progress' if already started
+                const eventType = currentProgress.status === 'pending' ? 'ready' : 'progress';
+                const progressEvent = `event: ${eventType}\ndata: ${JSON.stringify(currentProgress)}\n\n`;
                 controller.enqueue(encoder.encode(progressEvent));
+                console.log(`[AnalysisProgressDO] Sent initial ${eventType} event to ${connectionId}`);
 
                 // If already complete or failed, close stream
                 if (currentProgress.status === 'complete' || currentProgress.status === 'failed') {
@@ -346,9 +350,14 @@ export class AnalysisProgressDO extends DurableObject {
     progress: AnalysisProgressState,
     eventType: 'ready' | 'progress' | 'complete' | 'failed' | 'cancelled' = 'progress'
   ): void {
-    if (this.sseConnections.size === 0) {
+    const clientCount = this.sseConnections.size;
+
+    if (clientCount === 0) {
+      console.log(`[AnalysisProgressDO] No SSE clients connected (event: ${eventType}, progress: ${progress.progress}%)`);
       return;
     }
+
+    console.log(`[AnalysisProgressDO] Broadcasting ${eventType} (${progress.progress}%) to ${clientCount} client(s)`);
 
     const encoder = new TextEncoder();
     const event = `event: ${eventType}\ndata: ${JSON.stringify(progress)}\n\n`;
