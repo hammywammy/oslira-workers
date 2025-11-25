@@ -13,6 +13,7 @@ import { CostTracker } from '@/infrastructure/monitoring/cost-tracker.service';
 import { PerformanceTracker } from '@/infrastructure/monitoring/performance-tracker.service';
 import { getSecret } from '@/infrastructure/config/secrets';
 import { generateId } from '@/shared/utils/id.util';
+import { getCreditCost, getPostsLimit, getScrapingCost } from '@/config/operations-pricing.config';
 
 /**
  * ANALYZE LEAD USE CASE
@@ -86,7 +87,7 @@ export class AnalyzeLeadUseCase {
       await this.checkForDuplicate(params);
 
       // Step 3-4: Check credits + Deduct immediately
-      const creditsCost = this.getCreditCost(params.analysisType);
+      const creditsCost = getCreditCost(params.analysisType);
       await this.deductCredits(params.accountId, creditsCost, params.analysisType);
 
       // Step 5-8: Get profile data (cache or scrape) + Run AI
@@ -138,8 +139,8 @@ export class AnalyzeLeadUseCase {
 
     } catch (error: any) {
       // On failure, refund credits
-      await this.refundCredits(params.accountId, this.getCreditCost(params.analysisType));
-      
+      await this.refundCredits(params.accountId, getCreditCost(params.analysisType));
+
       throw error;
     }
   }
@@ -242,13 +243,13 @@ export class AnalyzeLeadUseCase {
       this.perfTracker.startStep('scrape_profile');
       const apifyToken = await getSecret('APIFY_API_TOKEN', this.env, this.env.APP_ENV);
       const apifyAdapter = new ApifyAdapter(apifyToken);
-      
-      const postsLimit = this.getPostsLimit(params.analysisType);
+
+      const postsLimit = getPostsLimit(params.analysisType);
       profile = await apifyAdapter.scrapeProfile(params.username, postsLimit);
-      
-      apifyCost = ApifyAdapter.estimateCost(postsLimit);
+
+      apifyCost = getScrapingCost(params.analysisType);
       this.costTracker.recordCost('apify', apifyCost);
-      
+
       this.perfTracker.endStep('scrape_profile');
 
       // Store in cache
@@ -343,21 +344,6 @@ export class AnalyzeLeadUseCase {
     console.log(`[CostTracking] Run ${runId}: Apify=$${costs.apifyCost.toFixed(4)}, AI=$${costs.aiCost.toFixed(4)}`);
   }
 
-  /**
-   * Get credit cost by analysis type
-   * Extensible - add more costs when implementing additional tiers
-   */
-  private getCreditCost(type: 'light'): number {
-    const costs: Record<'light', number> = { light: 1 };
-    return costs[type];
-  }
-
-  /**
-   * Get posts limit by analysis type
-   * Extensible - add more limits when implementing additional tiers
-   */
-  private getPostsLimit(type: 'light'): number {
-    const limits: Record<'light', number> = { light: 6 };
-    return limits[type];
-  }
+  // NOTE: Credit cost, posts limit, and scraping cost functions moved to centralized config
+  // Use imports from '@/config/operations-pricing.config'
 }

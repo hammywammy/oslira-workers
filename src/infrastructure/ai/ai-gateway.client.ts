@@ -1,7 +1,7 @@
 // infrastructure/ai/ai-gateway.client.ts
 
 import type { Env } from '@/shared/types/env.types';
-import { AI_PRICING, calculateAICost } from './pricing.config';
+import { AI_MODEL_PRICING, calculateAICost } from '@/config/operations-pricing.config';
 
 /**
  * AI GATEWAY CLIENT - PRODUCTION VERSION
@@ -86,10 +86,10 @@ export class AIGatewayClient {
    * Universal AI call - auto-routes to OpenAI or Claude based on model
    */
   async call(request: AIRequest): Promise<AIResponse> {
-    const pricing = AI_PRICING[request.model];
-    
+    const pricing = AI_MODEL_PRICING[request.model];
+
     if (!pricing) {
-      throw new Error(`Unknown model: ${request.model}. Available models: ${Object.keys(AI_PRICING).join(', ')}`);
+      throw new Error(`Unknown model: ${request.model}. Available models: ${Object.keys(AI_MODEL_PRICING).join(', ')}`);
     }
 
     if (pricing.provider === 'openai') {
