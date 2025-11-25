@@ -42,38 +42,29 @@ export class PromptBuilder {
   /**
    * Build business context (CACHED - 800 tokens)
    * This section is reused across all analyses for the same business profile
+   *
+   * FIXED: Correctly maps database JSONB fields (business_context & ideal_customer_profile)
    */
   buildBusinessContext(business: BusinessProfile): string {
-    const contextPack = business.business_context_pack || {};
+    // Extract data from JSONB fields (database schema)
+    const context = business.business_context || {};
+    const icp = business.ideal_customer_profile || {};
 
     return `# BUSINESS CONTEXT (Your Client)
 
-**Company:** ${business.business_name}
-**Website:** ${business.website || 'Not provided'}
+**Company:** ${business.business_name || business.full_name}
 **One-Liner:** ${business.business_one_liner || 'Not provided'}
+**Business Summary:** ${context.business_summary || business.business_summary_generated || 'Not provided'}
 
 ## Target Audience
-${contextPack.target_audience || 'Not specified'}
+${icp.target_audience || context.target_description || 'Not specified'}
 
-## Industry & Offering
-- **Industry:** ${contextPack.industry || 'Not specified'}
-- **What We Offer:** ${contextPack.offering || 'Not specified'}
+## Communication Tone
+${icp.brand_voice || context.communication_tone || 'Professional and engaging'}
 
 ## Ideal Customer Profile (ICP)
-- **Follower Range:** ${contextPack.icp_min_followers || 0} - ${contextPack.icp_max_followers || 'unlimited'}
-- **Min Engagement Rate:** ${contextPack.icp_min_engagement_rate || 0}%
-- **Content Themes:** ${contextPack.icp_content_themes?.join(', ') || 'Any'}
-- **Geographic Focus:** ${contextPack.icp_geographic_focus || 'Global'}
-- **Industry Niche:** ${contextPack.icp_industry_niche || 'Any'}
-
-## Key Selling Points
-${contextPack.selling_points?.map((p: string, i: number) => `${i + 1}. ${p}`).join('\n') || 'Not specified'}
-
-## Brand Voice
-${contextPack.brand_voice || 'Professional and engaging'}
-
-## Outreach Goals
-${contextPack.outreach_goals || 'Build partnerships and drive conversions'}
+- **Follower Range:** ${icp.icp_min_followers || context.icp_min_followers || 0} - ${icp.icp_max_followers || context.icp_max_followers || 'unlimited'}
+- **Target Company Sizes:** ${context.target_company_sizes?.join(', ') || 'Any'}
 
 ---`;
   }
