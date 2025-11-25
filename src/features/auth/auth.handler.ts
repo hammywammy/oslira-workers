@@ -524,14 +524,6 @@ export async function handleBootstrap(c: Context<{ Bindings: Env }>) {
             stripe_subscription_id_test,
             stripe_customer_id_live,
             stripe_customer_id_test
-          ),
-          balances (
-            account_id,
-            credit_balance,
-            light_analyses_balance,
-            last_transaction_at,
-            created_at,
-            updated_at
           )
         )
       `)
@@ -548,7 +540,18 @@ export async function handleBootstrap(c: Context<{ Bindings: Env }>) {
     const account = Array.isArray(data.accounts) ? data.accounts[0] : data.accounts;
     const accountData = Array.isArray(data.account) ? data.account[0] : data.account;
     const subscription = accountData?.subscriptions?.[0] || null;
-    const balance = accountData?.balances?.[0] || null;
+
+    // Fetch balances directly - nested joins through reverse FKs can be unreliable
+    const { data: balance, error: balanceError } = await supabase
+      .from('balances')
+      .select('account_id, credit_balance, light_analyses_balance, last_transaction_at, created_at, updated_at')
+      .eq('account_id', account.id)
+      .single();
+
+    if (balanceError && balanceError.code !== 'PGRST116') {
+      // PGRST116 = "not found" which is acceptable (we have defaults)
+      console.error('[Bootstrap] Balance query error:', balanceError);
+    }
 
     // Determine environment-specific Stripe IDs
     const isProduction = c.env.APP_ENV === 'production';
