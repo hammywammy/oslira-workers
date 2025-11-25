@@ -29,18 +29,20 @@ export type AnalysisType = 'light' | 'deep';
 
 /**
  * CREDIT TYPES
- * Maps to database columns: light_analyses_balance, deep_analyses_balance
- * Add new credit types here when expanding the credit system.
+ * Maps to database columns:
+ * - light_analyses: light_analyses_balance (legacy, for light only)
+ * - credits: credit_balance (for deep and all future analysis types)
  */
-export type CreditType = 'light_analyses' | 'deep_analyses';
+export type CreditType = 'light_analyses' | 'credits';
 
 /**
  * Maps each analysis type to its corresponding credit type.
- * This allows flexible credit routing for different analysis tiers.
+ * - Light uses dedicated light_analyses_balance
+ * - Deep and all future types use credit_balance
  */
 export const ANALYSIS_TO_CREDIT_TYPE: Record<AnalysisType, CreditType> = {
   light: 'light_analyses',
-  deep: 'deep_analyses'
+  deep: 'credits'
 };
 
 export type AIProvider = 'openai' | 'anthropic';
