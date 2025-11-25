@@ -2,13 +2,14 @@
 
 /**
  * AUTH HANDLERS - INDUSTRY STANDARD (2025)
- * 
+ *
  * ENDPOINTS:
  * - POST /api/auth/google/callback - Complete OAuth flow, issue tokens
  * - POST /api/auth/refresh           - Rotate tokens, extend session
  * - POST /api/auth/logout            - Revoke refresh token
  * - GET  /api/auth/session          - Fetch current user data (requires auth)
- * 
+ * - GET  /api/auth/bootstrap        - Single source for all init data (requires auth)
+ *
  * TOKEN STRATEGY:
  * - Access Token: JWT, 15min expiry, contains user/account claims
  * - Refresh Token: Opaque UUID, 30 days expiry, stored hashed in DB
@@ -36,6 +37,7 @@ import type {
   RefreshResponse,
   LogoutRequest,
   SessionResponse,
+  BootstrapResponse,
 } from './auth.types';
 
 import { SupabaseClientFactory } from '@/infrastructure/database/supabase.client';
@@ -475,9 +477,128 @@ if (newAccessToken) {
 
   } catch (error: any) {
     console.error('[GetSession] Error:', error);
-    return c.json({ 
+    return c.json({
       error: 'Failed to fetch session',
-      message: error.message 
+      message: error.message
     }, 500);
+  }
+}
+
+/**
+ * GET /api/auth/bootstrap
+ * Single endpoint for all user initialization data
+ *
+ * Purpose: Replace multiple API calls (/session, /subscription, /balance)
+ * with a single bootstrap call on app initialization.
+ *
+ * Uses JOIN query for single database round-trip.
+ * Handles missing subscription/balances gracefully.
+ */
+export async function handleBootstrap(c: Context<{ Bindings: Env }>) {
+  try {
+    const auth = getAuthContext(c);
+    const supabase = await SupabaseClientFactory.createAdminClient(c.env);
+
+    // Single JOIN query to fetch all initialization data
+    const { data, error } = await supabase
+      .from('users')
+      .select(`
+        id,
+        email,
+        full_name,
+        avatar_url,
+        accounts!inner (
+          id,
+          name
+        ),
+        account:accounts!inner (
+          subscriptions (
+            id,
+            plan_type,
+            status,
+            current_period_start,
+            current_period_end,
+            stripe_subscription_id_live,
+            stripe_subscription_id_test,
+            stripe_customer_id_live,
+            stripe_customer_id_test
+          ),
+          balances (
+            account_id,
+            credit_balance,
+            light_analyses_balance,
+            last_transaction_at,
+            created_at,
+            updated_at
+          )
+        )
+      `)
+      .eq('id', auth.userId)
+      .single();
+
+    if (error || !data) {
+      console.error('[Bootstrap] User not found:', auth.userId, error);
+      return errorResponse(c, 'Bootstrap failed', 'NOT_FOUND', 404);
+    }
+
+    // Extract nested data
+    const user = data;
+    const account = Array.isArray(data.accounts) ? data.accounts[0] : data.accounts;
+    const accountData = Array.isArray(data.account) ? data.account[0] : data.account;
+    const subscription = accountData?.subscriptions?.[0] || null;
+    const balance = accountData?.balances?.[0] || null;
+
+    // Determine environment-specific Stripe IDs
+    const isProduction = c.env.APP_ENV === 'production';
+
+    // Build response
+    const response: BootstrapResponse = {
+      user: {
+        id: user.id,
+        email: user.email,
+        full_name: user.full_name,
+        avatar_url: user.avatar_url,
+        onboarding_completed: auth.onboardingCompleted // From JWT claims
+      },
+      account: {
+        id: account.id,
+        name: account.name
+      },
+      subscription: subscription ? {
+        id: subscription.id,
+        tier: subscription.plan_type as 'free' | 'growth' | 'pro' | 'agency' | 'enterprise',
+        status: subscription.status as 'active' | 'canceled' | 'past_due',
+        current_period_start: subscription.current_period_start,
+        current_period_end: subscription.current_period_end,
+        stripe_subscription_id: isProduction
+          ? subscription.stripe_subscription_id_live
+          : subscription.stripe_subscription_id_test,
+        stripe_customer_id: isProduction
+          ? subscription.stripe_customer_id_live
+          : subscription.stripe_customer_id_test
+      } : null,
+      balances: balance ? {
+        account_id: balance.account_id,
+        credit_balance: balance.credit_balance,
+        light_analyses_balance: balance.light_analyses_balance,
+        last_transaction_at: balance.last_transaction_at,
+        created_at: balance.created_at,
+        updated_at: balance.updated_at
+      } : {
+        // Default balances if not found
+        account_id: account.id,
+        credit_balance: 0,
+        light_analyses_balance: 0,
+        last_transaction_at: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+    };
+
+    return successResponse(c, response);
+
+  } catch (error: any) {
+    console.error('[Bootstrap] Error:', error);
+    return errorResponse(c, 'Bootstrap failed', 'INTERNAL_ERROR', 500);
   }
 }
