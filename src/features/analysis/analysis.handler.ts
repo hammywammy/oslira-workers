@@ -277,6 +277,17 @@ export async function streamAnalysisProgress(c: Context<{ Bindings: Env }>) {
 
     console.log('[SSE] Starting stream:', runId);
 
+    // Get origin for CORS - must be added manually for raw Response
+    const origin = c.req.header('Origin') || 'https://app.oslira.com';
+    const allowedOrigins = [
+      'https://app.oslira.com',
+      'https://staging-app.oslira.com',
+      'http://localhost:5173',
+      'http://localhost:5174',
+      'http://127.0.0.1:5173',
+    ];
+    const corsOrigin = allowedOrigins.includes(origin) ? origin : 'https://app.oslira.com';
+
     const progressId = c.env.ANALYSIS_PROGRESS.idFromName(runId);
     const progressDO = c.env.ANALYSIS_PROGRESS.get(progressId);
 
@@ -397,12 +408,17 @@ export async function streamAnalysisProgress(c: Context<{ Bindings: Env }>) {
       }
     });
 
+    // CRITICAL: Include CORS headers for SSE - browsers require these
     return new Response(stream, {
       headers: {
         'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Connection': 'keep-alive',
-        'X-Accel-Buffering': 'no'
+        'X-Accel-Buffering': 'no',
+        // CORS headers - must be set manually for raw Response
+        'Access-Control-Allow-Origin': corsOrigin,
+        'Access-Control-Allow-Credentials': 'true',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
       }
     });
 
