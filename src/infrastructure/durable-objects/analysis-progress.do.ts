@@ -51,6 +51,17 @@ export class AnalysisProgressDO extends DurableObject {
       // WEBSOCKET UPGRADE HANDLER
       // =========================================================================
       if (request.headers.get('Upgrade') === 'websocket') {
+        // Check if analysis already complete - reject new connections
+        const existingProgress = await this.getProgress();
+        if (existingProgress && (
+          existingProgress.status === 'complete' ||
+          existingProgress.status === 'failed' ||
+          existingProgress.status === 'cancelled'
+        )) {
+          console.log('[AnalysisProgressDO] Rejecting WebSocket - analysis already terminal:', existingProgress.status);
+          return new Response(`Analysis already ${existingProgress.status}`, { status: 410 }); // 410 Gone
+        }
+
         const pair = new WebSocketPair();
         const [client, server] = Object.values(pair);
 
