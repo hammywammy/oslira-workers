@@ -10,7 +10,7 @@ import { BusinessRepository } from '@/infrastructure/database/repositories/busin
 import { OperationsLedgerRepository } from '@/infrastructure/database/repositories/operations-ledger.repository';
 import { R2CacheService, type ProfileData as CacheProfileData } from '@/infrastructure/cache/r2-cache.service';
 import { AvatarCacheService } from '@/infrastructure/cache/avatar-cache.service';
-import { ApifyAdapter } from '@/infrastructure/scraping/apify.adapter';
+import { ApifyAdapter, type ScrapeResult, type ApifyErrorItem } from '@/infrastructure/scraping/apify.adapter';
 import { AIAnalysisService } from '@/infrastructure/ai/ai-analysis.service';
 import { getSecret } from '@/infrastructure/config/secrets';
 import type { ProfileData as AIProfileData } from '@/infrastructure/ai/prompt-builder.service';
@@ -21,6 +21,11 @@ import {
   buildOperationsMetrics,
   type AnalysisType
 } from '@/config/operations-pricing.config';
+import {
+  PreAnalysisChecksService,
+  type PreAnalysisChecksSummary,
+  type AnalysisResultType
+} from '@/infrastructure/analysis-checks';
 
 /**
  * ANALYSIS WORKFLOW
@@ -82,10 +87,14 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
     const timing = {
       cache_check: 0,
       scraping: 0,
+      pre_checks: 0,
       ai_analysis: 0,
       db_upsert: 0,
       cache_hit: false
     };
+
+    // Track scrape error info for pre-analysis checks
+    let scrapeErrorInfo: ApifyErrorItem | null = null;
 
     try {
       console.log(`[Workflow][${params.run_id}] START`, {
@@ -251,10 +260,11 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       });
 
       // Step 6: Scrape profile if cache miss
+      // Uses scrapeProfileWithMeta to capture error info for pre-analysis checks
       if (!profile) {
-        profile = await step.do('scrape_profile', {
+        const scrapeResult = await step.do('scrape_profile', {
           retries: { limit: 1, delay: '2 seconds' }
-        }, async () => {
+        }, async (): Promise<ScrapeResult> => {
           try {
             console.log(`[Workflow][${params.run_id}] Step 6: Scraping Instagram profile @${params.username}`);
             const stepInfo = getStepProgress(params.analysis_type, 'scrape_profile');
@@ -266,26 +276,244 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
             const postsLimit = getPostsLimit(params.analysis_type);
             console.log(`[Workflow][${params.run_id}] Scraping ${postsLimit} posts`);
-            const scraped = await apifyAdapter.scrapeProfile(params.username, postsLimit);
+
+            // Use scrapeProfileWithMeta to get detailed error info instead of throwing
+            const result = await apifyAdapter.scrapeProfileWithMeta(params.username, postsLimit);
             timing.scraping = Date.now() - scrapeStart;
 
-            console.log(`[Workflow][${params.run_id}] Scraped profile:`, {
-              username: scraped.username,
-              followers: scraped.followersCount,
-              posts: scraped.latestPosts.length
-            });
+            if (result.success && result.profile) {
+              console.log(`[Workflow][${params.run_id}] Scraped profile:`, {
+                username: result.profile.username,
+                followers: result.profile.followersCount,
+                posts: result.profile.latestPosts.length,
+                isPrivate: result.profile.isPrivate
+              });
 
-            // Store in cache
-            const cacheService = new R2CacheService(this.env.R2_CACHE_BUCKET);
-            await cacheService.set(params.username, scraped, params.analysis_type);
-            console.log(`[Workflow][${params.run_id}] Profile cached`);
+              // Store in cache only if successful
+              const cacheService = new R2CacheService(this.env.R2_CACHE_BUCKET);
+              await cacheService.set(params.username, result.profile, params.analysis_type);
+              console.log(`[Workflow][${params.run_id}] Profile cached`);
+            } else {
+              console.log(`[Workflow][${params.run_id}] Scrape returned error:`, result.error);
+            }
 
-            return scraped;
+            return result;
           } catch (error: any) {
             console.error(`[Workflow][${params.run_id}] Step 6 FAILED:`, this.serializeError(error));
+            // Return as error result instead of throwing
+            return {
+              success: false,
+              error: {
+                username: params.username,
+                error: 'scrape_error',
+                errorDescription: error.message
+              }
+            };
+          }
+        });
+
+        // Extract profile and error info from result
+        if (scrapeResult.success && scrapeResult.profile) {
+          profile = scrapeResult.profile;
+        } else {
+          scrapeErrorInfo = scrapeResult.error || null;
+        }
+      }
+
+      // Step 6b: Run pre-analysis checks (private profile, not found, etc.)
+      // This step determines if we should bypass AI analysis
+      const preChecksResult = await step.do('pre_analysis_checks', async (): Promise<PreAnalysisChecksSummary> => {
+        try {
+          console.log(`[Workflow][${params.run_id}] Step 6b: Running pre-analysis checks`);
+
+          const checksStart = Date.now();
+          const checksService = new PreAnalysisChecksService();
+
+          const result = await checksService.runChecks({
+            profile: profile || null,
+            rawApifyResponse: scrapeErrorInfo,
+            username: params.username,
+            accountId: params.account_id,
+            businessProfileId: params.business_profile_id,
+            requestedAnalysisType: params.analysis_type as AnalysisType
+          });
+
+          timing.pre_checks = Date.now() - checksStart;
+
+          console.log(`[Workflow][${params.run_id}] Pre-analysis checks complete:`, {
+            allPassed: result.allPassed,
+            checksRun: result.checksRun,
+            failedCheck: result.failedCheck?.checkName,
+            durationMs: result.durationMs
+          });
+
+          return result;
+        } catch (error: any) {
+          console.error(`[Workflow][${params.run_id}] Step 6b FAILED:`, this.serializeError(error));
+          // On check error, allow analysis to proceed (fail-open)
+          return {
+            allPassed: true,
+            results: [],
+            checksRun: 0,
+            durationMs: 0
+          };
+        }
+      });
+
+      // Handle bypassed analysis (private profile, not found, etc.)
+      if (!preChecksResult.allPassed && preChecksResult.failedCheck) {
+        const failedCheck = preChecksResult.failedCheck;
+        console.log(`[Workflow][${params.run_id}] Pre-analysis check failed - bypassing AI analysis`, {
+          check: failedCheck.checkName,
+          resultType: failedCheck.resultType,
+          shouldRefund: failedCheck.shouldRefund
+        });
+
+        // Step 6c: Refund if needed (the check said we should)
+        if (failedCheck.shouldRefund) {
+          await step.do('refund_for_bypass', {
+            retries: { limit: 3, delay: '1 second', backoff: 'exponential' }
+          }, async () => {
+            try {
+              console.log(`[Workflow][${params.run_id}] Refunding ${creditsCost} light analyses for bypassed check`);
+              const supabase = await SupabaseClientFactory.createAdminClient(this.env);
+              const creditsRepo = new CreditsRepository(supabase);
+
+              await creditsRepo.addLightAnalyses(
+                params.account_id,
+                creditsCost,
+                'refund',
+                `Analysis bypassed (${failedCheck.resultType}): @${params.username}`
+              );
+
+              console.log(`[Workflow][${params.run_id}] Light analyses refunded for bypass`);
+            } catch (refundError: any) {
+              console.error(`[Workflow][${params.run_id}] Refund failed:`, this.serializeError(refundError));
+              // Continue anyway - don't fail the workflow for refund issues
+            }
+          });
+        }
+
+        // Step 6d: Create minimal lead record if we have any profile data
+        let bypassLeadId: string | null = null;
+        if (profile) {
+          bypassLeadId = await step.do('upsert_bypass_lead', {
+            retries: { limit: 3, delay: '1 second' }
+          }, async () => {
+            try {
+              console.log(`[Workflow][${params.run_id}] Creating lead record for bypassed profile`);
+              const supabase = await SupabaseClientFactory.createAdminClient(this.env);
+              const leadsRepo = new LeadsRepository(supabase);
+
+              const aiProfile = this.transformToAIProfile(profile);
+
+              const lead = await leadsRepo.upsertLead({
+                account_id: params.account_id,
+                business_profile_id: params.business_profile_id,
+                username: params.username,
+                display_name: aiProfile.display_name,
+                follower_count: aiProfile.follower_count,
+                following_count: aiProfile.following_count,
+                post_count: aiProfile.post_count,
+                external_url: aiProfile.external_url,
+                profile_pic_url: aiProfile.profile_pic_url,
+                is_verified: aiProfile.is_verified,
+                is_private: aiProfile.is_private,
+                is_business_account: aiProfile.is_business_account
+              });
+
+              console.log(`[Workflow][${params.run_id}] Bypass lead created: ${lead.lead_id}`);
+              return lead.lead_id;
+            } catch (error: any) {
+              console.error(`[Workflow][${params.run_id}] Bypass lead creation failed:`, this.serializeError(error));
+              return null;
+            }
+          });
+        }
+
+        // Step 6e: Save bypassed analysis result
+        const bypassAnalysisId = await step.do('save_bypass_analysis', {
+          retries: { limit: 3, delay: '1 second' }
+        }, async () => {
+          try {
+            console.log(`[Workflow][${params.run_id}] Saving bypassed analysis record`);
+            const supabase = await SupabaseClientFactory.createAdminClient(this.env);
+            const analysisRepo = new AnalysisRepository(supabase);
+
+            const aiResponse = {
+              score: failedCheck.score ?? 0,
+              summary: failedCheck.summary || `Unable to analyze: ${failedCheck.reason}`,
+              bypassed: true,
+              bypass_reason: failedCheck.reason,
+              bypass_check: failedCheck.checkName
+            };
+
+            const analysis = await analysisRepo.updateAnalysis(params.run_id, {
+              overall_score: failedCheck.score ?? 0,
+              ai_response: aiResponse,
+              analysis_type: failedCheck.resultType as AnalysisResultType,
+              status: 'complete',
+              completed_at: new Date().toISOString()
+            });
+
+            console.log(`[Workflow][${params.run_id}] Bypass analysis saved:`, analysis.id);
+            return analysis.id;
+          } catch (error: any) {
+            console.error(`[Workflow][${params.run_id}] Bypass analysis save failed:`, this.serializeError(error));
             throw error;
           }
         });
+
+        // Step 6f: Mark complete in progress tracker
+        await step.do('complete_bypass_progress', {
+          retries: { limit: 2, delay: '500 milliseconds' }
+        }, async () => {
+          try {
+            console.log(`[Workflow][${params.run_id}] Marking bypassed analysis as complete`);
+
+            const id = this.env.ANALYSIS_PROGRESS.idFromName(params.run_id);
+            const progressDO = this.env.ANALYSIS_PROGRESS.get(id);
+
+            await progressDO.fetch('http://do/complete', {
+              method: 'POST',
+              body: JSON.stringify({
+                result: {
+                  lead_id: bypassLeadId,
+                  overall_score: failedCheck.score ?? 0,
+                  summary_text: failedCheck.summary || `Unable to analyze: ${failedCheck.reason}`,
+                  bypassed: true,
+                  bypass_reason: failedCheck.resultType
+                }
+              })
+            });
+
+            console.log(`[Workflow][${params.run_id}] Bypass progress marked as complete`);
+          } catch (error: any) {
+            console.error(`[Workflow][${params.run_id}] Bypass progress complete failed:`, this.serializeError(error));
+          }
+        });
+
+        console.log(`[Workflow][${params.run_id}] BYPASSED (${failedCheck.resultType})`, {
+          leadId: bypassLeadId,
+          analysisId: bypassAnalysisId,
+          reason: failedCheck.reason
+        });
+
+        // Return early - skip AI analysis and remaining steps
+        return {
+          success: true,
+          run_id: params.run_id,
+          lead_id: bypassLeadId,
+          analysis_id: bypassAnalysisId,
+          bypassed: true,
+          bypass_reason: failedCheck.resultType
+        };
+      }
+
+      // Safety check: profile should not be null at this point
+      // (ProfileNotFoundCheck should have caught null profiles)
+      if (!profile) {
+        throw new Error('Profile data is null - this should have been caught by pre-analysis checks');
       }
 
       // Step 7: Execute AI analysis
@@ -299,7 +527,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
           const aiStart = Date.now();
           // Transform camelCase cache profile to snake_case AI profile
-          const aiProfile = this.transformToAIProfile(profile);
+          const aiProfile = this.transformToAIProfile(profile!);
 
           const aiService = await AIAnalysisService.create(this.env);
           const result = await aiService.executeLightAnalysis(business, aiProfile);
