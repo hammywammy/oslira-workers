@@ -85,10 +85,11 @@ function flattenRawMetrics(extraction: ExtractionResult): RawMetricsFlat {
   } = extraction;
 
   return {
-    // Profile metrics (16)
+    // Profile metrics (18)
     followersCount: profileMetrics.followersCount,
     followsCount: profileMetrics.followsCount,
     postsCount: profileMetrics.postsCount,
+    authorityRatioRaw: profileMetrics.authorityRatioRaw,
     authorityRatio: profileMetrics.authorityRatio,
     isBusinessAccount: profileMetrics.isBusinessAccount,
     verified: profileMetrics.verified,
@@ -96,6 +97,7 @@ function flattenRawMetrics(extraction: ExtractionResult): RawMetricsFlat {
     businessCategoryName: profileMetrics.businessCategoryName,
     hasExternalLink: profileMetrics.hasExternalLink,
     externalUrl: profileMetrics.externalUrl,
+    externalUrls: profileMetrics.externalUrls,
     externalLinksCount: profileMetrics.externalLinksCount,
     highlightReelCount: profileMetrics.highlightReelCount,
     igtvVideoCount: profileMetrics.igtvVideoCount,
@@ -126,9 +128,10 @@ function flattenRawMetrics(extraction: ExtractionResult): RawMetricsFlat {
     timeBetweenPostsDays: frequencyMetrics.timeBetweenPostsDays,
     postingConsistency: frequencyMetrics.postingConsistency,
 
-    // Format metrics (10)
+    // Format metrics (11)
     reelsCount: formatMetrics.reelsCount,
     videoCount: formatMetrics.videoCount,
+    nonReelsVideoCount: formatMetrics.nonReelsVideoCount,
     imageCount: formatMetrics.imageCount,
     carouselCount: formatMetrics.carouselCount,
     reelsRate: formatMetrics.reelsRate,
@@ -168,9 +171,10 @@ function flattenRawMetrics(extraction: ExtractionResult): RawMetricsFlat {
     fakeFollowerRiskScore: riskScores.fakeFollowerRiskScore,
     fakeFollowerWarnings: riskScores.fakeFollowerWarnings,
 
-    // Derived metrics (3)
+    // Derived metrics (4)
     contentDensity: derivedMetrics.contentDensity,
-    viralPostCount: derivedMetrics.viralPostCount,
+    recentViralPostCount: derivedMetrics.recentViralPostCount,
+    recentPostsSampled: derivedMetrics.recentPostsSampled,
     viralPostRate: derivedMetrics.viralPostRate
   };
 }

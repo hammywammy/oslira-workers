@@ -152,12 +152,13 @@ function calculateEngagementHealth(extraction: ExtractionResult): number {
 /**
  * Calculate Content Sophistication Score (0-100)
  *
- * Formula: clamp(0, 100, (avgHashtagsPerPost * 3) + (avgCaptionLength / 10) + (locationTaggingRate * 30) + (formatDiversity * 10))
+ * Formula: clamp(0, 100, (avgHashtagsPerPost * 3) + (avgCaptionLength / 10) + (locationTaggingRate * 0.3) + (formatDiversity * 10))
  *
  * Components:
  * - avgHashtagsPerPost * 3: 10 hashtags = 30 points (optimal range)
  * - avgCaptionLength / 10: 300 char avg = 30 points
- * - locationTaggingRate * 30: Full location usage = 30 points
+ * - locationTaggingRate * 0.3: Full location usage (100%) = 30 points
+ *   Note: locationTaggingRate is 0-100%, so multiply by 0.3 not 30
  * - formatDiversity * 10: Using all 4 formats = 40 points (bonus for variety)
  */
 function calculateContentSophistication(extraction: ExtractionResult): number {
@@ -168,9 +169,10 @@ function calculateContentSophistication(extraction: ExtractionResult): number {
   const locationTaggingRate = safeNumber(contentMetrics.locationTaggingRate);
   const formatDiversity = safeNumber(formatMetrics.formatDiversity);
 
+  // Note: locationTaggingRate is already 0-100, so multiply by 0.3 to get max 30 points
   const score = (avgHashtagsPerPost * 3) +
     (avgCaptionLength / 10) +
-    (locationTaggingRate * 30) +
+    (locationTaggingRate * 0.3) +
     (formatDiversity * 10);
 
   const clamped = clamp(0, 100, score);
@@ -237,45 +239,30 @@ function calculateAccountMaturity(extraction: ExtractionResult): number {
  *
  * Higher score = MORE suspicious/risky
  *
- * Base: Start with existing fakeFollowerRiskScore from extraction
- * Adjustments:
- * - +20 if followsCount > followersCount * 2 (follow-back farming)
- * - +15 if engagementRate < 0.5% AND followersCount > 10000 (dead followers)
+ * IMPORTANT: The comprehensive fake follower risk calculation is now performed
+ * in ProfileExtractionService.calculateRiskScores() with:
+ * - Tiered engagement rate thresholds based on account size
+ * - Authority ratio analysis with multiple tiers
+ * - Content-to-follower ratio analysis
+ * - Engagement consistency anomaly detection
+ *
+ * This function now passes through the extraction service's score directly.
+ * The extraction service's calculation is more nuanced and avoids
+ * double-counting the same risk factors.
+ *
+ * See ProfileExtractionService for detailed factor documentation.
  */
 function calculateFakeFollowerRisk(extraction: ExtractionResult): number {
-  const { profileMetrics, engagementMetrics, riskScores } = extraction;
+  const { riskScores } = extraction;
 
-  // Start with base risk score from extraction service
-  let score = safeNumber(riskScores.fakeFollowerRiskScore);
-
-  const followersCount = profileMetrics.followersCount;
-  const followsCount = profileMetrics.followsCount;
-  const engagementRate = safeNumber(engagementMetrics.engagementRate);
-
-  // Check for follow-back farming pattern
-  if (followsCount > followersCount * 2) {
-    score += 20;
-    logger.debug('[ScoreCalculator] Fake follower risk: Follow-back farming detected', {
-      followersCount,
-      followsCount
-    });
-  }
-
-  // Check for dead/fake followers pattern
-  if (engagementRate < 0.5 && followersCount > 10000) {
-    score += 15;
-    logger.debug('[ScoreCalculator] Fake follower risk: Low engagement with high followers', {
-      engagementRate,
-      followersCount
-    });
-  }
-
+  // Use the comprehensive score from extraction service directly
+  // No additional adjustments needed - extraction service now handles all factors
+  const score = safeNumber(riskScores.fakeFollowerRiskScore);
   const clamped = clamp(0, 100, score);
 
-  logger.debug('[ScoreCalculator] Fake follower risk calculated', {
-    baseScore: riskScores.fakeFollowerRiskScore,
-    adjustedScore: score,
-    finalScore: clamped
+  logger.debug('[ScoreCalculator] Fake follower risk (from extraction)', {
+    score: clamped,
+    warnings: riskScores.fakeFollowerWarnings?.length || 0
   });
 
   return round(clamped);
@@ -336,10 +323,11 @@ function detectGaps(extraction: ExtractionResult): GapDetection {
 
   // Content Gap: Basic content strategy indicators
   // Any of: avg hashtags < 3, avg caption < 100 chars, location rate < 10%
+  // Note: locationTaggingRate is already a percentage (0-100), so compare to 10 not 0.1
   const avgHashtags = safeNumber(contentMetrics.avgHashtagsPerPost);
   const avgCaption = safeNumber(contentMetrics.avgCaptionLength);
   const locationRate = safeNumber(contentMetrics.locationTaggingRate);
-  const contentGap = (avgHashtags < 3) || (avgCaption < 100) || (locationRate < 0.1);
+  const contentGap = (avgHashtags < 3) || (avgCaption < 100) || (locationRate < 10);
 
   // Conversion Gap: Missing funnel despite business potential
   // No external link AND (is business account OR has 5000+ followers)
@@ -348,7 +336,8 @@ function detectGaps(extraction: ExtractionResult): GapDetection {
 
   // Platform Gap: Not leveraging Reels algorithm
   // Reels rate < 20% of content
-  const platformGap = safeNumber(formatMetrics.reelsRate) < 0.2;
+  // Note: reelsRate is already a percentage (0-100), so compare to 20 not 0.2
+  const platformGap = safeNumber(formatMetrics.reelsRate) < 20;
 
   const gaps: GapDetection = {
     engagementGap,
