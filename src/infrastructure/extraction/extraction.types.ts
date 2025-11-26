@@ -277,7 +277,12 @@ export interface VideoMetrics {
   videoPostCount: number;
   totalVideoViews: number | null;
   avgVideoViews: number | null;
-  videoViewRate: number | null; // views / followers
+  /**
+   * Average video views as a percentage of follower count.
+   * Can exceed 100% for viral content (non-followers viewing).
+   * Renamed from "videoViewRate" for clarity since it's not a true rate.
+   */
+  videoViewsPerFollower: number | null;
   videoViewToLikeRatio: number | null;
   _reason: string | null;
 }
@@ -507,7 +512,7 @@ export interface RawMetricsFlat {
   videoPostCount: number;
   totalVideoViews: number | null;
   avgVideoViews: number | null;
-  videoViewRate: number | null;
+  videoViewsPerFollower: number | null;
   videoViewToLikeRatio: number | null;
 
   // Risk scores (2)
@@ -609,10 +614,12 @@ export interface AIResponsePayload {
   analyzedAt: string;
   /** AI model used for analysis */
   model: string;
-  /** Token usage for cost tracking */
+  /** Token usage and cost for tracking */
   tokenUsage: {
     input: number;
     output: number;
+    /** Cost in USD for this AI call */
+    cost: number;
   };
   /** The actual analysis result */
   analysis: AILeadAnalysis;

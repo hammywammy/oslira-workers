@@ -530,15 +530,32 @@ export class ProfileExtractionService {
         : 0;
     });
 
-    // Calculate statistics
+    // Calculate statistics using Coefficient of Variation (CV) for scale-independent consistency
+    // CV = stdDev / mean - this normalizes the variation relative to the average engagement
+    // Without CV, high engagement profiles (e.g., 7% avg) would show low consistency
+    // even with proportionally similar variation to low engagement profiles (e.g., 0.004% avg)
     const engagementStdDev = this.calculateStdDev(engagementRatePerPost);
-    const engagementConsistency = engagementStdDev !== null
-      ? this.round(100 / (1 + (engagementStdDev * 10)), 2)
+
+    // Calculate mean engagement rate for CV calculation
+    const meanEngagementRate = engagementRatePerPost.length > 0
+      ? engagementRatePerPost.reduce((a, b) => a + b, 0) / engagementRatePerPost.length
       : null;
+
+    let engagementConsistency: number | null = null;
+    if (engagementStdDev !== null && meanEngagementRate !== null && meanEngagementRate > 0) {
+      // Coefficient of Variation: stdDev / mean (dimensionless ratio)
+      const cv = engagementStdDev / meanEngagementRate;
+      // Scale: CV of 0 = 100 consistency, CV of 1 = 50 consistency, CV of 2 = 33 consistency
+      engagementConsistency = this.round(100 / (1 + cv), 2);
+    }
 
     logger.debug('Engagement consistency calculated', {
       ...logContext,
       engagementStdDev,
+      meanEngagementRate,
+      coefficientOfVariation: meanEngagementRate && meanEngagementRate > 0 && engagementStdDev !== null
+        ? this.round(engagementStdDev / meanEngagementRate, 4)
+        : null,
       engagementConsistency
     });
 
@@ -1020,10 +1037,10 @@ export class ProfileExtractionService {
     const totalVideoViews = videoPosts.reduce((sum, p) => sum + (p.videoViewCount || 0), 0);
     const avgVideoViews = this.round(totalVideoViews / videoPostCount, 2);
 
-    // Video view rate (views / followers)
-    let videoViewRate: number | null = null;
+    // Video views per follower (as percentage, can exceed 100% for viral content)
+    let videoViewsPerFollower: number | null = null;
     if (profile.followersCount > 0) {
-      videoViewRate = this.round((avgVideoViews / profile.followersCount) * 100, 4);
+      videoViewsPerFollower = this.round((avgVideoViews / profile.followersCount) * 100, 4);
     }
 
     // Video view to like ratio
@@ -1040,7 +1057,7 @@ export class ProfileExtractionService {
       videoPostCount,
       totalVideoViews,
       avgVideoViews,
-      videoViewRate,
+      videoViewsPerFollower,
       videoViewToLikeRatio,
       _reason: null
     };
@@ -1049,7 +1066,7 @@ export class ProfileExtractionService {
       ...logContext,
       videoPostCount,
       avgVideoViews,
-      videoViewRate
+      videoViewsPerFollower
     });
 
     return metrics;
@@ -1060,7 +1077,7 @@ export class ProfileExtractionService {
       videoPostCount: 0,
       totalVideoViews: null,
       avgVideoViews: null,
-      videoViewRate: null,
+      videoViewsPerFollower: null,
       videoViewToLikeRatio: null,
       _reason: reason
     };
@@ -1236,8 +1253,11 @@ export class ProfileExtractionService {
       .map(p => p.caption || '')
       .filter(c => c.length > 0);
 
-    // All hashtags
-    const allHashtags = posts.flatMap(p => p.hashtags || []);
+    // All hashtags - cleaned of trailing punctuation (e.g., commas, periods, exclamation marks)
+    const allHashtags = posts
+      .flatMap(p => p.hashtags || [])
+      .map(this.cleanHashtag)
+      .filter(tag => tag.length > 0);
     const uniqueHashtags = [...new Set(allHashtags)];
 
     // Hashtag frequency (top 10)
@@ -1427,7 +1447,7 @@ export class ProfileExtractionService {
       ...logContext,
       videoPostCount: result.videoMetrics.videoPostCount,
       avgVideoViews: result.videoMetrics.avgVideoViews,
-      videoViewRate: result.videoMetrics.videoViewRate,
+      videoViewsPerFollower: result.videoMetrics.videoViewsPerFollower,
       _reason: result.videoMetrics._reason
     });
 
@@ -1523,6 +1543,20 @@ export class ProfileExtractionService {
 
   private addSkippedReason(metricGroup: string, reason: string, affectedMetrics: string[]): void {
     this.skippedReasons.push({ metricGroup, reason, affectedMetrics });
+  }
+
+  /**
+   * Clean hashtag text by removing:
+   * - Leading/trailing whitespace
+   * - Trailing punctuation (commas, periods, exclamation marks, etc.)
+   * - Leading # symbol (if present, will be added back in display)
+   */
+  private cleanHashtag(tag: string): string {
+    return tag
+      .trim()
+      .replace(/^#+/, '')                    // Remove leading # symbols
+      .replace(/[,\.!?\)]+$/, '')            // Remove trailing punctuation
+      .trim();
   }
 }
 
