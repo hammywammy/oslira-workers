@@ -36,7 +36,8 @@ import {
   type ExtractionOutput,
   type CalculatedMetrics,
   type AIResponsePayload,
-  type TextDataForAI
+  type TextDataForAI,
+  type ApifyFullProfile
 } from '@/infrastructure/extraction';
 
 /**
@@ -61,6 +62,47 @@ const CRITICAL_PROGRESS_STEPS = new Set([
   'upsert_lead',
   'complete_progress'
 ]);
+
+/**
+ * Convert ProfileData (cache format) to ApifyFullProfile (extraction format)
+ * Handles field name mismatches: likeCount → likesCount, commentCount → commentsCount
+ */
+function profileDataToApifyFormat(profile: ProfileData): ApifyFullProfile {
+  return {
+    id: profile.username,
+    username: profile.username,
+    fullName: profile.displayName,
+    biography: profile.bio,
+    externalUrl: profile.externalUrl,
+    externalUrls: profile.externalUrl ? [{ title: 'External Link', url: profile.externalUrl }] : [],
+    profilePicUrl: profile.profilePicUrl,
+    followersCount: profile.followersCount,
+    followsCount: profile.followingCount,
+    postsCount: profile.postsCount,
+    verified: profile.isVerified,
+    private: profile.isPrivate,
+    isBusinessAccount: profile.isBusinessAccount,
+    hasChannel: false,
+    businessCategoryName: null,
+    latestPosts: profile.latestPosts.map(post => ({
+      id: post.id,
+      shortCode: post.id,
+      caption: post.caption,
+      likesCount: post.likeCount,
+      commentsCount: post.commentCount,
+      timestamp: post.timestamp,
+      type: post.mediaType === 'video' ? 'Video' as const : post.mediaType === 'carousel' ? 'Sidecar' as const : 'Image' as const,
+      displayUrl: post.mediaUrl || '',
+      hashtags: [],
+      mentions: [],
+      taggedUsers: [],
+      locationName: null,
+      locationId: null,
+      alt: null,
+      isCommentsDisabled: false
+    }))
+  };
+}
 
 export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowParams> {
 
@@ -546,9 +588,22 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         try {
           console.log(`[Workflow][${params.run_id}] Step 6c: Phase 2 - Extracting metrics and calculating scores`);
 
+          // Convert cache format to Apify format (fixes likeCount → likesCount mismatch)
+          const apifyProfile = profileDataToApifyFormat(profile);
+
+          // Log sample post data to verify transformation
+          console.log(`[Workflow][${params.run_id}] Sample post data:`, {
+            firstPost: apifyProfile.latestPosts[0] ? {
+              hasLikesCount: apifyProfile.latestPosts[0].likesCount !== undefined,
+              hasCommentsCount: apifyProfile.latestPosts[0].commentsCount !== undefined,
+              likesValue: apifyProfile.latestPosts[0].likesCount,
+              commentsValue: apifyProfile.latestPosts[0].commentsCount
+            } : 'No posts'
+          });
+
           // Run profile extraction service
           const extractor = createProfileExtractionService();
-          const extractionResult: ExtractionOutput = extractor.extract(profile);
+          const extractionResult: ExtractionOutput = extractor.extract(apifyProfile);
 
           if (!extractionResult.success) {
             console.warn(`[Workflow][${params.run_id}] Phase 2 extraction failed:`, extractionResult.error);
