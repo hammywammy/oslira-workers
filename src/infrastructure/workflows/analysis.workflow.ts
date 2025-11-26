@@ -653,87 +653,128 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       calculatedMetrics = phase2Result.calculatedMetrics;
       textDataForAI = phase2Result.textDataForAI;
 
-      // Step 6d: Phase 2 - Run GPT-5 Lead Analysis (if extraction succeeded)
-      if (calculatedMetrics && textDataForAI) {
-        phase2AIResponse = await step.do('phase2_ai_analysis', {
-          retries: { limit: 1, delay: '2 seconds' }
-        }, async (): Promise<AIResponsePayload | null> => {
-          try {
-            console.log(`[Workflow][${params.run_id}] Step 6d: Phase 2 - Running GPT-5 lead analysis`);
-
-            // Fetch business context for AI prompt
-            const supabase = await SupabaseClientFactory.createAdminClient(this.env);
-            const businessContextResult = await fetchBusinessContext(supabase, params.business_profile_id);
-
-            if (!businessContextResult.success) {
-              console.warn(`[Workflow][${params.run_id}] Failed to fetch business context:`, businessContextResult.error);
-              return null;
-            }
-
-            // Run GPT-5 lead analysis
-            const aiResult = await analyzeLeadWithAI(
-              {
-                calculatedMetrics: calculatedMetrics!,
-                textData: textDataForAI!,
-                businessContext: businessContextResult.data
-              },
-              this.env,
-              secrets.openaiKey,
-              secrets.claudeKey,
-              secrets.aiGatewayToken
-            );
-
-            if (!aiResult.success) {
-              console.warn(`[Workflow][${params.run_id}] Phase 2 AI analysis failed:`, aiResult.error);
-              return null;
-            }
-
-            console.log(`[Workflow][${params.run_id}] Phase 2 AI analysis complete:`, {
-              leadTier: aiResult.data.analysis.leadTier,
-              tokensUsed: aiResult.data.tokenUsage
-            });
-
-            return aiResult.data;
-
-          } catch (error: any) {
-            console.error(`[Workflow][${params.run_id}] Phase 2 AI analysis error (non-fatal):`, this.serializeError(error));
-            return null;
-          }
-        });
-      }
-
-      // Step 7: Execute AI analysis
-      // MODULAR: Routes to correct analysis execution based on type
-      const aiResult = await step.do('ai_analysis', {
-        retries: { limit: 2, delay: '2 seconds', backoff: 'exponential' }
-      }, async () => {
+      // Step 7: PARALLEL AI Analysis - Run Phase 2 and Deep AI simultaneously
+      // OPTIMIZATION: Runs both AI calls in parallel (saves ~14s)
+      // - Phase 2 AI: GPT-5 lead analysis (~62s)
+      // - Deep AI: Profile scoring (~14s)
+      // Total time: max(62, 14) = ~62s instead of 62+14 = ~76s sequential
+      const parallelAIResult = await step.do('parallel_ai_analysis', {
+        retries: { limit: 1, delay: '2 seconds' }
+      }, async (): Promise<{
+        phase2Response: AIResponsePayload | null;
+        deepAIResult: {
+          overall_score: number;
+          summary_text: string;
+          model_used: string;
+          input_tokens: number;
+          output_tokens: number;
+          total_cost: number;
+        };
+      }> => {
         try {
-          console.log(`[Workflow][${params.run_id}] Step 7: Executing ${params.analysis_type} AI analysis`);
+          console.log(`[Workflow][${params.run_id}] Step 7: PARALLEL AI Analysis starting`);
           const stepInfo = getStepProgress(params.analysis_type as AnalysisType, 'ai_analysis');
           await this.updateProgress(params.run_id, stepInfo.percentage, stepInfo.description);
 
           const aiStart = Date.now();
-          // Transform camelCase cache profile to snake_case AI profile
-          const aiProfile = toAIProfile(profile!);
 
-          const aiService = await AIAnalysisService.create(this.env);
-          // MODULAR: executeAnalysis routes to correct method based on analysis type
-          const result = await aiService.executeAnalysis(params.analysis_type as AnalysisType, business, aiProfile);
+          // Prepare both AI tasks
+          const phase2Task = (async (): Promise<AIResponsePayload | null> => {
+            if (!calculatedMetrics || !textDataForAI) {
+              console.log(`[Workflow][${params.run_id}] [Parallel] Phase 2 skipped - no metrics`);
+              return null;
+            }
+
+            try {
+              console.log(`[Workflow][${params.run_id}] [Parallel] Phase 2 AI starting...`);
+              const phase2Start = Date.now();
+
+              // Fetch business context for AI prompt
+              const supabase = await SupabaseClientFactory.createAdminClient(this.env);
+              const businessContextResult = await fetchBusinessContext(supabase, params.business_profile_id);
+
+              if (!businessContextResult.success) {
+                console.warn(`[Workflow][${params.run_id}] [Parallel] Failed to fetch business context:`, businessContextResult.error);
+                return null;
+              }
+
+              // Run GPT-5 lead analysis
+              const aiResult = await analyzeLeadWithAI(
+                {
+                  calculatedMetrics: calculatedMetrics!,
+                  textData: textDataForAI!,
+                  businessContext: businessContextResult.data
+                },
+                this.env,
+                secrets.openaiKey,
+                secrets.claudeKey,
+                secrets.aiGatewayToken
+              );
+
+              const phase2Duration = Date.now() - phase2Start;
+
+              if (!aiResult.success) {
+                console.warn(`[Workflow][${params.run_id}] [Parallel] Phase 2 AI failed:`, aiResult.error);
+                return null;
+              }
+
+              console.log(`[Workflow][${params.run_id}] [Parallel] Phase 2 AI complete`, {
+                leadTier: aiResult.data.analysis.leadTier,
+                durationMs: phase2Duration
+              });
+
+              return aiResult.data;
+            } catch (error: any) {
+              console.error(`[Workflow][${params.run_id}] [Parallel] Phase 2 AI error:`, error.message);
+              return null;
+            }
+          })();
+
+          const deepAITask = (async () => {
+            console.log(`[Workflow][${params.run_id}] [Parallel] Deep AI starting...`);
+            const deepStart = Date.now();
+
+            // Transform camelCase cache profile to snake_case AI profile
+            const aiProfile = toAIProfile(profile!);
+
+            const aiService = await AIAnalysisService.create(this.env);
+            const result = await aiService.executeAnalysis(params.analysis_type as AnalysisType, business, aiProfile);
+
+            const deepDuration = Date.now() - deepStart;
+
+            console.log(`[Workflow][${params.run_id}] [Parallel] Deep AI complete`, {
+              score: result.overall_score,
+              model: result.model_used,
+              durationMs: deepDuration
+            });
+
+            return result;
+          })();
+
+          // Run BOTH in parallel
+          const [phase2Response, deepResult] = await Promise.all([phase2Task, deepAITask]);
+
           timing.ai_analysis = Date.now() - aiStart;
 
-          console.log(`[Workflow][${params.run_id}] ${params.analysis_type} AI analysis complete:`, {
-            score: result.overall_score,
-            model: result.model_used,
-            cost: result.total_cost,
-            tokens: `${result.input_tokens}/${result.output_tokens}`
+          console.log(`[Workflow][${params.run_id}] PARALLEL AI Analysis complete`, {
+            totalDurationMs: timing.ai_analysis,
+            phase2Success: !!phase2Response,
+            deepScore: deepResult.overall_score
           });
 
-          return result;
+          return {
+            phase2Response,
+            deepAIResult: deepResult
+          };
         } catch (error: any) {
           console.error(`[Workflow][${params.run_id}] Step 7 FAILED:`, this.serializeError(error));
           throw error;
         }
       });
+
+      // Extract results from parallel execution
+      phase2AIResponse = parallelAIResult.phase2Response;
+      const aiResult = parallelAIResult.deepAIResult;
 
       // Step 8: Upsert lead (avatar caching moved off critical path)
       // OPTIMIZED: Avatar caching is now fire-and-forget (saves 1-2s)
@@ -922,10 +963,17 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             metrics
           });
 
-          console.log(`[Workflow][${params.run_id}] Operations logged`, {
-            total_cost: metrics.cost.total_usd,
-            step7_ai_cost: aiResult.total_cost,
-            phase2_ai_cost: phase2AICost,
+          // Log detailed cost breakdown for transparency
+          const apifyCost = metrics.cost.items.scraping.usd;
+          console.log(`[Workflow][${params.run_id}] Operations logged - COST BREAKDOWN`, {
+            total_cost_usd: metrics.cost.total_usd,
+            breakdown: {
+              deep_ai: `$${aiResult.total_cost.toFixed(6)}`,
+              phase2_ai: `$${phase2AICost.toFixed(6)}`,
+              apify_scraping: `$${apifyCost.toFixed(6)}`,
+              sum_check: `$${(aiResult.total_cost + phase2AICost + apifyCost).toFixed(6)}`
+            },
+            cache_hit: timing.cache_hit,
             total_duration_ms: metrics.duration.total_ms
           });
         } catch (error: any) {
