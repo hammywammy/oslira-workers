@@ -323,20 +323,6 @@ export interface VideoMetrics {
   videoPostCount: number;
   totalVideoViews: number | null;
   avgVideoViews: number | null;
-  /**
-   * Average video views as a percentage of follower count.
-   * Can exceed 100% for viral content (non-followers viewing).
-   *
-   * Interpretation guide:
-   * - < 50%: Low reach (videos don't reach most followers)
-   * - 50-100%: Normal reach (most followers see videos)
-   * - 100-300%: Good viral reach (content reaching beyond followers)
-   * - > 300%: Exceptional viral reach (significant non-follower views)
-   *
-   * Note: This is a reach multiplier, NOT a per-follower view count.
-   * A value of 323.6% means average video views are 3.24x the follower count.
-   */
-  videoViewsPerFollower: number | null;
   videoViewToLikeRatio: number | null;
   _reason: string | null;
 }
@@ -380,8 +366,15 @@ export interface DerivedMetrics {
 export interface TextDataForAI {
   biography: string;
   recentCaptions: string[];
+  /** All hashtags (with duplicates, cleaned of punctuation) */
   allHashtags: string[];
+  /** Unique hashtags (deduplicated) */
   uniqueHashtags: string[];
+  /** Total count of hashtags (including duplicates) */
+  totalHashtagsCount: number;
+  /** Unique hashtag count for quick access */
+  uniqueHashtagsCount: number;
+  /** Top hashtags with frequency counts (top 10, sorted by count desc) */
   hashtagFrequency: HashtagFrequency[];
   allMentions: string[];
   uniqueMentions: string[];
@@ -603,11 +596,10 @@ export interface RawMetricsFlat {
   commentsDisabledRate: number | null;
   commentsEnabledRate: number | null;
 
-  // Video metrics (5)
+  // Video metrics (4)
   videoPostCount: number;
   totalVideoViews: number | null;
   avgVideoViews: number | null;
-  videoViewsPerFollower: number | null;
   videoViewToLikeRatio: number | null;
 
   // Risk scores (2)

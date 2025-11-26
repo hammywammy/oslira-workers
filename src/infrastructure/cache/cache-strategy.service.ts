@@ -90,13 +90,37 @@ export class CacheStrategyService {
       const metadata = this.parseMetadata(object);
 
       // Check if TTL expired
+      const ageSeconds = this.getAge(metadata);
+      const ttlSeconds = this.TTL_CONFIG[analysisType];
+      const remainingSeconds = ttlSeconds - ageSeconds;
+
       if (this.isTTLExpired(metadata, analysisType)) {
-        console.log(`[Cache] EXPIRED: ${username} (${analysisType}, age: ${this.getAge(metadata)}s)`);
+        console.log(`[Cache] EXPIRED: ${username} (${analysisType}, age: ${this.formatDuration(ageSeconds)})`);
         await this.delete(username);
         return null;
       }
 
-      console.log(`[Cache] HIT: ${username} (age: ${this.getAge(metadata)}s, ttl: ${this.TTL_CONFIG[analysisType]}s)`);
+      // Calculate age in hours for readability
+      const ageHours = ageSeconds / 3600;
+      const remainingHours = remainingSeconds / 3600;
+
+      console.log(`[Cache] HIT`, {
+        username,
+        age: `${ageHours.toFixed(1)}h`,
+        remaining: `${remainingHours.toFixed(1)}h`,
+        type: analysisType,
+        followerCount: profile.follower_count
+      });
+
+      // Alert if cache is stale (> 20 hours old)
+      if (ageSeconds > 72000) { // 20 hours
+        console.warn('[Cache] Stale data', {
+          username,
+          age: `${ageHours.toFixed(1)}h`,
+          recommendation: 'Consider reducing TTL or invalidating old cache'
+        });
+      }
+
       return profile;
     } catch (error) {
       console.error('[Cache] Get error:', error);
@@ -147,15 +171,29 @@ export class CacheStrategyService {
     analysisType: 'light' | 'deep'
   ): Promise<InvalidationReason | null> {
     const cachedProfile = await this.get(username, analysisType);
-    
+
     if (!cachedProfile) {
       return null; // No cache to invalidate
     }
 
+    // Track follower growth between analyses
+    const followerDelta = newProfile.follower_count - cachedProfile.follower_count;
+    const cachedAt = new Date(cachedProfile.cached_at).getTime();
+    const timeElapsedMs = Date.now() - cachedAt;
+    const timeElapsedHours = timeElapsedMs / 3600000;
+    const growthRatePerHour = timeElapsedHours > 0 ? followerDelta / timeElapsedHours : 0;
+
+    console.log('[Cache] Follower growth tracking', {
+      username,
+      previous: cachedProfile.follower_count,
+      current: newProfile.follower_count,
+      delta: followerDelta > 0 ? `+${followerDelta}` : `${followerDelta}`,
+      timeElapsed: `${timeElapsedHours.toFixed(1)}h`,
+      growthRate: `${growthRatePerHour.toFixed(0)}/hour`
+    });
+
     // Check follower count change (>10%)
-    const followerChange = Math.abs(
-      newProfile.follower_count - cachedProfile.follower_count
-    );
+    const followerChange = Math.abs(followerDelta);
     const followerChangePercent = (followerChange / cachedProfile.follower_count) * 100;
 
     if (followerChangePercent > 10) {
@@ -292,6 +330,15 @@ export class CacheStrategyService {
    */
   private getAge(metadata: CacheMetadata): number {
     return Math.floor((Date.now() - metadata.cached_at) / 1000);
+  }
+
+  /**
+   * Format duration in seconds to human-readable string
+   */
+  private formatDuration(seconds: number): string {
+    if (seconds < 60) return `${seconds}s`;
+    if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+    return `${(seconds / 3600).toFixed(1)}h`;
   }
 
   /**
