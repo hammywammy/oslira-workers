@@ -29,6 +29,13 @@ export interface Analysis {
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
+  /** Extraction service version for A/B testing and debugging */
+  extraction_version?: string | null;
+  /** AI model versions used for this analysis */
+  model_versions?: {
+    profile_assessment?: string;
+    lead_qualification?: string;
+  } | null;
 }
 
 export interface CreateAnalysisData {
@@ -48,6 +55,13 @@ export interface UpdateAnalysisData {
   status?: 'complete' | 'failed' | 'cancelled';
   error_message?: string;
   completed_at?: string;
+  /** Extraction service version for A/B testing and debugging */
+  extraction_version?: string;
+  /** AI model versions used for this analysis */
+  model_versions?: {
+    profile_assessment?: string;
+    lead_qualification?: string;
+  };
 }
 
 export class AnalysisRepository extends BaseRepository<Analysis> {

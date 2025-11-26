@@ -202,12 +202,35 @@ export class AIGatewayClient {
         usage.completion_tokens
       );
 
+      // Calculate expected input tokens (rough estimate: ~4 chars per token)
+      const promptLength = request.system_prompt.length + request.user_prompt.length;
+      const expectedTokensIn = Math.round(promptLength / 4);
+      const tokenVariance = usage.prompt_tokens - expectedTokensIn;
+
+      // Extract reasoning tokens if available (GPT-5 extended thinking)
+      const reasoningTokens = (data.usage as any)?.completion_tokens_details?.reasoning_tokens || 0;
+      const reasoningPercent = usage.completion_tokens > 0 ? (reasoningTokens / usage.completion_tokens) * 100 : 0;
+
       console.log('[AIGateway] Structured call complete:', {
         tokens_in: usage.prompt_tokens,
+        tokens_in_expected: expectedTokensIn,
+        tokens_variance: tokenVariance,
         tokens_out: usage.completion_tokens,
+        reasoning_tokens: reasoningTokens,
+        reasoning_percent: `${reasoningPercent.toFixed(1)}%`,
         cost: totalCost,
         content_keys: Object.keys(parsedContent)
       });
+
+      // Alert if reasoning tokens are high (>75% of output)
+      if (reasoningPercent > 75) {
+        console.warn('[AIGateway] High reasoning token usage', {
+          reasoning_percent: `${reasoningPercent.toFixed(1)}%`,
+          reasoning_tokens: reasoningTokens,
+          output_tokens: usage.completion_tokens,
+          recommendation: 'Consider reducing reasoning_effort or using non-reasoning model'
+        });
+      }
 
       return {
         content: parsedContent,
@@ -303,12 +326,35 @@ export class AIGatewayClient {
 
       const content = data.choices[0]?.message?.content || '';
 
+      // Calculate expected input tokens (rough estimate: ~4 chars per token)
+      const promptLength = request.system_prompt.length + request.user_prompt.length;
+      const expectedTokensIn = Math.round(promptLength / 4);
+      const tokenVariance = usage.prompt_tokens - expectedTokensIn;
+
+      // Extract reasoning tokens if available (GPT-5 extended thinking)
+      const reasoningTokens = (data.usage as any)?.completion_tokens_details?.reasoning_tokens || 0;
+      const reasoningPercent = usage.completion_tokens > 0 ? (reasoningTokens / usage.completion_tokens) * 100 : 0;
+
       console.log('[AIGateway] OpenAI call complete:', {
         tokens_in: usage.prompt_tokens,
+        tokens_in_expected: expectedTokensIn,
+        tokens_variance: tokenVariance,
         tokens_out: usage.completion_tokens,
+        reasoning_tokens: reasoningTokens,
+        reasoning_percent: `${reasoningPercent.toFixed(1)}%`,
         cost: totalCost,
         content_length: content.length
       });
+
+      // Alert if reasoning tokens are high (>75% of output)
+      if (reasoningPercent > 75) {
+        console.warn('[AIGateway] High reasoning token usage', {
+          reasoning_percent: `${reasoningPercent.toFixed(1)}%`,
+          reasoning_tokens: reasoningTokens,
+          output_tokens: usage.completion_tokens,
+          recommendation: 'Consider reducing reasoning_effort or using non-reasoning model'
+        });
+      }
 
       return {
         content,

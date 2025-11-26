@@ -48,13 +48,16 @@ export class ProfileExtractionService {
   private metricsCalculated = 0;
   private metricsSkipped = 0;
   private skippedReasons: SkippedMetricReason[] = [];
-  private startTime = 0;
+  /** High-resolution start time using performance.now() for microsecond precision */
+  private startTimeHR = 0;
 
   /**
    * Main entry point - extract all metrics from an Apify profile response
    */
   extract(rawProfile: unknown): ExtractionOutput {
-    this.startTime = Date.now();
+    // Use performance.now() for high-resolution timing (microsecond precision)
+    // This prevents "0ms" processing times when operations complete very fast
+    this.startTimeHR = performance.now();
     this.metricsCalculated = 0;
     this.metricsSkipped = 0;
     this.skippedReasons = [];
@@ -77,7 +80,7 @@ export class ProfileExtractionService {
       logger.error('Extraction aborted - validation failed', {
         ...logContext,
         errors: validation.errors,
-        processingTimeMs: Date.now() - this.startTime
+        processingTimeMs: Math.round(performance.now() - this.startTimeHR)
       });
       return errorResult;
     }
@@ -964,8 +967,12 @@ export class ProfileExtractionService {
     const posts = profile.latestPosts;
     const postCount = posts.length;
 
-    // Hashtag analysis - normalize to lowercase for proper deduplication
-    const allHashtags = posts.flatMap(p => (p.hashtags || []).map(h => h.toLowerCase().trim()));
+    // Hashtag analysis - clean and normalize for proper deduplication
+    // Uses cleanHashtag to remove trailing punctuation (commas, periods, etc.) and normalize
+    const allHashtags = posts
+      .flatMap(p => p.hashtags || [])
+      .map(h => this.cleanHashtag(h))
+      .filter(h => h.length > 0);
     const totalHashtags = allHashtags.length;
     const uniqueHashtags = [...new Set(allHashtags)];
     const uniqueHashtagCount = uniqueHashtags.length;
@@ -1106,9 +1113,9 @@ export class ProfileExtractionService {
     if (!flags.hasVideoData) {
       logger.warn('Skipping video metrics: No video view data available', logContext);
       this.addSkippedReason('VideoMetrics', 'No video view data available', [
-        'avgVideoViews', 'videoViewRate', 'videoViewToLikeRatio'
+        'avgVideoViews', 'videoViewToLikeRatio'
       ]);
-      this.metricsSkipped += 5;
+      this.metricsSkipped += 4;
       return this.buildNullVideoMetrics('No video view data available');
     }
 
@@ -1125,19 +1132,13 @@ export class ProfileExtractionService {
 
     if (videoPostCount === 0) {
       logger.warn('No posts with video view count found', logContext);
-      this.metricsSkipped += 5;
+      this.metricsSkipped += 4;
       return this.buildNullVideoMetrics('No posts with video view count');
     }
 
     // Calculate view totals
     const totalVideoViews = videoPosts.reduce((sum, p) => sum + (p.videoViewCount || 0), 0);
     const avgVideoViews = this.round(totalVideoViews / videoPostCount, 2);
-
-    // Video views per follower (as percentage, can exceed 100% for viral content)
-    let videoViewsPerFollower: number | null = null;
-    if (profile.followersCount > 0) {
-      videoViewsPerFollower = this.round((avgVideoViews / profile.followersCount) * 100, 4);
-    }
 
     // Video view to like ratio
     const videoLikes = videoPosts.reduce((sum, p) => sum + (p.likesCount || 0), 0);
@@ -1147,13 +1148,12 @@ export class ProfileExtractionService {
       videoViewToLikeRatio = this.round(avgVideoViews / avgVideoLikes, 2);
     }
 
-    this.metricsCalculated += 5;
+    this.metricsCalculated += 4;
 
     const metrics: VideoMetrics = {
       videoPostCount,
       totalVideoViews,
       avgVideoViews,
-      videoViewsPerFollower,
       videoViewToLikeRatio,
       _reason: null
     };
@@ -1162,7 +1162,7 @@ export class ProfileExtractionService {
       ...logContext,
       videoPostCount,
       avgVideoViews,
-      videoViewsPerFollower
+      videoViewToLikeRatio
     });
 
     return metrics;
@@ -1173,7 +1173,6 @@ export class ProfileExtractionService {
       videoPostCount: 0,
       totalVideoViews: null,
       avgVideoViews: null,
-      videoViewsPerFollower: null,
       videoViewToLikeRatio: null,
       _reason: reason
     };
@@ -1470,7 +1469,7 @@ export class ProfileExtractionService {
     // All hashtags - cleaned of trailing punctuation (e.g., commas, periods, exclamation marks)
     const allHashtags = posts
       .flatMap(p => p.hashtags || [])
-      .map(this.cleanHashtag)
+      .map(h => this.cleanHashtag(h))
       .filter(tag => tag.length > 0);
     const uniqueHashtags = [...new Set(allHashtags)];
 
@@ -1513,6 +1512,8 @@ export class ProfileExtractionService {
       recentCaptions,
       allHashtags,
       uniqueHashtags,
+      totalHashtagsCount: allHashtags.length,
+      uniqueHashtagsCount: uniqueHashtags.length,
       hashtagFrequency,
       allMentions,
       uniqueMentions,
@@ -1537,23 +1538,25 @@ export class ProfileExtractionService {
   // ===========================================================================
 
   private buildMetadata(profile: ApifyFullProfile): ExtractionMetadata {
-    const rawProcessingTime = Date.now() - this.startTime;
-    // Ensure at least 1ms is reported (avoids confusing 0 values if extraction is very fast)
-    const processingTimeMs = Math.max(1, rawProcessingTime);
+    // Use performance.now() for high-resolution timing
+    // Math.round converts to integer milliseconds while preserving sub-ms precision in calculation
+    const endTimeHR = performance.now();
+    const rawProcessingTimeMs = endTimeHR - this.startTimeHR;
+    // Round to nearest millisecond, minimum 1ms for display
+    const processingTimeMs = Math.max(1, Math.round(rawProcessingTimeMs));
 
-    // Validation: log warning if processing time seems suspicious
-    if (rawProcessingTime < 1) {
-      logger.warn('[ProfileExtraction] Processing time suspiciously low', {
-        rawProcessingTime,
-        startTime: this.startTime,
-        endTime: Date.now()
-      });
-    }
+    // Log precise timing for debugging (with sub-millisecond detail)
+    logger.debug('[ProfileExtraction] High-resolution timing', {
+      startTimeHR: this.startTimeHR.toFixed(3),
+      endTimeHR: endTimeHR.toFixed(3),
+      rawProcessingTimeMs: rawProcessingTimeMs.toFixed(3),
+      reportedMs: processingTimeMs
+    });
 
     const postCount = profile.latestPosts?.length || 0;
 
     // Calculate data completeness - capped at 100% to prevent display issues
-    const totalPossibleMetrics = 74; // Total number of metrics defined
+    const totalPossibleMetrics = 73; // Total number of metrics defined
     const rawCompleteness = (this.metricsCalculated / totalPossibleMetrics) * 100;
     const dataCompleteness = this.round(Math.min(100, rawCompleteness), 2);
 
@@ -1574,8 +1577,9 @@ export class ProfileExtractionService {
   }
 
   private buildErrorResult(validation: ValidationResult, rawProfile: unknown): ExtractionOutput {
-    const rawProcessingTime = Date.now() - this.startTime;
-    const processingTimeMs = Math.max(1, rawProcessingTime);
+    const endTimeHR = performance.now();
+    const rawProcessingTimeMs = endTimeHR - this.startTimeHR;
+    const processingTimeMs = Math.max(1, Math.round(rawProcessingTimeMs));
     const username = (rawProfile as any)?.username || 'unknown';
 
     const primaryError = validation.errors[0] || {
@@ -1619,7 +1623,7 @@ export class ProfileExtractionService {
       frequency: result.frequencyMetrics._reason ? 0 : 8,
       format: result.formatMetrics._reason ? 0 : 11,
       content: result.contentMetrics._reason ? 0 : 14,
-      video: result.videoMetrics._reason ? 0 : 5,
+      video: result.videoMetrics._reason ? 0 : 4,
       risk: 2,
       derived: 4,
       text: 8
@@ -1739,7 +1743,6 @@ export class ProfileExtractionService {
       videoPostCount: result.videoMetrics.videoPostCount,
       totalVideoViews: result.videoMetrics.totalVideoViews,
       avgVideoViews: result.videoMetrics.avgVideoViews,
-      videoViewsPerFollower: result.videoMetrics.videoViewsPerFollower,
       videoViewToLikeRatio: result.videoMetrics.videoViewToLikeRatio,
       _reason: result.videoMetrics._reason
     });

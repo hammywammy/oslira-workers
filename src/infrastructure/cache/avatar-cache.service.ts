@@ -39,6 +39,8 @@ export class AvatarCacheService {
       return null;
     }
 
+    const startTime = performance.now();
+
     try {
       // Fetch image from Instagram
       console.log(`[AvatarCache] Fetching avatar for lead ${leadId}`);
@@ -79,11 +81,21 @@ export class AvatarCacheService {
       });
 
       const r2Url = `${CDN_BASE_URL}/${key}`;
-      console.log(`[AvatarCache] Cached avatar for lead ${leadId}: ${r2Url}`);
+      const durationMs = Math.round(performance.now() - startTime);
+      const sizeKB = Math.round(imageBytes.byteLength / 1024);
+
+      console.log(`[AvatarCache] Cached avatar`, {
+        leadId,
+        url: r2Url,
+        durationMs,
+        sizeKB: `${sizeKB}KB`
+      });
+
       return r2Url;
 
     } catch (error) {
-      console.error(`[AvatarCache] Error caching avatar for lead ${leadId}:`, error);
+      const durationMs = Math.round(performance.now() - startTime);
+      console.error(`[AvatarCache] Error caching avatar for lead ${leadId} (after ${durationMs}ms):`, error);
       return null;
     }
   }

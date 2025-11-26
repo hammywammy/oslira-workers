@@ -160,11 +160,10 @@ function flattenRawMetrics(extraction: ExtractionResult): RawMetricsFlat {
     commentsDisabledRate: contentMetrics.commentsDisabledRate,
     commentsEnabledRate: contentMetrics.commentsEnabledRate,
 
-    // Video metrics (5)
+    // Video metrics (4)
     videoPostCount: videoMetrics.videoPostCount,
     totalVideoViews: videoMetrics.totalVideoViews,
     avgVideoViews: videoMetrics.avgVideoViews,
-    videoViewsPerFollower: videoMetrics.videoViewsPerFollower,
     videoViewToLikeRatio: videoMetrics.videoViewToLikeRatio,
 
     // Risk scores (2)

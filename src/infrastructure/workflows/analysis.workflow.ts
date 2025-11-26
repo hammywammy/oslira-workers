@@ -734,7 +734,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
                 totalMs: totalDuration
               });
 
-              return aiResult.data;
+              return { data: aiResult.data, durationMs: totalDuration };
             } catch (error: any) {
               console.error(`[Workflow][${params.run_id}] [Parallel] Lead Qualification AI error:`, error.message);
               return null;
@@ -766,28 +766,56 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
               durationMs: assessDuration
             });
 
-            return result;
+            return { data: result, durationMs: assessDuration };
           })();
 
           // Run BOTH in parallel - total time = max(leadQual, profileAssess)
-          const [leadQualResponse, profileAssessResult] = await Promise.all([leadQualificationTask, profileAssessmentTask]);
+          const [leadQualResult, profileAssessResultWithDuration] = await Promise.all([leadQualificationTask, profileAssessmentTask]);
 
           timing.ai_analysis = Date.now() - aiStart;
 
+          // Extract individual durations for SLA tracking
+          const leadQualDurationMs = leadQualResult?.durationMs ?? 0;
+          const profileAssessDurationMs = profileAssessResultWithDuration.durationMs;
+
+          // Store AI breakdown for SLA logging
+          (timing as any).ai_breakdown = {
+            leadQualificationMs: leadQualDurationMs,
+            profileAssessmentMs: profileAssessDurationMs,
+            parallelStatus: timing.ai_analysis <= 70000 ? 'optimal' : timing.ai_analysis <= 90000 ? 'good' : 'degraded'
+          };
+
           // Log parallel execution results with verification
           // If truly parallel, totalDurationMs should be close to the max of the two, not the sum
+          // Calculate parallel efficiency: ratio of actual time to expected sequential time
+          const expectedSequentialMs = 60000 + 14000; // ~74s if run sequentially
+          const parallelSavingsMs = expectedSequentialMs - timing.ai_analysis;
+          const parallelStatus = (timing as any).ai_breakdown.parallelStatus;
+
           console.log(`[Workflow][${params.run_id}] PARALLEL AI Analysis complete`, {
             totalDurationMs: timing.ai_analysis,
-            leadQualSuccess: !!leadQualResponse,
-            leadTier: leadQualResponse?.analysis?.leadTier || 'N/A',
-            profileScore: profileAssessResult.overall_score,
-            profileModel: profileAssessResult.model_used,
-            parallelEfficiency: `Total ${timing.ai_analysis}ms - should be ~max(leadQual ~60s, profileAssess ~14s)`
+            leadQualSuccess: !!leadQualResult,
+            leadTier: leadQualResult?.data?.analysis?.leadTier || 'N/A',
+            profileScore: profileAssessResultWithDuration.data.overall_score,
+            profileModel: profileAssessResultWithDuration.data.model_used,
+            parallelExecution: {
+              status: parallelStatus,
+              totalMs: timing.ai_analysis,
+              leadQualificationMs: leadQualDurationMs,
+              profileAssessmentMs: profileAssessDurationMs,
+              expectedSequentialMs,
+              savedMs: parallelSavingsMs > 0 ? parallelSavingsMs : 0,
+              note: parallelStatus === 'optimal'
+                ? '✓ Perfect parallelization - total time equals slowest component'
+                : parallelStatus === 'good'
+                  ? '✓ Good parallelization - minor overhead detected'
+                  : '⚠ Degraded parallelization - investigate bottleneck'
+            }
           });
 
           return {
-            phase2Response: leadQualResponse,
-            deepAIResult: profileAssessResult
+            phase2Response: leadQualResult?.data ?? null,
+            deepAIResult: profileAssessResultWithDuration.data
           };
         } catch (error: any) {
           console.error(`[Workflow][${params.run_id}] Step 7 FAILED:`, this.serializeError(error));
@@ -899,12 +927,18 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
           // UPDATE existing analysis record (created in handler before workflow started)
           // Include calculated_metrics from Phase 2 extraction if available
+          // Include version tracking for A/B testing and debugging
           const analysis = await analysisRepo.updateAnalysis(params.run_id, {
             overall_score: aiResult.overall_score,
             ai_response: aiResponse,
             calculated_metrics: calculatedMetrics || undefined,
             status: 'complete',
-            completed_at: new Date().toISOString()
+            completed_at: new Date().toISOString(),
+            extraction_version: calculatedMetrics?.version || '1.0',
+            model_versions: {
+              profile_assessment: aiResult.model_used,
+              lead_qualification: phase2AIResponse?.model || aiResult.model_used
+            }
           });
 
           console.log(`[Workflow][${params.run_id}] Analysis updated with results:`, analysis.id);
@@ -990,16 +1024,42 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           const apifyCost = metrics.cost.items.scraping.usd;
           const totalCostUsd = metrics.cost.total_usd;
 
+          // Calculate cache savings (scraping cost avoided when cache hit)
+          const SCRAPING_COST_USD = 0.003; // Cost per scrape
+          const cacheSavingsUsd = timing.cache_hit ? SCRAPING_COST_USD : 0;
+          const savingsPercent = timing.cache_hit ? Math.round((cacheSavingsUsd / (totalCostUsd + cacheSavingsUsd)) * 100) : 0;
+
+          // Get AI breakdown for performance metrics
+          const aiBreakdownData = (timing as any).ai_breakdown;
+
           console.log(`[Workflow][${params.run_id}] Operations logged - COST BREAKDOWN`, {
             total_cost_usd: totalCostUsd,
             breakdown: {
               profile_assessment_ai: `$${aiResult.total_cost.toFixed(6)}`,
               lead_qualification_ai: `$${phase2AICost.toFixed(6)}`,
-              apify_scraping: `$${apifyCost.toFixed(6)}`,
+              apify_scraping: timing.cache_hit ? '$0.000000 (cached)' : `$${apifyCost.toFixed(6)}`,
+              cache_savings: timing.cache_hit ? `$${cacheSavingsUsd.toFixed(6)}` : '$0.000000',
               sum_check: `$${(aiResult.total_cost + phase2AICost + apifyCost).toFixed(6)}`
             },
             cache_hit: timing.cache_hit,
-            total_duration_ms: metrics.duration.total_ms
+            savings_percent: timing.cache_hit ? `${savingsPercent}%` : '0%',
+            total_duration_ms: metrics.duration.total_ms,
+
+            // Profile metadata for cost/complexity correlation
+            profile_metadata: {
+              follower_count: calculatedMetrics?.raw?.followersCount ?? 'N/A',
+              analysis_type: params.analysis_type,
+              profile_health_score: calculatedMetrics?.scores?.profileHealthScore ?? 'N/A',
+              lead_tier: phase2AIResponse?.analysis?.leadTier ?? 'N/A',
+              fake_follower_risk: calculatedMetrics?.scores?.fakeFollowerRisk ?? 'N/A'
+            },
+
+            // Performance metrics for monitoring
+            performance_metrics: {
+              sla_status: 'calculated_later', // SLA is calculated after this step
+              reasoning_tokens: phase2AIResponse?.tokenUsage?.output ?? 0,
+              parallel_efficiency: aiBreakdownData?.parallelStatus ?? 'N/A'
+            }
           });
 
           // COST ALERT THRESHOLDS
@@ -1046,6 +1106,9 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         totalDurationMs <= SLA_CRITICAL_MS ? 'critical' :
         'severe';
 
+      // Get AI breakdown if available
+      const aiBreakdown = (timing as any).ai_breakdown;
+
       const slaLog = {
         runId: params.run_id,
         username: params.username,
@@ -1060,6 +1123,11 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           scrapingMs: timing.scraping ?? 0,
           preChecksMs: timing.pre_checks ?? 0,
           aiAnalysisMs: timing.ai_analysis ?? 0,
+          aiBreakdown: aiBreakdown ? {
+            profileAssessmentMs: aiBreakdown.profileAssessmentMs,
+            leadQualificationMs: aiBreakdown.leadQualificationMs,
+            parallelStatus: aiBreakdown.parallelStatus
+          } : undefined,
           dbUpsertMs: timing.db_upsert ?? 0
         }
       };
