@@ -32,15 +32,15 @@ import type {
  *
  * Features:
  * - Validation pipeline with prerequisite checks
- * - 70+ metrics organized in logical groups
+ * - 52 metrics organized in logical groups
  * - Comprehensive logging for debugging
  * - Graceful degradation when data is missing
  * - Deterministic output (same input = same output)
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 export class ProfileExtractionService {
-  private static readonly VERSION = '1.0.0';
+  private static readonly VERSION = '1.1.0';
   private static readonly MIN_POSTS_FOR_CONFIDENCE = 5;
 
   // Tracking for metrics calculation
@@ -471,7 +471,7 @@ export class ProfileExtractionService {
       this.addSkippedReason('EngagementMetrics', 'No posts available', [
         'totalLikes', 'totalComments', 'avgLikesPerPost', 'engagementRate', 'etc.'
       ]);
-      this.metricsSkipped += 14;
+      this.metricsSkipped += 11;
       return this.buildNullEngagementMetrics('No posts available');
     }
 
@@ -480,7 +480,7 @@ export class ProfileExtractionService {
       this.addSkippedReason('EngagementMetrics', 'Posts lack engagement data', [
         'totalLikes', 'totalComments', 'avgLikesPerPost', 'engagementRate', 'etc.'
       ]);
-      this.metricsSkipped += 14;
+      this.metricsSkipped += 11;
       return this.buildNullEngagementMetrics('Posts lack engagement data');
     }
 
@@ -542,24 +542,13 @@ export class ProfileExtractionService {
       ? this.round(100 / (1 + (engagementStdDev * 10)), 2)
       : null;
 
-    const sortedEngagements = posts
-      .map(p => (p.likesCount || 0) + (p.commentsCount || 0))
-      .sort((a, b) => a - b);
-
-    const minEngagement = sortedEngagements[0];
-    const maxEngagement = sortedEngagements[sortedEngagements.length - 1];
-    const medianEngagement = this.calculateMedian(sortedEngagements);
-
     logger.debug('Engagement consistency calculated', {
       ...logContext,
       engagementStdDev,
-      engagementConsistency,
-      minEngagement,
-      maxEngagement,
-      medianEngagement
+      engagementConsistency
     });
 
-    this.metricsCalculated += 14;
+    this.metricsCalculated += 11;
 
     const metrics: EngagementMetrics = {
       totalLikes,
@@ -572,9 +561,6 @@ export class ProfileExtractionService {
       commentToLikeRatio,
       engagementStdDev,
       engagementConsistency,
-      minEngagementPerPost: minEngagement,
-      maxEngagementPerPost: maxEngagement,
-      medianEngagementPerPost: medianEngagement,
       engagementRatePerPost,
       _reason: null
     };
@@ -602,9 +588,6 @@ export class ProfileExtractionService {
       commentToLikeRatio: null,
       engagementStdDev: null,
       engagementConsistency: null,
-      minEngagementPerPost: null,
-      maxEngagementPerPost: null,
-      medianEngagementPerPost: null,
       engagementRatePerPost: [],
       _reason: reason
     };
@@ -875,7 +858,7 @@ export class ProfileExtractionService {
       this.addSkippedReason('ContentMetrics', 'No posts available', [
         'avgHashtagsPerPost', 'avgMentionsPerPost', 'locationTaggingRate'
       ]);
-      this.metricsSkipped += 18;
+      this.metricsSkipped += 14;
       return this.buildNullContentMetrics('No posts available');
     }
 
@@ -913,13 +896,11 @@ export class ProfileExtractionService {
     const captionLengths = captions.map(c => c.length);
     const totalCaptionLength = captionLengths.reduce((a, b) => a + b, 0);
     const avgCaptionLength = this.round(totalCaptionLength / postCount, 2);
-    const minCaptionLength = Math.min(...captionLengths);
     const maxCaptionLength = Math.max(...captionLengths);
 
     logger.debug('Caption analysis', {
       ...logContext,
       avgCaptionLength,
-      minCaptionLength,
       maxCaptionLength
     });
 
@@ -936,14 +917,7 @@ export class ProfileExtractionService {
     const commentsDisabledRate = this.round((postsWithCommentsDisabled / postCount) * 100, 2);
     const commentsEnabledRate = this.round(100 - commentsDisabledRate, 2);
 
-    // Tagged users analysis
-    const totalTaggedUsers = posts.reduce((sum, p) => sum + (p.taggedUsers?.length || 0), 0);
-    const avgTaggedUsersPerPost = this.round(totalTaggedUsers / postCount, 2);
-
-    // Pinned posts
-    const pinnedPostsCount = posts.filter(p => p.isPinned === true).length;
-
-    this.metricsCalculated += 18;
+    this.metricsCalculated += 14;
 
     const metrics: ContentMetrics = {
       totalHashtags,
@@ -955,7 +929,6 @@ export class ProfileExtractionService {
       uniqueMentionCount,
       totalCaptionLength,
       avgCaptionLength,
-      minCaptionLength,
       maxCaptionLength,
       postsWithLocation,
       locationTaggingRate,
@@ -964,9 +937,6 @@ export class ProfileExtractionService {
       postsWithCommentsDisabled,
       commentsDisabledRate,
       commentsEnabledRate,
-      totalTaggedUsers,
-      avgTaggedUsersPerPost,
-      pinnedPostsCount,
       _reason: null
     };
 
@@ -992,7 +962,6 @@ export class ProfileExtractionService {
       uniqueMentionCount: 0,
       totalCaptionLength: 0,
       avgCaptionLength: null,
-      minCaptionLength: 0,
       maxCaptionLength: 0,
       postsWithLocation: 0,
       locationTaggingRate: null,
@@ -1001,9 +970,6 @@ export class ProfileExtractionService {
       postsWithCommentsDisabled: 0,
       commentsDisabledRate: null,
       commentsEnabledRate: null,
-      totalTaggedUsers: 0,
-      avgTaggedUsersPerPost: null,
-      pinnedPostsCount: 0,
       _reason: reason
     };
   }
@@ -1021,9 +987,9 @@ export class ProfileExtractionService {
     if (!flags.hasVideoData) {
       logger.warn('Skipping video metrics: No video view data available', logContext);
       this.addSkippedReason('VideoMetrics', 'No video view data available', [
-        'avgVideoViews', 'videoViewRate', 'avgVideoDuration'
+        'avgVideoViews', 'videoViewRate', 'videoViewToLikeRatio'
       ]);
-      this.metricsSkipped += 8;
+      this.metricsSkipped += 5;
       return this.buildNullVideoMetrics('No video view data available');
     }
 
@@ -1040,18 +1006,13 @@ export class ProfileExtractionService {
 
     if (videoPostCount === 0) {
       logger.warn('No posts with video view count found', logContext);
-      this.metricsSkipped += 8;
+      this.metricsSkipped += 5;
       return this.buildNullVideoMetrics('No posts with video view count');
     }
 
     // Calculate view totals
     const totalVideoViews = videoPosts.reduce((sum, p) => sum + (p.videoViewCount || 0), 0);
     const avgVideoViews = this.round(totalVideoViews / videoPostCount, 2);
-
-    // Min/max views
-    const viewCounts = videoPosts.map(p => p.videoViewCount || 0).sort((a, b) => a - b);
-    const minVideoViews = viewCounts[0];
-    const maxVideoViews = viewCounts[viewCounts.length - 1];
 
     // Video view rate (views / followers)
     let videoViewRate: number | null = null;
@@ -1067,25 +1028,14 @@ export class ProfileExtractionService {
       videoViewToLikeRatio = this.round(avgVideoViews / avgVideoLikes, 2);
     }
 
-    // Average video duration (if available)
-    const videosWithDuration = videoPosts.filter(p => p.videoDuration !== undefined);
-    let avgVideoDuration: number | null = null;
-    if (videosWithDuration.length > 0) {
-      const totalDuration = videosWithDuration.reduce((sum, p) => sum + (p.videoDuration || 0), 0);
-      avgVideoDuration = this.round(totalDuration / videosWithDuration.length, 2);
-    }
-
-    this.metricsCalculated += 8;
+    this.metricsCalculated += 5;
 
     const metrics: VideoMetrics = {
       videoPostCount,
       totalVideoViews,
       avgVideoViews,
-      minVideoViews,
-      maxVideoViews,
       videoViewRate,
       videoViewToLikeRatio,
-      avgVideoDuration,
       _reason: null
     };
 
@@ -1104,11 +1054,8 @@ export class ProfileExtractionService {
       videoPostCount: 0,
       totalVideoViews: null,
       avgVideoViews: null,
-      minVideoViews: null,
-      maxVideoViews: null,
       videoViewRate: null,
       videoViewToLikeRatio: null,
-      avgVideoDuration: null,
       _reason: reason
     };
   }
@@ -1185,61 +1132,17 @@ export class ProfileExtractionService {
     // Clamp to 0-100
     fakeFollowerRiskScore = Math.min(100, Math.max(0, fakeFollowerRiskScore));
 
-    // Account Health Score (inverse of risk)
-    const accountHealthScore = 100 - fakeFollowerRiskScore;
-
-    // Content Quality Score (based on content metrics)
-    let contentQualityScore: number | null = null;
-    if (flags.hasPosts) {
-      contentQualityScore = 50; // Base score
-      // Bonus for captions
-      if (engagementMetrics.avgLikesPerPost !== null && engagementMetrics.avgLikesPerPost > 0) {
-        contentQualityScore += 10;
-      }
-      // Bonus for engagement consistency
-      if (engagementMetrics.engagementConsistency !== null) {
-        contentQualityScore += (engagementMetrics.engagementConsistency / 100) * 20;
-      }
-      // Bonus for hashtag usage (but not too many)
-      const avgHashtags = profile.latestPosts.reduce((sum, p) => sum + (p.hashtags?.length || 0), 0) / profile.latestPosts.length;
-      if (avgHashtags >= 3 && avgHashtags <= 15) {
-        contentQualityScore += 10;
-      }
-      contentQualityScore = this.round(Math.min(100, contentQualityScore), 2);
-    }
-
-    // Engagement Quality Score
-    let engagementQualityScore: number | null = null;
-    if (engagementMetrics.engagementRate !== null) {
-      // Score based on engagement rate brackets
-      const er = engagementMetrics.engagementRate;
-      if (er >= 6) engagementQualityScore = 100;
-      else if (er >= 3) engagementQualityScore = 80;
-      else if (er >= 1) engagementQualityScore = 60;
-      else if (er >= 0.5) engagementQualityScore = 40;
-      else engagementQualityScore = 20;
-
-      // Boost for high consistency
-      if (engagementMetrics.engagementConsistency !== null && engagementMetrics.engagementConsistency > 70) {
-        engagementQualityScore = Math.min(100, engagementQualityScore + 10);
-      }
-    }
-
-    this.metricsCalculated += 5;
+    this.metricsCalculated += 2;
 
     const metrics: RiskScores = {
       fakeFollowerRiskScore,
       fakeFollowerWarnings: warnings,
-      accountHealthScore,
-      contentQualityScore,
-      engagementQualityScore,
       _reason: null
     };
 
     logger.info('Risk scores calculated', {
       ...logContext,
       fakeFollowerRiskScore,
-      accountHealthScore,
       warningsCount: warnings.length
     });
 
@@ -1260,15 +1163,6 @@ export class ProfileExtractionService {
     let contentDensity: number | null = null;
     if (profile.followersCount > 0) {
       contentDensity = this.round((profile.postsCount / profile.followersCount) * 1000, 4);
-    }
-
-    // Estimated Account Age (based on oldest post)
-    let estimatedAccountAgeDays: number | null = null;
-    if (frequencyMetrics.oldestPostTimestamp) {
-      const oldestTs = this.parseTimestamp(frequencyMetrics.oldestPostTimestamp);
-      if (oldestTs) {
-        estimatedAccountAgeDays = this.round((Date.now() - oldestTs) / 86400000, 0);
-      }
     }
 
     // Viral Post Analysis
@@ -1294,47 +1188,20 @@ export class ProfileExtractionService {
       });
     }
 
-    // Growth Potential Score (composite)
-    let growthPotentialScore: number | null = null;
-    if (flags.hasEngagementData && engagementMetrics.engagementRate !== null) {
-      growthPotentialScore = 50; // Base
-
-      // Bonus for good engagement
-      if (engagementMetrics.engagementRate > 3) {
-        growthPotentialScore += 20;
-      } else if (engagementMetrics.engagementRate > 1) {
-        growthPotentialScore += 10;
-      }
-
-      // Bonus for posting consistency
-      if (frequencyMetrics.postingConsistency !== null && frequencyMetrics.postingConsistency > 50) {
-        growthPotentialScore += 15;
-      }
-
-      // Bonus for format diversity
-      const formatDiversity = profile.latestPosts.some(p => p.productType === 'clips') ? 15 : 0;
-      growthPotentialScore += formatDiversity;
-
-      growthPotentialScore = Math.min(100, growthPotentialScore);
-    }
-
-    this.metricsCalculated += 5;
+    this.metricsCalculated += 3;
 
     const metrics: DerivedMetrics = {
       contentDensity,
-      estimatedAccountAgeDays,
       viralPostCount,
       viralPostRate,
-      growthPotentialScore,
       _reason: null
     };
 
     logger.info('Derived metrics calculated', {
       ...logContext,
       contentDensity,
-      estimatedAccountAgeDays,
       viralPostCount,
-      growthPotentialScore
+      viralPostRate
     });
 
     return metrics;
@@ -1562,18 +1429,14 @@ export class ProfileExtractionService {
     logger.info('RISK SCORES (Group 4)', {
       ...logContext,
       fakeFollowerRiskScore: result.riskScores.fakeFollowerRiskScore,
-      accountHealthScore: result.riskScores.accountHealthScore,
-      contentQualityScore: result.riskScores.contentQualityScore,
-      engagementQualityScore: result.riskScores.engagementQualityScore,
       warnings: result.riskScores.fakeFollowerWarnings
     });
 
     logger.info('DERIVED METRICS (Group 4)', {
       ...logContext,
       contentDensity: result.derivedMetrics.contentDensity,
-      estimatedAccountAgeDays: result.derivedMetrics.estimatedAccountAgeDays,
       viralPostCount: result.derivedMetrics.viralPostCount,
-      growthPotentialScore: result.derivedMetrics.growthPotentialScore
+      viralPostRate: result.derivedMetrics.viralPostRate
     });
 
     logger.info('TEXT DATA FOR AI (Group 5)', {

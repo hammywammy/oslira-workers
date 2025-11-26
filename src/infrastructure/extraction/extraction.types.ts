@@ -204,9 +204,6 @@ export interface EngagementMetrics {
   commentToLikeRatio: number | null;
   engagementStdDev: number | null;
   engagementConsistency: number | null;
-  minEngagementPerPost: number | null;
-  maxEngagementPerPost: number | null;
-  medianEngagementPerPost: number | null;
   engagementRatePerPost: number[];
   _reason: string | null;
 }
@@ -258,7 +255,6 @@ export interface ContentMetrics {
 
   totalCaptionLength: number;
   avgCaptionLength: number | null;
-  minCaptionLength: number;
   maxCaptionLength: number;
 
   postsWithLocation: number;
@@ -271,11 +267,6 @@ export interface ContentMetrics {
   commentsDisabledRate: number | null;
   commentsEnabledRate: number | null;
 
-  totalTaggedUsers: number;
-  avgTaggedUsersPerPost: number | null;
-
-  pinnedPostsCount: number;
-
   _reason: string | null;
 }
 
@@ -286,11 +277,8 @@ export interface VideoMetrics {
   videoPostCount: number;
   totalVideoViews: number | null;
   avgVideoViews: number | null;
-  minVideoViews: number | null;
-  maxVideoViews: number | null;
   videoViewRate: number | null; // views / followers
   videoViewToLikeRatio: number | null;
-  avgVideoDuration: number | null;
   _reason: string | null;
 }
 
@@ -300,9 +288,6 @@ export interface VideoMetrics {
 export interface RiskScores {
   fakeFollowerRiskScore: number | null;
   fakeFollowerWarnings: string[];
-  accountHealthScore: number | null;
-  contentQualityScore: number | null;
-  engagementQualityScore: number | null;
   _reason: string | null;
 }
 
@@ -311,10 +296,8 @@ export interface RiskScores {
  */
 export interface DerivedMetrics {
   contentDensity: number | null;
-  estimatedAccountAgeDays: number | null;
   viralPostCount: number; // posts with 2x+ average engagement
   viralPostRate: number | null;
-  growthPotentialScore: number | null;
   _reason: string | null;
 }
 
