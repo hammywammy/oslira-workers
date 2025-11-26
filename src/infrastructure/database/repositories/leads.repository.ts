@@ -23,6 +23,8 @@ export interface Lead {
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
+  // Phase 2: Calculated metrics JSONB
+  calculated_metrics: any | null;
 }
 
 export interface UpsertLeadData {
@@ -39,6 +41,8 @@ export interface UpsertLeadData {
   is_verified: boolean;
   is_private: boolean;
   is_business_account: boolean;
+  // Phase 2: Calculated metrics JSONB (optional)
+  calculated_metrics?: any;
 }
 
 export interface UpsertLeadResult {
@@ -66,18 +70,31 @@ export class LeadsRepository extends BaseRepository<Lead> {
     const now = new Date().toISOString();
 
     // Build payload with timestamps
-    const payload = {
-      ...data,
+    const payload: any = {
+      account_id: data.account_id,
+      business_profile_id: data.business_profile_id,
+      username: data.username,
       display_name: data.display_name || null,
+      follower_count: data.follower_count,
+      following_count: data.following_count,
+      post_count: data.post_count,
       profile_pic_url: data.profile_pic_url || null,
       profile_url: data.profile_url || `https://instagram.com/${data.username}`,
       external_url: data.external_url || null,
+      is_verified: data.is_verified,
+      is_private: data.is_private,
+      is_business_account: data.is_business_account,
       last_analyzed_at: now,
       ...(existing ? {} : {
         first_analyzed_at: now,
         created_at: now
       })
     };
+
+    // Phase 2: Include calculated_metrics if provided
+    if (data.calculated_metrics !== undefined) {
+      payload.calculated_metrics = data.calculated_metrics;
+    }
 
     const { data: result, error } = await this.supabase
       .from('leads')
