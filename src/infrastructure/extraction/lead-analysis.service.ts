@@ -32,7 +32,7 @@ import type {
 // ============================================================================
 
 const LEAD_ANALYSIS_MODEL = 'gpt-5';
-const MAX_OUTPUT_TOKENS = 2000;
+const MAX_OUTPUT_TOKENS = 4000;
 
 // ============================================================================
 // TOOL SCHEMA FOR STRUCTURED OUTPUT
