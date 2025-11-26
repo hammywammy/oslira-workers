@@ -131,15 +131,15 @@ export class AIAnalysisService {
     console.log('  • business_summary:', context.business_summary || 'MISSING');
     console.log('  • communication_tone:', context.communication_tone || 'MISSING');
     console.log('  • target_description:', context.target_description || 'MISSING');
-    console.log('  • icp_min_followers:', context.icp_min_followers || 'MISSING');
-    console.log('  • icp_max_followers:', context.icp_max_followers || 'MISSING');
+    console.log('  • icp_min_followers:', context.icp_min_followers ?? 0);
+    console.log('  • icp_max_followers:', context.icp_max_followers ?? 'unlimited');
     console.log('  • target_company_sizes:', context.target_company_sizes || 'MISSING');
 
     console.log('\n🎯 ideal_customer_profile (JSONB):');
     console.log('  • target_audience:', icp.target_audience || 'MISSING');
     console.log('  • brand_voice:', icp.brand_voice || 'MISSING');
-    console.log('  • icp_min_followers:', icp.icp_min_followers || 'MISSING');
-    console.log('  • icp_max_followers:', icp.icp_max_followers || 'MISSING');
+    console.log('  • icp_min_followers:', icp.icp_min_followers ?? 0);
+    console.log('  • icp_max_followers:', icp.icp_max_followers ?? 'unlimited');
 
     console.log('\n📝 PROFILE DATA:');
     console.log('  • username:', profile.username);
@@ -248,15 +248,15 @@ export class AIAnalysisService {
     console.log('  • business_summary:', context.business_summary || 'MISSING');
     console.log('  • communication_tone:', context.communication_tone || 'MISSING');
     console.log('  • target_description:', context.target_description || 'MISSING');
-    console.log('  • icp_min_followers:', context.icp_min_followers || 'MISSING');
-    console.log('  • icp_max_followers:', context.icp_max_followers || 'MISSING');
+    console.log('  • icp_min_followers:', context.icp_min_followers ?? 0);
+    console.log('  • icp_max_followers:', context.icp_max_followers ?? 'unlimited');
     console.log('  • target_company_sizes:', context.target_company_sizes || 'MISSING');
 
     console.log('\n🎯 ideal_customer_profile (JSONB):');
     console.log('  • target_audience:', icp.target_audience || 'MISSING');
     console.log('  • brand_voice:', icp.brand_voice || 'MISSING');
-    console.log('  • icp_min_followers:', icp.icp_min_followers || 'MISSING');
-    console.log('  • icp_max_followers:', icp.icp_max_followers || 'MISSING');
+    console.log('  • icp_min_followers:', icp.icp_min_followers ?? 0);
+    console.log('  • icp_max_followers:', icp.icp_max_followers ?? 'unlimited');
 
     console.log('\n📝 PROFILE DATA:');
     console.log('  • username:', profile.username);
