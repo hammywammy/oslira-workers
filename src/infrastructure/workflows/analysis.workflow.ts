@@ -66,6 +66,7 @@ const CRITICAL_PROGRESS_STEPS = new Set([
 /**
  * Convert ProfileData (cache format) to ApifyFullProfile (extraction format)
  * Handles field name mismatches: likeCount → likesCount, commentCount → commentsCount
+ * Preserves rich metadata (hashtags, mentions, locations, video data) for accurate analysis
  */
 function profileDataToApifyFormat(profile: ProfileData): ApifyFullProfile {
   return {
@@ -91,17 +92,35 @@ function profileDataToApifyFormat(profile: ProfileData): ApifyFullProfile {
       likesCount: post.likeCount,
       commentsCount: post.commentCount,
       timestamp: post.timestamp,
-      type: post.mediaType === 'video' ? 'Video' as const : post.mediaType === 'carousel' ? 'Sidecar' as const : 'Image' as const,
+      type: mapMediaTypeToApify(post.mediaType, post.productType),
+      productType: post.productType as 'feed' | 'clips' | 'igtv' | undefined,
       displayUrl: post.mediaUrl || '',
-      hashtags: [],
-      mentions: [],
+      videoUrl: post.videoUrl || undefined,
+      videoViewCount: post.videoViewCount || undefined,
+      hashtags: post.hashtags || [],
+      mentions: post.mentions || [],
       taggedUsers: [],
-      locationName: null,
+      locationName: post.locationName || null,
       locationId: null,
       alt: null,
       isCommentsDisabled: false
     }))
   };
+}
+
+/**
+ * Map ProfileData mediaType back to Apify format
+ * Considers productType for accurate Reels detection
+ */
+function mapMediaTypeToApify(
+  mediaType: 'photo' | 'video' | 'carousel',
+  productType?: string | null
+): 'Image' | 'Video' | 'Sidecar' {
+  // Reels (productType='clips') are always Videos
+  if (productType === 'clips') return 'Video';
+  if (mediaType === 'video') return 'Video';
+  if (mediaType === 'carousel') return 'Sidecar';
+  return 'Image';
 }
 
 export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowParams> {
