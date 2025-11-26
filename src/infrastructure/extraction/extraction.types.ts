@@ -481,6 +481,9 @@ export type ExtractionOutput =
 
 /**
  * Composite scores calculated from raw metrics (0-100 scale)
+ *
+ * IMPORTANT: These scores measure PROFILE QUALITY, not business fit.
+ * Business fit is determined separately by AI analysis (leadTier, overall_score).
  */
 export interface CompositeScores {
   /** Engagement health score combining rate, consistency, and comment ratio */
@@ -491,8 +494,19 @@ export interface CompositeScores {
   accountMaturity: number;
   /** Fake follower risk score (higher = more suspicious) */
   fakeFollowerRisk: number;
-  /** Overall opportunity score (weighted combination of other scores) */
-  opportunityScore: number;
+  /**
+   * Profile Health Score (weighted combination of quality scores)
+   *
+   * IMPORTANT: Measures ACCOUNT QUALITY only - NOT business fit!
+   * A high profile health score means the account is well-maintained,
+   * but does NOT mean it's a good lead for the business.
+   *
+   * Formula: (engagementHealth × 0.3) + (contentSophistication × 0.25)
+   *          + (accountMaturity × 0.25) + ((100 - fakeFollowerRisk) × 0.2)
+   *
+   * @renamed from opportunityScore to clarify what it measures
+   */
+  profileHealthScore: number;
 }
 
 /**

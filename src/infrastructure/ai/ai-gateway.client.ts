@@ -135,10 +135,11 @@ export class AIGatewayClient {
 
     // Add reasoning_effort if specified (top-level, not nested)
     if (request.reasoning_effort) {
-      body.reasoning_effort = request.reasoning_effort; // ✅ FIXED: Top-level parameter
+      body.reasoning_effort = request.reasoning_effort;
     }
 
-    console.log('[AIGateway] Request body:', JSON.stringify(body, null, 2));
+    // DEBUG: Uncomment to log full request body during development
+    // console.debug('[AIGateway] Request body:', JSON.stringify(body, null, 2));
 
     try {
       const response = await fetch(`${this.openaiBaseURL}/v1/chat/completions`, {

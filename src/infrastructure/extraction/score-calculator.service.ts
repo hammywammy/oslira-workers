@@ -21,39 +21,14 @@
  */
 
 import { logger } from '@/shared/utils/logger.util';
+import { clamp, round, safeNumber } from '@/shared/utils/number-format.util';
 import type {
   ExtractionResult,
   CompositeScores,
   GapDetection
 } from './extraction.types';
 
-// ============================================================================
-// UTILITY FUNCTIONS
-// ============================================================================
-
-/**
- * Clamp a value between min and max
- */
-function clamp(min: number, max: number, value: number): number {
-  return Math.max(min, Math.min(max, value));
-}
-
-/**
- * Round to specified decimal places
- */
-function round(value: number, decimals: number = 2): number {
-  return Number(value.toFixed(decimals));
-}
-
-/**
- * Safe number getter - returns default if null/undefined/NaN
- */
-function safeNumber(value: number | null | undefined, defaultValue: number = 0): number {
-  if (value === null || value === undefined || isNaN(value)) {
-    return defaultValue;
-  }
-  return value;
-}
+// Note: clamp, round, safeNumber are imported from centralized utility
 
 // ============================================================================
 // SCORE CALCULATION SERVICE
@@ -80,8 +55,9 @@ export function calculateScores(extraction: ExtractionResult): ScoreCalculationR
   const accountMaturity = calculateAccountMaturity(extraction);
   const fakeFollowerRisk = calculateFakeFollowerRisk(extraction);
 
-  // Calculate opportunity score from other scores
-  const opportunityScore = calculateOpportunityScore({
+  // Calculate profile health score from other quality scores
+  // NOTE: This measures ACCOUNT QUALITY, not business fit!
+  const profileHealthScore = calculateProfileHealthScore({
     engagementHealth,
     contentSophistication,
     accountMaturity,
@@ -93,7 +69,7 @@ export function calculateScores(extraction: ExtractionResult): ScoreCalculationR
     contentSophistication,
     accountMaturity,
     fakeFollowerRisk,
-    opportunityScore
+    profileHealthScore
   };
 
   // Calculate gap detection
@@ -269,19 +245,25 @@ function calculateFakeFollowerRisk(extraction: ExtractionResult): number {
 }
 
 /**
- * Calculate Opportunity Score (0-100)
+ * Calculate Profile Health Score (0-100)
  *
- * Weighted combination of other scores for lead qualification.
+ * Weighted combination of QUALITY scores to assess account health.
+ *
+ * IMPORTANT: This measures ACCOUNT QUALITY only - NOT business fit!
+ * A high profile health score means the account is well-maintained,
+ * but does NOT mean it's a good lead for the business.
  *
  * Formula: (engagementHealth * 0.3) + (contentSophistication * 0.25) + (accountMaturity * 0.25) + ((100 - fakeFollowerRisk) * 0.2)
  *
  * Weights:
- * - Engagement Health: 30% (most important - shows active audience)
+ * - Engagement Health: 30% (shows active, real audience)
  * - Content Sophistication: 25% (shows effort and strategy)
- * - Account Maturity: 25% (shows commitment)
+ * - Account Maturity: 25% (shows commitment and professionalism)
  * - Trust Factor (inverse of risk): 20% (authenticity check)
+ *
+ * @renamed from calculateOpportunityScore to clarify what it measures
  */
-function calculateOpportunityScore(scores: Omit<CompositeScores, 'opportunityScore'>): number {
+function calculateProfileHealthScore(scores: Omit<CompositeScores, 'profileHealthScore'>): number {
   const trustFactor = 100 - scores.fakeFollowerRisk;
 
   const score = (scores.engagementHealth * 0.3) +
@@ -291,13 +273,14 @@ function calculateOpportunityScore(scores: Omit<CompositeScores, 'opportunitySco
 
   const clamped = clamp(0, 100, score);
 
-  logger.debug('[ScoreCalculator] Opportunity score calculated', {
+  logger.debug('[ScoreCalculator] Profile health score calculated', {
     engagementHealth: scores.engagementHealth,
     contentSophistication: scores.contentSophistication,
     accountMaturity: scores.accountMaturity,
     trustFactor,
     rawScore: score,
-    finalScore: clamped
+    finalScore: clamped,
+    note: 'Measures account quality, NOT business fit'
   });
 
   return round(clamped);
