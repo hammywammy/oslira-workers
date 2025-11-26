@@ -27,6 +27,18 @@ import {
   type AnalysisResultType
 } from '@/infrastructure/analysis-checks';
 
+// Phase 2: Profile Extraction & Score Calculation
+import {
+  createProfileExtractionService,
+  transformToCalculatedMetrics,
+  analyzeLeadWithAI,
+  fetchBusinessContext,
+  type ExtractionOutput,
+  type CalculatedMetrics,
+  type AIResponsePayload,
+  type TextDataForAI
+} from '@/infrastructure/extraction';
+
 /**
  * ANALYSIS WORKFLOW
  *
@@ -506,6 +518,98 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         throw new Error('Profile data is null - this should have been caught by pre-analysis checks');
       }
 
+      // Step 6c: Phase 2 - Extract metrics and calculate scores
+      // This runs the comprehensive profile extraction and score calculation
+      let calculatedMetrics: CalculatedMetrics | null = null;
+      let textDataForAI: TextDataForAI | null = null;
+      let phase2AIResponse: AIResponsePayload | null = null;
+
+      const phase2Result = await step.do('extract_and_score', {
+        retries: { limit: 1, delay: '1 second' }
+      }, async (): Promise<{ calculatedMetrics: CalculatedMetrics | null; textDataForAI: TextDataForAI | null }> => {
+        try {
+          console.log(`[Workflow][${params.run_id}] Step 6c: Phase 2 - Extracting metrics and calculating scores`);
+
+          // Run profile extraction service
+          const extractor = createProfileExtractionService();
+          const extractionResult: ExtractionOutput = extractor.extract(profile);
+
+          if (!extractionResult.success) {
+            console.warn(`[Workflow][${params.run_id}] Phase 2 extraction failed:`, extractionResult.error);
+            return { calculatedMetrics: null, textDataForAI: null };
+          }
+
+          // Transform to CalculatedMetrics format (includes scores and gaps)
+          const metrics = transformToCalculatedMetrics(extractionResult.data);
+
+          console.log(`[Workflow][${params.run_id}] Phase 2 extraction complete:`, {
+            sampleSize: metrics.sampleSize,
+            scores: metrics.scores,
+            gaps: metrics.gaps
+          });
+
+          return {
+            calculatedMetrics: metrics,
+            textDataForAI: extractionResult.data.textDataForAI
+          };
+
+        } catch (error: any) {
+          console.error(`[Workflow][${params.run_id}] Phase 2 extraction error (non-fatal):`, this.serializeError(error));
+          // Return null to fall back to old system
+          return { calculatedMetrics: null, textDataForAI: null };
+        }
+      });
+
+      calculatedMetrics = phase2Result.calculatedMetrics;
+      textDataForAI = phase2Result.textDataForAI;
+
+      // Step 6d: Phase 2 - Run GPT-5 Lead Analysis (if extraction succeeded)
+      if (calculatedMetrics && textDataForAI) {
+        phase2AIResponse = await step.do('phase2_ai_analysis', {
+          retries: { limit: 1, delay: '2 seconds' }
+        }, async (): Promise<AIResponsePayload | null> => {
+          try {
+            console.log(`[Workflow][${params.run_id}] Step 6d: Phase 2 - Running GPT-5 lead analysis`);
+
+            // Fetch business context for AI prompt
+            const supabase = await SupabaseClientFactory.createAdminClient(this.env);
+            const businessContextResult = await fetchBusinessContext(supabase, params.business_profile_id);
+
+            if (!businessContextResult.success) {
+              console.warn(`[Workflow][${params.run_id}] Failed to fetch business context:`, businessContextResult.error);
+              return null;
+            }
+
+            // Run GPT-5 lead analysis
+            const aiResult = await analyzeLeadWithAI(
+              {
+                calculatedMetrics: calculatedMetrics!,
+                textData: textDataForAI!,
+                businessContext: businessContextResult.data
+              },
+              this.env
+            );
+
+            if (!aiResult.success) {
+              console.warn(`[Workflow][${params.run_id}] Phase 2 AI analysis failed:`, aiResult.error);
+              return null;
+            }
+
+            console.log(`[Workflow][${params.run_id}] Phase 2 AI analysis complete:`, {
+              leadTier: aiResult.data.analysis.leadTier,
+              confidence: aiResult.data.analysis.confidence,
+              tokensUsed: aiResult.data.tokenUsage
+            });
+
+            return aiResult.data;
+
+          } catch (error: any) {
+            console.error(`[Workflow][${params.run_id}] Phase 2 AI analysis error (non-fatal):`, this.serializeError(error));
+            return null;
+          }
+        });
+      }
+
       // Step 7: Execute AI analysis
       // MODULAR: Routes to correct analysis execution based on type
       const aiResult = await step.do('ai_analysis', {
@@ -557,6 +661,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           const aiProfile = toAIProfile(profile);
 
           // Step 8a: Upsert lead with Instagram URL first (to get lead_id)
+          // Include calculated_metrics if Phase 2 extraction succeeded
           const lead = await leadsRepo.upsertLead({
             account_id: params.account_id,
             business_profile_id: params.business_profile_id,
@@ -569,10 +674,15 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             profile_pic_url: aiProfile.profile_pic_url, // Instagram URL initially
             is_verified: aiProfile.is_verified,
             is_private: aiProfile.is_private,
-            is_business_account: aiProfile.is_business_account
+            is_business_account: aiProfile.is_business_account,
+            // Phase 2: Include calculated metrics if available
+            calculated_metrics: calculatedMetrics || undefined
           });
 
-          console.log(`[Workflow][${params.run_id}] Lead upserted: ${lead.lead_id}`);
+          console.log(`[Workflow][${params.run_id}] Lead upserted: ${lead.lead_id}`, {
+            hasCalculatedMetrics: !!calculatedMetrics,
+            opportunityScore: calculatedMetrics?.scores?.opportunityScore
+          });
 
           // Step 8b: Cache avatar to R2 (FIRE-AND-FORGET - don't wait)
           // This saves 1-2s on the critical path while still caching the avatar
@@ -620,12 +730,23 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           const supabase = await SupabaseClientFactory.createAdminClient(this.env);
           const analysisRepo = new AnalysisRepository(supabase);
 
-          // Structure ai_response JSONB with only analysis results
-          // (cost/timing metadata goes to operations_ledger)
-          const aiResponse = {
+          // Structure ai_response JSONB - merge old format with Phase 2 if available
+          // Old format: { score, summary } for backward compatibility
+          // Phase 2 format: Full AIResponsePayload with leadTier, confidence, etc.
+          const aiResponse: any = {
+            // Always include basic fields (backward compat)
             score: aiResult.overall_score,
             summary: aiResult.summary_text
           };
+
+          // Merge Phase 2 AI response if available
+          if (phase2AIResponse) {
+            aiResponse.phase2 = phase2AIResponse;
+            console.log(`[Workflow][${params.run_id}] Including Phase 2 AI response:`, {
+              leadTier: phase2AIResponse.analysis.leadTier,
+              confidence: phase2AIResponse.analysis.confidence
+            });
+          }
 
           // UPDATE existing analysis record (created in handler before workflow started)
           const analysis = await analysisRepo.updateAnalysis(params.run_id, {
