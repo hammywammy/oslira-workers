@@ -407,14 +407,22 @@ export class ProfileExtractionService {
 
     logger.info('Calculating profile metrics...', logContext);
 
-    // Authority ratio (followers / following)
+    // Authority ratio: scaled 0-100 score representing follower/following balance
+    // High ratio = more followers than following = more authority
     let authorityRatio: number | null = null;
     if (profile.followsCount > 0) {
-      authorityRatio = this.round(profile.followersCount / profile.followsCount, 2);
+      const rawRatio = profile.followersCount / profile.followsCount;
+      // Scale to 0-100: divide by 100 so ratio of 10000:1 = 100 score
+      authorityRatio = this.round(Math.min(100, rawRatio / 100), 2);
       this.metricsCalculated++;
-      logger.debug('authorityRatio calculated', { ...logContext, authorityRatio });
+      logger.debug('authorityRatio calculated', { ...logContext, rawRatio, authorityRatio });
+    } else if (profile.followersCount >= 100) {
+      // Perfect score when follows=0 but has significant followers (rare, highly authoritative)
+      authorityRatio = 100;
+      this.metricsCalculated++;
+      logger.debug('authorityRatio: perfect score (follows=0 with followers)', { ...logContext, authorityRatio });
     } else {
-      logger.debug('authorityRatio skipped: followsCount is 0', logContext);
+      logger.debug('authorityRatio skipped: followsCount is 0 with few followers', logContext);
       this.metricsSkipped++;
     }
 
@@ -752,6 +760,18 @@ export class ProfileExtractionService {
 
     const posts = profile.latestPosts;
     const postCount = posts.length;
+
+    // Log raw post type data for debugging format detection
+    logger.debug('Raw post types for format detection', {
+      ...logContext,
+      postCount,
+      posts: posts.slice(0, 5).map(p => ({
+        id: p.id,
+        type: p.type,
+        productType: p.productType,
+        hasVideoUrl: !!p.videoUrl
+      }))
+    });
 
     // Count by format
     const reelsCount = posts.filter(p => p.productType === 'clips').length;

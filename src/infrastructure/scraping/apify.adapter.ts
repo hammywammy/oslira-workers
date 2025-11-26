@@ -31,6 +31,14 @@ export interface ApifyRawPost {
   timestamp: string;
   type: 'Image' | 'Video' | 'Sidecar';
   displayUrl: string;
+  // Extended metadata from Apify
+  videoUrl?: string;
+  videoViewCount?: number;
+  productType?: 'feed' | 'clips' | 'igtv';  // 'clips' = Reels
+  hashtags?: string[];
+  mentions?: string[];
+  locationName?: string | null;
+  locationId?: string | null;
 }
 
 export interface ApifyRawProfile {
@@ -377,6 +385,7 @@ export class ApifyAdapter {
 
   /**
    * Transform posts array (camelCase for R2CacheService)
+   * Preserves rich metadata for format detection and content analysis
    */
   private transformPosts(rawPosts: ApifyRawPost[]): ProfileData['latestPosts'] {
     return rawPosts.map(post => ({
@@ -386,7 +395,14 @@ export class ApifyAdapter {
       commentCount: post.commentsCount,
       timestamp: post.timestamp,
       mediaType: this.mapMediaType(post.type),
-      mediaUrl: post.displayUrl
+      mediaUrl: post.displayUrl,
+      // Extended metadata for rich analysis
+      videoUrl: post.videoUrl || null,
+      videoViewCount: post.videoViewCount || null,
+      productType: post.productType || null,
+      hashtags: post.hashtags || [],
+      mentions: post.mentions || [],
+      locationName: post.locationName || null
     }));
   }
 

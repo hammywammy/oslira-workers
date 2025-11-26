@@ -15,6 +15,13 @@ export interface PostData {
   timestamp: string;
   mediaType: 'photo' | 'video' | 'carousel';
   mediaUrl: string;
+  // Extended metadata for rich analysis
+  videoUrl?: string | null;
+  videoViewCount?: number | null;
+  productType?: string | null;  // 'clips' = Reels, 'feed' = regular, 'igtv' = IGTV
+  hashtags?: string[];
+  mentions?: string[];
+  locationName?: string | null;
 }
 
 export interface ProfileData {
