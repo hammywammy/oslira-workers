@@ -690,7 +690,6 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
             console.log(`[Workflow][${params.run_id}] Phase 2 AI analysis complete:`, {
               leadTier: aiResult.data.analysis.leadTier,
-              confidence: aiResult.data.analysis.confidence,
               tokensUsed: aiResult.data.tokenUsage
             });
 
@@ -819,7 +818,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
           // Structure ai_response JSONB - merge old format with Phase 2 if available
           // Old format: { score, summary } for backward compatibility
-          // Phase 2 format: Full AIResponsePayload with leadTier, confidence, etc.
+          // Phase 2 format: Full AIResponsePayload with leadTier, partnershipAssessment, etc.
           const aiResponse: any = {
             // Always include basic fields (backward compat)
             score: aiResult.overall_score,
@@ -830,8 +829,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           if (phase2AIResponse) {
             aiResponse.phase2 = phase2AIResponse;
             console.log(`[Workflow][${params.run_id}] Including Phase 2 AI response:`, {
-              leadTier: phase2AIResponse.analysis.leadTier,
-              confidence: phase2AIResponse.analysis.confidence
+              leadTier: phase2AIResponse.analysis.leadTier
             });
           }
 

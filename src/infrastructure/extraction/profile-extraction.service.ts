@@ -40,8 +40,7 @@ import type {
  * @version 1.1.0
  */
 export class ProfileExtractionService {
-  private static readonly VERSION = '1.1.0';
-  private static readonly MIN_POSTS_FOR_CONFIDENCE = 5;
+  private static readonly VERSION = '1.2.0';
 
   // Tracking for metrics calculation
   private metricsCalculated = 0;
@@ -276,20 +275,6 @@ export class ProfileExtractionService {
       warnings.push({
         code: 'NO_VIDEO_DATA',
         message: 'No video view data available - video metrics will be null'
-      });
-    }
-
-    const postCount = profile.latestPosts?.length || 0;
-    if (postCount > 0 && postCount < ProfileExtractionService.MIN_POSTS_FOR_CONFIDENCE) {
-      warnings.push({
-        code: 'LOW_SAMPLE_SIZE',
-        message: `Only ${postCount} posts available - statistical confidence is low`
-      });
-      logger.warn('Warning: Low sample size', {
-        service: 'ProfileExtraction',
-        username: profile.username,
-        postCount,
-        minRequired: ProfileExtractionService.MIN_POSTS_FOR_CONFIDENCE
       });
     }
 
@@ -531,10 +516,10 @@ export class ProfileExtractionService {
       engagementRate
     });
 
-    // Comment to like ratio
+    // Comment to like ratio (standardized to 3 decimal places for consistency)
     let commentToLikeRatio: number | null = null;
     if (avgLikesPerPost > 0) {
-      commentToLikeRatio = this.round(avgCommentsPerPost / avgLikesPerPost, 4);
+      commentToLikeRatio = this.round(avgCommentsPerPost / avgLikesPerPost, 3);
     }
 
     // Per-post engagement rates for consistency calculation
@@ -1310,9 +1295,10 @@ export class ProfileExtractionService {
     const processingTimeMs = Date.now() - this.startTime;
     const postCount = profile.latestPosts?.length || 0;
 
-    // Calculate data completeness
+    // Calculate data completeness - capped at 100% to prevent display issues
     const totalPossibleMetrics = 74; // Total number of metrics defined
-    const dataCompleteness = this.round((this.metricsCalculated / totalPossibleMetrics) * 100, 2);
+    const rawCompleteness = (this.metricsCalculated / totalPossibleMetrics) * 100;
+    const dataCompleteness = this.round(Math.min(100, rawCompleteness), 2);
 
     const metadata: ExtractionMetadata = {
       username: profile.username,
@@ -1324,8 +1310,7 @@ export class ProfileExtractionService {
       metricsCalculated: this.metricsCalculated,
       metricsSkipped: this.metricsSkipped,
       skippedReasons: this.skippedReasons,
-      extractionVersion: ProfileExtractionService.VERSION,
-      lowConfidenceWarning: postCount > 0 && postCount < ProfileExtractionService.MIN_POSTS_FOR_CONFIDENCE
+      extractionVersion: ProfileExtractionService.VERSION
     };
 
     return metadata;
@@ -1378,7 +1363,6 @@ export class ProfileExtractionService {
       dataCompleteness: `${result.metadata.dataCompleteness}%`,
       metricsCalculated: result.metadata.metricsCalculated,
       metricsSkipped: result.metadata.metricsSkipped,
-      lowConfidenceWarning: result.metadata.lowConfidenceWarning,
       extractionVersion: result.metadata.extractionVersion
     });
 

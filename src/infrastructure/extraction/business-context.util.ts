@@ -168,12 +168,19 @@ function transformToBusinessContext(row: BusinessProfileRow): BusinessContext {
   // Derive pain points from context
   const painPoints = derivePainPoints(bc, icp);
 
+  // Extract ICP follower range with proper defaults
+  // Use nullish coalescing (??) to properly handle 0 values
+  const icpMinFollowers = bc.icp_min_followers ?? 0;
+  const icpMaxFollowers = bc.icp_max_followers ?? null;
+
   return {
     businessName: row.business_name || 'Unknown Business',
     industry: industry,
     targetAudience: bc.target_description || icp.target_audience || 'Not specified',
     valueProposition: bc.business_summary || icp.business_description || 'Not specified',
-    painPoints: painPoints
+    painPoints: painPoints,
+    icpMinFollowers: icpMinFollowers,
+    icpMaxFollowers: icpMaxFollowers
   };
 }
 

@@ -334,12 +334,11 @@ export interface ExtractionMetadata {
   processingTimeMs: number;
   samplePostCount: number;
   totalPostCount: number;
-  dataCompleteness: number; // percentage 0-100
+  dataCompleteness: number; // percentage 0-100 (capped)
   metricsCalculated: number;
   metricsSkipped: number;
   skippedReasons: SkippedMetricReason[];
   extractionVersion: string;
-  lowConfidenceWarning: boolean;
 }
 
 export interface SkippedMetricReason {
@@ -553,6 +552,10 @@ export interface BusinessContext {
   targetAudience: string;
   valueProposition: string;
   painPoints: string[];
+  /** ICP minimum follower count (defaults to 0 if not set) */
+  icpMinFollowers: number;
+  /** ICP maximum follower count (null means unlimited) */
+  icpMaxFollowers: number | null;
 }
 
 /**
@@ -562,9 +565,6 @@ export interface BusinessContext {
 export interface AILeadAnalysis {
   /** Lead qualification tier */
   leadTier: 'hot' | 'warm' | 'cold';
-
-  /** Confidence score for the analysis (0-100) */
-  confidence: number;
 
   /** Brief summary of the ICP profile */
   summary: string;
@@ -589,6 +589,14 @@ export interface AILeadAnalysis {
 
   /** Why this ICP is/isn't a good fit */
   fitReasoning: string;
+
+  /**
+   * Partnership Assessment Summary
+   * Quick, conversational summary for salespeople (4-6 sentences)
+   * Uses clear, direct language without excessive metrics
+   * Covers: content observation, ICP fit, alignment with value prop, signals, and recommendation
+   */
+  partnershipAssessment: string;
 }
 
 /**
