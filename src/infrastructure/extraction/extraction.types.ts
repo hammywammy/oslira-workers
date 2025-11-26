@@ -392,3 +392,220 @@ export interface ExtractionError {
 export type ExtractionOutput =
   | { success: true; data: ExtractionResult }
   | ExtractionError;
+
+// ============================================================================
+// CALCULATED METRICS OUTPUT (Phase 2 - Score Calculation)
+// ============================================================================
+
+/**
+ * Composite scores calculated from raw metrics (0-100 scale)
+ */
+export interface CompositeScores {
+  /** Engagement health score combining rate, consistency, and comment ratio */
+  engagementHealth: number;
+  /** Content sophistication based on hashtags, captions, locations, and format diversity */
+  contentSophistication: number;
+  /** Account maturity based on posting consistency, highlights, and profile completeness */
+  accountMaturity: number;
+  /** Fake follower risk score (higher = more suspicious) */
+  fakeFollowerRisk: number;
+  /** Overall opportunity score (weighted combination of other scores) */
+  opportunityScore: number;
+}
+
+/**
+ * Gap detection flags - areas where the ICP has room for improvement
+ */
+export interface GapDetection {
+  /** Low engagement rate (<1%) with decent followers (>1000) */
+  engagementGap: boolean;
+  /** Basic content strategy: low hashtags (<3 avg), short captions (<100 avg), no locations */
+  contentGap: boolean;
+  /** No external links despite business features */
+  conversionGap: boolean;
+  /** Not using Reels despite algorithm preference */
+  platformGap: boolean;
+}
+
+/**
+ * Flattened raw metrics for database storage
+ * Contains all 52 metrics from the extraction result in a flat structure
+ */
+export interface RawMetricsFlat {
+  // Profile metrics (16)
+  followersCount: number;
+  followsCount: number;
+  postsCount: number;
+  authorityRatio: number | null;
+  isBusinessAccount: boolean;
+  verified: boolean;
+  hasChannel: boolean;
+  businessCategoryName: string | null;
+  hasExternalLink: boolean;
+  externalUrl: string | null;
+  externalLinksCount: number;
+  highlightReelCount: number;
+  igtvVideoCount: number;
+  hasBio: boolean;
+  bioLength: number;
+  username: string;
+
+  // Engagement metrics (11)
+  totalLikes: number | null;
+  totalComments: number | null;
+  totalEngagement: number | null;
+  avgLikesPerPost: number | null;
+  avgCommentsPerPost: number | null;
+  avgEngagementPerPost: number | null;
+  engagementRate: number | null;
+  commentToLikeRatio: number | null;
+  engagementStdDev: number | null;
+  engagementConsistency: number | null;
+  engagementRatePerPost: number[];
+
+  // Frequency metrics (8)
+  oldestPostTimestamp: string | null;
+  newestPostTimestamp: string | null;
+  postingPeriodDays: number | null;
+  postingFrequency: number | null;
+  daysSinceLastPost: number | null;
+  avgDaysBetweenPosts: number | null;
+  timeBetweenPostsDays: number[];
+  postingConsistency: number | null;
+
+  // Format metrics (10)
+  reelsCount: number;
+  videoCount: number;
+  imageCount: number;
+  carouselCount: number;
+  reelsRate: number | null;
+  videoRate: number | null;
+  imageRate: number | null;
+  carouselRate: number | null;
+  formatDiversity: number;
+  dominantFormat: 'reels' | 'video' | 'image' | 'carousel' | 'mixed' | null;
+
+  // Content metrics (17)
+  totalHashtags: number;
+  avgHashtagsPerPost: number | null;
+  uniqueHashtagCount: number;
+  hashtagDiversity: number | null;
+  totalMentions: number;
+  avgMentionsPerPost: number | null;
+  uniqueMentionCount: number;
+  totalCaptionLength: number;
+  avgCaptionLength: number | null;
+  maxCaptionLength: number;
+  postsWithLocation: number;
+  locationTaggingRate: number | null;
+  postsWithAltText: number;
+  altTextRate: number | null;
+  postsWithCommentsDisabled: number;
+  commentsDisabledRate: number | null;
+  commentsEnabledRate: number | null;
+
+  // Video metrics (5)
+  videoPostCount: number;
+  totalVideoViews: number | null;
+  avgVideoViews: number | null;
+  videoViewRate: number | null;
+  videoViewToLikeRatio: number | null;
+
+  // Risk scores (2)
+  fakeFollowerRiskScore: number | null;
+  fakeFollowerWarnings: string[];
+
+  // Derived metrics (3)
+  contentDensity: number | null;
+  viralPostCount: number;
+  viralPostRate: number | null;
+}
+
+/**
+ * Complete calculated metrics for database storage (calculated_metrics JSONB column)
+ */
+export interface CalculatedMetrics {
+  /** Schema version for backwards compatibility */
+  version: '1.0';
+  /** ISO timestamp when calculation was performed */
+  calculatedAt: string;
+  /** Number of posts analyzed */
+  sampleSize: number;
+  /** Flattened raw metrics */
+  raw: RawMetricsFlat;
+  /** Composite scores (0-100 scale) */
+  scores: CompositeScores;
+  /** Gap detection flags */
+  gaps: GapDetection;
+}
+
+// ============================================================================
+// AI LEAD ANALYSIS OUTPUT (Phase 2 - GPT-5 Analysis)
+// ============================================================================
+
+/**
+ * Business context from business_profiles table
+ * Fetched and passed to AI for personalized analysis
+ */
+export interface BusinessContext {
+  businessName: string;
+  industry: string;
+  targetAudience: string;
+  valueProposition: string;
+  painPoints: string[];
+}
+
+/**
+ * AI-generated lead analysis result
+ * Output structure from GPT-5 analysis
+ */
+export interface AILeadAnalysis {
+  /** Lead qualification tier */
+  leadTier: 'hot' | 'warm' | 'cold';
+
+  /** Confidence score for the analysis (0-100) */
+  confidence: number;
+
+  /** Brief summary of the ICP profile */
+  summary: string;
+
+  /** Key strengths identified in the ICP */
+  strengths: string[];
+
+  /** Areas where the ICP could improve */
+  weaknesses: string[];
+
+  /** Specific opportunities to pitch the business services */
+  opportunities: string[];
+
+  /** Personalized outreach hooks based on ICP's content */
+  outreachHooks: string[];
+
+  /** Recommended next actions for the business */
+  recommendedActions: string[];
+
+  /** Risk factors to consider */
+  riskFactors: string[];
+
+  /** Why this ICP is/isn't a good fit */
+  fitReasoning: string;
+}
+
+/**
+ * Complete AI response for database storage (ai_response JSONB column)
+ */
+export interface AIResponsePayload {
+  /** Schema version for backwards compatibility */
+  version: '1.0';
+  /** ISO timestamp when analysis was performed */
+  analyzedAt: string;
+  /** AI model used for analysis */
+  model: string;
+  /** Token usage for cost tracking */
+  tokenUsage: {
+    input: number;
+    output: number;
+  };
+  /** The actual analysis result */
+  analysis: AILeadAnalysis;
+}

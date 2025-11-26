@@ -66,3 +66,45 @@ export type {
   ExtractionError,
   ExtractionOutput
 } from './extraction.types';
+
+// Types - Calculated Metrics (Phase 2)
+export type {
+  CompositeScores,
+  GapDetection,
+  RawMetricsFlat,
+  CalculatedMetrics
+} from './extraction.types';
+
+// Types - AI Analysis (Phase 2)
+export type {
+  BusinessContext,
+  AILeadAnalysis,
+  AIResponsePayload
+} from './extraction.types';
+
+// Services - Score Calculation (Phase 2)
+export {
+  calculateScores,
+  type ScoreCalculationResult
+} from './score-calculator.service';
+
+// Services - Output Transformation (Phase 2)
+export { transformToCalculatedMetrics } from './output-transformer.service';
+
+// Services - Lead Analysis (Phase 2)
+export {
+  analyzeLeadWithAI,
+  LEAD_ANALYSIS_MODEL,
+  type LeadAnalysisInput,
+  type LeadAnalysisResult,
+  type LeadAnalysisError,
+  type LeadAnalysisOutput
+} from './lead-analysis.service';
+
+// Utilities - Business Context (Phase 2)
+export {
+  fetchBusinessContext,
+  type FetchBusinessContextResult,
+  type FetchBusinessContextError,
+  type FetchBusinessContextOutput
+} from './business-context.util';
