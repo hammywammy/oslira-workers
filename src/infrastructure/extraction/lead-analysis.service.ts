@@ -400,16 +400,20 @@ function formatNumber(value: number | null | undefined): string {
 
 /**
  * Format percentage with smart decimal handling
- * - Values < 0.01%: show 4 decimals (e.g., "0.0043%")
- * - Values < 1%: show 3 decimals (e.g., "0.143%")
- * - Values >= 1%: show 2 decimals (e.g., "7.11%")
- * This prevents misleading "0.00%" display for very low engagement rates
+ * - Value = 0: show "0%" (clean display)
+ * - Values < 0.01%: show "<0.01%" (cleaner than 4 decimal places)
+ * - Values < 1%: show 2 decimals (e.g., "0.14%")
+ * - Values >= 1%: show 1 decimal (e.g., "7.1%")
+ * - Values >= 10%: show whole number (e.g., "12%")
+ * This prevents misleading "0.0000%" display
  */
 function formatPercentage(value: number | null | undefined): string {
   if (value === null || value === undefined) return 'N/A';
-  if (value < 0.01) return `${value.toFixed(4)}%`;
-  if (value < 1) return `${value.toFixed(3)}%`;
-  return `${value.toFixed(2)}%`;
+  if (value === 0) return '0%';
+  if (value < 0.01) return '<0.01%';
+  if (value < 1) return `${value.toFixed(2)}%`;
+  if (value < 10) return `${value.toFixed(1)}%`;
+  return `${Math.round(value)}%`;
 }
 
 /**

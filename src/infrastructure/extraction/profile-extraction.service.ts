@@ -18,10 +18,12 @@ import type {
   DerivedMetrics,
   TextDataForAI,
   HashtagFrequency,
+  MentionFrequency,
   ExtractionMetadata,
   SkippedMetricReason,
   ExtractionResult,
-  ExtractionOutput
+  ExtractionOutput,
+  ExternalLinkInfo
 } from './extraction.types';
 
 /**
@@ -392,33 +394,61 @@ export class ProfileExtractionService {
 
     logger.info('Calculating profile metrics...', logContext);
 
-    // Authority ratio: scaled 0-100 score representing follower/following balance
-    // High ratio = more followers than following = more authority
+    // Authority ratio calculation
+    // Raw: exact followers/following ratio for display/comparison
+    // Score: logarithmic 0-100 scale for normalized comparison
+    let authorityRatioRaw: number | null = null;
     let authorityRatio: number | null = null;
+
     if (profile.followsCount > 0) {
       const rawRatio = profile.followersCount / profile.followsCount;
-      // Scale to 0-100: divide by 100 so ratio of 10000:1 = 100 score
-      authorityRatio = this.round(Math.min(100, rawRatio / 100), 2);
-      this.metricsCalculated++;
-      logger.debug('authorityRatio calculated', { ...logContext, rawRatio, authorityRatio });
+      authorityRatioRaw = this.round(rawRatio, 2);
+
+      // Logarithmic scaling for better differentiation:
+      // log10(10) = 1 → 25, log10(100) = 2 → 50, log10(1000) = 3 → 75, log10(10000) = 4 → 100
+      authorityRatio = this.round(Math.min(100, Math.max(0, Math.log10(rawRatio) * 25)), 2);
+      this.metricsCalculated += 2;
+
+      logger.debug('authorityRatio calculated', {
+        ...logContext,
+        rawRatio: authorityRatioRaw,
+        logScore: authorityRatio
+      });
     } else if (profile.followersCount >= 100) {
       // Perfect score when follows=0 but has significant followers (rare, highly authoritative)
+      authorityRatioRaw = profile.followersCount; // Use followers as raw (since can't divide by 0)
       authorityRatio = 100;
-      this.metricsCalculated++;
-      logger.debug('authorityRatio: perfect score (follows=0 with followers)', { ...logContext, authorityRatio });
+      this.metricsCalculated += 2;
+      logger.debug('authorityRatio: perfect score (follows=0 with followers)', {
+        ...logContext,
+        authorityRatioRaw,
+        authorityRatio
+      });
     } else {
       logger.debug('authorityRatio skipped: followsCount is 0 with few followers', logContext);
-      this.metricsSkipped++;
+      this.metricsSkipped += 2;
     }
 
-    const externalLinksCount =
-      (profile.externalUrls?.length || 0) +
-      (profile.externalUrl ? 1 : 0);
+    // Extract full external URLs array with metadata
+    const externalUrls: ExternalLinkInfo[] = (profile.externalUrls || []).map(link => ({
+      url: link.url,
+      title: link.title || '',
+      linkType: (link as any).link_type || 'external'
+    }));
+
+    // Count unique URLs (deduplicate externalUrl if already in externalUrls)
+    const allUrls = new Set<string>();
+    if (profile.externalUrl) {
+      allUrls.add(profile.externalUrl);
+    }
+    externalUrls.forEach(link => allUrls.add(link.url));
+    const externalLinksCount = allUrls.size;
 
     const metrics: ProfileMetrics = {
       followersCount: profile.followersCount,
       followsCount: profile.followsCount,
       postsCount: profile.postsCount,
+      authorityRatioRaw,
       authorityRatio,
       isBusinessAccount: profile.isBusinessAccount || false,
       verified: profile.verified || false,
@@ -426,9 +456,10 @@ export class ProfileExtractionService {
       businessCategoryName: profile.businessCategoryName || null,
       hasExternalLink: profile.externalUrl !== null || externalLinksCount > 0,
       externalUrl: profile.externalUrl || null,
+      externalUrls,
       externalLinksCount,
-      highlightReelCount: profile.highlightReelCount || 0,
-      igtvVideoCount: profile.igtvVideoCount || 0,
+      highlightReelCount: profile.highlightReelCount ?? 0,
+      igtvVideoCount: profile.igtvVideoCount ?? 0,
       hasBio: !!profile.biography && profile.biography.length > 0,
       bioLength: profile.biography?.length || 0,
       username: profile.username
@@ -523,6 +554,7 @@ export class ProfileExtractionService {
     }
 
     // Per-post engagement rates for consistency calculation
+    // Note: Raw rates without time-weighting (used for general metrics)
     const engagementRatePerPost = posts.map(p => {
       const postEngagement = (p.likesCount || 0) + (p.commentsCount || 0);
       return profile.followersCount > 0
@@ -530,33 +562,63 @@ export class ProfileExtractionService {
         : 0;
     });
 
-    // Calculate statistics using Coefficient of Variation (CV) for scale-independent consistency
-    // CV = stdDev / mean - this normalizes the variation relative to the average engagement
-    // Without CV, high engagement profiles (e.g., 7% avg) would show low consistency
-    // even with proportionally similar variation to low engagement profiles (e.g., 0.004% avg)
-    const engagementStdDev = this.calculateStdDev(engagementRatePerPost);
+    // =========================================================================
+    // ENGAGEMENT CONSISTENCY CALCULATION
+    // Uses Coefficient of Variation (CV) with time-based weighting
+    //
+    // CV = stdDev / mean - normalizes variation relative to average engagement
+    // Time weighting accounts for recent posts still accumulating engagement
+    //
+    // Interpretation guide:
+    // - CV < 0.5: Very consistent engagement across posts
+    // - CV 0.5-1.0: Moderate variation (normal for most accounts)
+    // - CV 1.0-2.0: High variation (some posts perform much better)
+    // - CV > 2.0: Extreme variation (viral posts + flops)
+    //
+    // Consistency score = 100 / (1 + CV)
+    // - Score ~100: All posts perform similarly
+    // - Score ~50: Significant variation (CV = 1)
+    // - Score ~33: High variation (CV = 2)
+    // - Score ~25: Extreme variation (CV = 3)
+    // =========================================================================
+
+    // Calculate time-weighted engagement rates (normalize for post age)
+    const weightedEngagementRates = posts.map(p => {
+      const postEngagement = (p.likesCount || 0) + (p.commentsCount || 0);
+      const rawRate = profile.followersCount > 0
+        ? (postEngagement / profile.followersCount) * 100
+        : 0;
+
+      // Apply time-based multiplier to normalize for post age
+      const ageMultiplier = this.getPostAgeMultiplier(p.timestamp);
+      // Divide by multiplier to boost recent posts' apparent engagement
+      return ageMultiplier > 0 ? rawRate / ageMultiplier : rawRate;
+    });
+
+    const engagementStdDev = this.calculateStdDev(weightedEngagementRates);
 
     // Calculate mean engagement rate for CV calculation
-    const meanEngagementRate = engagementRatePerPost.length > 0
-      ? engagementRatePerPost.reduce((a, b) => a + b, 0) / engagementRatePerPost.length
+    const meanEngagementRate = weightedEngagementRates.length > 0
+      ? weightedEngagementRates.reduce((a, b) => a + b, 0) / weightedEngagementRates.length
       : null;
 
     let engagementConsistency: number | null = null;
-    if (engagementStdDev !== null && meanEngagementRate !== null && meanEngagementRate > 0) {
-      // Coefficient of Variation: stdDev / mean (dimensionless ratio)
-      const cv = engagementStdDev / meanEngagementRate;
+    let coefficientOfVariation: number | null = null;
+
+    if (engagementStdDev !== null && meanEngagementRate !== null && meanEngagementRate > 0.0001) {
+      // Protect against division by very small numbers (floating point precision)
+      coefficientOfVariation = this.round(engagementStdDev / meanEngagementRate, 4);
       // Scale: CV of 0 = 100 consistency, CV of 1 = 50 consistency, CV of 2 = 33 consistency
-      engagementConsistency = this.round(100 / (1 + cv), 2);
+      engagementConsistency = this.round(100 / (1 + coefficientOfVariation), 2);
     }
 
     logger.debug('Engagement consistency calculated', {
       ...logContext,
       engagementStdDev,
       meanEngagementRate,
-      coefficientOfVariation: meanEngagementRate && meanEngagementRate > 0 && engagementStdDev !== null
-        ? this.round(engagementStdDev / meanEngagementRate, 4)
-        : null,
-      engagementConsistency
+      coefficientOfVariation,
+      engagementConsistency,
+      timeWeightingApplied: true
     });
 
     this.metricsCalculated += 11;
@@ -776,8 +838,10 @@ export class ProfileExtractionService {
     });
 
     // Count by format
+    // Note: Reels are a SUBSET of Videos (all reels have type='Video' AND productType='clips')
     const reelsCount = posts.filter(p => p.productType === 'clips').length;
     const videoCount = posts.filter(p => p.type === 'Video').length;
+    const nonReelsVideoCount = videoCount - reelsCount; // Traditional videos (IGTV, regular videos)
     const imageCount = posts.filter(p => p.type === 'Image').length;
     const carouselCount = posts.filter(p => p.type === 'Sidecar').length;
 
@@ -785,9 +849,11 @@ export class ProfileExtractionService {
       ...logContext,
       reelsCount,
       videoCount,
+      nonReelsVideoCount,
       imageCount,
       carouselCount,
-      total: postCount
+      total: postCount,
+      note: 'reelsCount + nonReelsVideoCount = videoCount'
     });
 
     // Calculate rates
@@ -796,17 +862,23 @@ export class ProfileExtractionService {
     const imageRate = this.round((imageCount / postCount) * 100, 2);
     const carouselRate = this.round((carouselCount / postCount) * 100, 2);
 
-    // Format diversity (1-4 scale)
+    // Format diversity (0-4 scale)
+    // Counts distinct format types used:
+    // - Reels (short-form vertical videos)
+    // - Non-reels videos (traditional videos, IGTV)
+    // - Images
+    // - Carousels
     let formatDiversity = 0;
     if (reelsCount > 0) formatDiversity++;
-    if (videoCount > 0 && videoCount !== reelsCount) formatDiversity++; // Don't double count if all videos are reels
+    if (nonReelsVideoCount > 0) formatDiversity++; // Only count non-reels videos separately
     if (imageCount > 0) formatDiversity++;
     if (carouselCount > 0) formatDiversity++;
 
     // Determine dominant format
+    // Note: For dominantFormat, we use the more specific breakdown
     const formatCounts = [
       { format: 'reels' as const, count: reelsCount },
-      { format: 'video' as const, count: videoCount },
+      { format: 'video' as const, count: nonReelsVideoCount }, // Non-reels videos only
       { format: 'image' as const, count: imageCount },
       { format: 'carousel' as const, count: carouselCount }
     ].sort((a, b) => b.count - a.count);
@@ -823,11 +895,12 @@ export class ProfileExtractionService {
       }
     }
 
-    this.metricsCalculated += 10;
+    this.metricsCalculated += 11; // Added nonReelsVideoCount
 
     const metrics: FormatMetrics = {
       reelsCount,
       videoCount,
+      nonReelsVideoCount,
       imageCount,
       carouselCount,
       reelsRate,
@@ -854,6 +927,7 @@ export class ProfileExtractionService {
     return {
       reelsCount: 0,
       videoCount: 0,
+      nonReelsVideoCount: 0,
       imageCount: 0,
       carouselCount: 0,
       reelsRate: null,
@@ -890,8 +964,8 @@ export class ProfileExtractionService {
     const posts = profile.latestPosts;
     const postCount = posts.length;
 
-    // Hashtag analysis
-    const allHashtags = posts.flatMap(p => p.hashtags || []);
+    // Hashtag analysis - normalize to lowercase for proper deduplication
+    const allHashtags = posts.flatMap(p => (p.hashtags || []).map(h => h.toLowerCase().trim()));
     const totalHashtags = allHashtags.length;
     const uniqueHashtags = [...new Set(allHashtags)];
     const uniqueHashtagCount = uniqueHashtags.length;
@@ -900,12 +974,22 @@ export class ProfileExtractionService {
       ? this.round(uniqueHashtagCount / totalHashtags, 4)
       : null;
 
+    // Validation: uniqueHashtagCount should always be <= totalHashtags
+    if (uniqueHashtagCount > totalHashtags) {
+      logger.warn('Hashtag validation failed: uniqueHashtagCount > totalHashtags', {
+        ...logContext,
+        totalHashtags,
+        uniqueHashtagCount
+      });
+    }
+
     logger.debug('Hashtag analysis', {
       ...logContext,
       totalHashtags,
       uniqueHashtagCount,
       avgHashtagsPerPost,
-      hashtagDiversity
+      hashtagDiversity,
+      topHashtags: uniqueHashtags.slice(0, 5) // Show top 5 for debugging
     });
 
     // Mention analysis
@@ -915,16 +999,28 @@ export class ProfileExtractionService {
     const avgMentionsPerPost = this.round(totalMentions / postCount, 2);
 
     // Caption analysis
+    // Note: JavaScript .length counts UTF-16 code units (emojis = 2 chars)
+    // All posts included, even those with empty captions
     const captions = posts.map(p => p.caption || '');
     const captionLengths = captions.map(c => c.length);
     const totalCaptionLength = captionLengths.reduce((a, b) => a + b, 0);
     const avgCaptionLength = this.round(totalCaptionLength / postCount, 2);
     const maxCaptionLength = Math.max(...captionLengths);
 
+    // Additional metrics for posts with captions only
+    const postsWithCaptions = captions.filter(c => c.length > 0).length;
+    const avgCaptionLengthNonEmpty = postsWithCaptions > 0
+      ? this.round(totalCaptionLength / postsWithCaptions, 2)
+      : null;
+
     logger.debug('Caption analysis', {
       ...logContext,
+      totalPosts: postCount,
+      postsWithCaptions,
       avgCaptionLength,
-      maxCaptionLength
+      avgCaptionLengthNonEmpty,
+      maxCaptionLength,
+      note: 'avgCaptionLength includes empty captions; avgCaptionLengthNonEmpty excludes them'
     });
 
     // Location analysis
@@ -1087,6 +1183,34 @@ export class ProfileExtractionService {
   // GROUP 4: RISK SCORES & DERIVED METRICS
   // ===========================================================================
 
+  /**
+   * Calculate Fake Follower Risk Score (0-100)
+   *
+   * IMPORTANT DISCLAIMER:
+   * This is a HEURISTIC-BASED indicator, NOT a definitive measure of fake followers.
+   * It identifies patterns commonly associated with purchased followers or bot activity,
+   * but legitimate accounts can trigger these signals due to various factors:
+   * - New accounts still building engagement
+   * - Niche content with naturally lower engagement
+   * - Celebrity/brand accounts with passive followers
+   * - Recent viral growth that engagement hasn't caught up with
+   *
+   * Use this score as ONE data point among many, not as definitive proof.
+   * High scores warrant manual review, not automatic rejection.
+   *
+   * Interpretation Guide:
+   * - 0-20: Low risk - Few or no warning signs
+   * - 21-40: Moderate risk - Some patterns present, worth noting
+   * - 41-60: Elevated risk - Multiple warning signs, recommend manual review
+   * - 61-80: High risk - Strong indicators of inauthenticity
+   * - 81-100: Very high risk - Multiple severe indicators
+   *
+   * Factors Evaluated:
+   * 1. Engagement Rate vs Account Size (0-35 points)
+   * 2. Authority Ratio / Follow Ratio (0-25 points)
+   * 3. Content-to-Follower Ratio (0-20 points)
+   * 4. Engagement Consistency Anomalies (0-20 points)
+   */
   private calculateRiskScores(
     profile: ApifyFullProfile,
     engagementMetrics: EngagementMetrics,
@@ -1097,58 +1221,138 @@ export class ProfileExtractionService {
     logger.info('Calculating risk scores...', logContext);
 
     const warnings: string[] = [];
+    let fakeFollowerRiskScore = 0;
 
-    // Fake Follower Risk Score (0-100)
-    let fakeFollowerRiskScore: number | null = 0;
+    // =========================================================================
+    // FACTOR 1: Engagement Rate Analysis (0-35 points)
+    // Low engagement relative to followers is a key indicator of inauthentic followers.
+    // Uses tiered thresholds based on account size (larger accounts naturally have lower ER).
+    // =========================================================================
+    if (engagementMetrics.engagementRate !== null) {
+      const er = engagementMetrics.engagementRate;
+      const followers = profile.followersCount;
 
-    // Factor 1: Very low engagement rate (<0.5%)
-    if (engagementMetrics.engagementRate !== null && engagementMetrics.engagementRate < 0.5) {
-      fakeFollowerRiskScore += 40;
-      warnings.push('Very low engagement rate (<0.5%)');
-      logger.debug('Risk factor: Low engagement rate', {
+      // Tiered thresholds: larger accounts naturally have lower engagement rates
+      // Industry benchmarks: micro (<10k): 3-6%, small (10-50k): 2-4%, medium (50-500k): 1-2%, large (>500k): 0.5-1%
+      let expectedMinER: number;
+      if (followers < 10000) {
+        expectedMinER = 1.5;  // Micro accounts should have at least 1.5%
+      } else if (followers < 50000) {
+        expectedMinER = 1.0;  // Small accounts: at least 1%
+      } else if (followers < 500000) {
+        expectedMinER = 0.5;  // Medium accounts: at least 0.5%
+      } else {
+        expectedMinER = 0.2;  // Large accounts: at least 0.2%
+      }
+
+      if (er < expectedMinER * 0.25) {
+        // Critically low engagement (< 25% of expected)
+        fakeFollowerRiskScore += 35;
+        warnings.push(`Critically low engagement rate (${er.toFixed(2)}% vs expected >${expectedMinER}%)`);
+      } else if (er < expectedMinER * 0.5) {
+        // Very low engagement (25-50% of expected)
+        fakeFollowerRiskScore += 25;
+        warnings.push(`Very low engagement rate (${er.toFixed(2)}% vs expected >${expectedMinER}%)`);
+      } else if (er < expectedMinER) {
+        // Below expected engagement
+        fakeFollowerRiskScore += 15;
+        warnings.push(`Below-average engagement rate (${er.toFixed(2)}% vs expected >${expectedMinER}%)`);
+      }
+
+      logger.debug('Risk factor: Engagement analysis', {
         ...logContext,
-        engagementRate: engagementMetrics.engagementRate,
-        riskAdded: 40
+        engagementRate: er,
+        expectedMinER,
+        followers,
+        riskAdded: fakeFollowerRiskScore
       });
     }
 
-    // Factor 2: High following-to-follower ratio (>0.8)
-    const followRatio = profile.followersCount > 0
-      ? profile.followsCount / profile.followersCount
-      : 0;
-    if (followRatio > 0.8) {
-      fakeFollowerRiskScore += 30;
-      warnings.push('High following-to-follower ratio (>0.8)');
-      logger.debug('Risk factor: High follow ratio', {
-        ...logContext,
-        followRatio,
-        riskAdded: 30
-      });
-    }
+    // =========================================================================
+    // FACTOR 2: Authority Ratio Analysis (0-25 points)
+    // Following more people than followers can indicate follow/unfollow schemes.
+    // Note: This overlaps with factor 3 in the old code, now consolidated.
+    // =========================================================================
+    if (profile.followsCount > 0 && profile.followersCount > 0) {
+      const authorityRatio = profile.followersCount / profile.followsCount;
 
-    // Factor 3: Low authority ratio (<1.0)
-    const authorityRatio = profile.followsCount > 0
-      ? profile.followersCount / profile.followsCount
-      : null;
-    if (authorityRatio !== null && authorityRatio < 1.0) {
-      fakeFollowerRiskScore += 20;
-      warnings.push('Low authority ratio (<1.0)');
-      logger.debug('Risk factor: Low authority ratio', {
+      if (authorityRatio < 0.3) {
+        // Extremely low authority - follows 3x+ more than followers
+        fakeFollowerRiskScore += 25;
+        warnings.push(`Very low authority ratio (${authorityRatio.toFixed(2)}x) - follows far exceed followers`);
+      } else if (authorityRatio < 0.7) {
+        // Low authority - follows significantly more than followers
+        fakeFollowerRiskScore += 15;
+        warnings.push(`Low authority ratio (${authorityRatio.toFixed(2)}x) - follows exceed followers`);
+      } else if (authorityRatio < 1.0) {
+        // Borderline - follows slightly more than followers
+        fakeFollowerRiskScore += 5;
+        warnings.push(`Borderline authority ratio (${authorityRatio.toFixed(2)}x)`);
+      }
+
+      logger.debug('Risk factor: Authority ratio', {
         ...logContext,
         authorityRatio,
-        riskAdded: 20
+        followersCount: profile.followersCount,
+        followsCount: profile.followsCount
       });
     }
 
-    // Factor 4: High followers but low post count
-    if (profile.followersCount > 10000 && profile.postsCount < 50) {
-      fakeFollowerRiskScore += 10;
-      warnings.push('High followers (>10k) with low post count (<50)');
-      logger.debug('Risk factor: High followers/low posts', {
+    // =========================================================================
+    // FACTOR 3: Content-to-Follower Ratio (0-20 points)
+    // High followers with very few posts can indicate purchased followers.
+    // Legitimate accounts typically grow followers through content.
+    // =========================================================================
+    if (profile.followersCount > 1000 && profile.postsCount > 0) {
+      const followersPerPost = profile.followersCount / profile.postsCount;
+
+      // Expected: roughly 50-500 followers per post for organic growth
+      // Very high ratios indicate growth that outpaces content creation
+      if (followersPerPost > 5000 && profile.followersCount > 50000) {
+        fakeFollowerRiskScore += 20;
+        warnings.push(`Unrealistic followers/post ratio (${Math.round(followersPerPost)}:1) - growth outpaces content`);
+      } else if (followersPerPost > 2000 && profile.followersCount > 20000) {
+        fakeFollowerRiskScore += 12;
+        warnings.push(`High followers/post ratio (${Math.round(followersPerPost)}:1)`);
+      } else if (followersPerPost > 1000 && profile.followersCount > 10000) {
+        fakeFollowerRiskScore += 5;
+        warnings.push(`Elevated followers/post ratio (${Math.round(followersPerPost)}:1)`);
+      }
+
+      logger.debug('Risk factor: Content-to-follower ratio', {
         ...logContext,
+        followersPerPost,
         followersCount: profile.followersCount,
-        postsCount: profile.postsCount,
-        riskAdded: 10
+        postsCount: profile.postsCount
+      });
+    }
+
+    // =========================================================================
+    // FACTOR 4: Engagement Consistency Analysis (0-20 points)
+    // Suspiciously consistent OR wildly inconsistent engagement can indicate bots.
+    // Bot engagement often shows unnaturally even distribution.
+    // =========================================================================
+    if (engagementMetrics.engagementConsistency !== null && engagementMetrics.engagementRate !== null) {
+      const consistency = engagementMetrics.engagementConsistency;
+      const er = engagementMetrics.engagementRate;
+
+      // Suspiciously HIGH consistency with low engagement = potential bot engagement
+      // (Bots tend to deliver consistent numbers, organic engagement varies naturally)
+      if (consistency > 90 && er < 1.0) {
+        fakeFollowerRiskScore += 15;
+        warnings.push(`Suspiciously consistent engagement (${consistency.toFixed(0)}%) with low rate`);
+      }
+
+      // Very LOW consistency might indicate engagement manipulation on specific posts
+      if (consistency < 20) {
+        fakeFollowerRiskScore += 10;
+        warnings.push(`Highly inconsistent engagement (${consistency.toFixed(0)}%) - possible selective boosting`);
+      }
+
+      logger.debug('Risk factor: Engagement consistency', {
+        ...logContext,
+        engagementConsistency: consistency,
+        engagementRate: er
       });
     }
 
@@ -1166,7 +1370,11 @@ export class ProfileExtractionService {
     logger.info('Risk scores calculated', {
       ...logContext,
       fakeFollowerRiskScore,
-      warningsCount: warnings.length
+      warningsCount: warnings.length,
+      interpretation: fakeFollowerRiskScore <= 20 ? 'LOW_RISK' :
+                       fakeFollowerRiskScore <= 40 ? 'MODERATE_RISK' :
+                       fakeFollowerRiskScore <= 60 ? 'ELEVATED_RISK' :
+                       fakeFollowerRiskScore <= 80 ? 'HIGH_RISK' : 'VERY_HIGH_RISK'
     });
 
     return metrics;
@@ -1189,42 +1397,48 @@ export class ProfileExtractionService {
     }
 
     // Viral Post Analysis
-    let viralPostCount = 0;
+    // Note: Based on small sample (typically 12 posts), NOT statistically significant
+    let recentViralPostCount = 0;
+    let recentPostsSampled = 0;
     let viralPostRate: number | null = null;
 
     if (flags.hasPosts && engagementMetrics.avgEngagementPerPost !== null) {
       const viralThreshold = engagementMetrics.avgEngagementPerPost * 2;
       const posts = profile.latestPosts;
+      recentPostsSampled = posts.length;
 
-      viralPostCount = posts.filter(p => {
+      recentViralPostCount = posts.filter(p => {
         const engagement = (p.likesCount || 0) + (p.commentsCount || 0);
         return engagement >= viralThreshold;
       }).length;
 
-      viralPostRate = this.round((viralPostCount / posts.length) * 100, 2);
+      // Keep viralPostRate for backwards compatibility (deprecated)
+      viralPostRate = this.round((recentViralPostCount / posts.length) * 100, 2);
 
-      logger.debug('Viral post analysis', {
+      logger.debug('Viral post analysis (sample-based)', {
         ...logContext,
         viralThreshold,
-        viralPostCount,
-        viralPostRate
+        recentViralPostCount,
+        recentPostsSampled,
+        note: `${recentViralPostCount} of ${recentPostsSampled} recent posts are viral - NOT representative of full history`
       });
     }
 
-    this.metricsCalculated += 3;
+    this.metricsCalculated += 4;
 
     const metrics: DerivedMetrics = {
       contentDensity,
-      viralPostCount,
-      viralPostRate,
+      recentViralPostCount,
+      recentPostsSampled,
+      viralPostRate, // deprecated, kept for backwards compatibility
       _reason: null
     };
 
     logger.info('Derived metrics calculated', {
       ...logContext,
       contentDensity,
-      viralPostCount,
-      viralPostRate
+      recentViralPostCount,
+      recentPostsSampled
     });
 
     return metrics;
@@ -1270,9 +1484,19 @@ export class ProfileExtractionService {
       .sort((a, b) => b.count - a.count)
       .slice(0, 10);
 
-    // All mentions
-    const allMentions = posts.flatMap(p => p.mentions || []);
+    // All mentions - normalize to lowercase for consistent deduplication
+    const allMentions = posts.flatMap(p => (p.mentions || []).map(m => m.toLowerCase().trim()));
     const uniqueMentions = [...new Set(allMentions)];
+
+    // Top mentions frequency (similar to hashtagFrequency)
+    const mentionCounts = new Map<string, number>();
+    allMentions.forEach(mention => {
+      mentionCounts.set(mention, (mentionCounts.get(mention) || 0) + 1);
+    });
+    const topMentions: MentionFrequency[] = Array.from(mentionCounts.entries())
+      .map(([username, count]) => ({ username, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5); // Top 5 mentions
 
     // External link titles
     const externalLinkTitles = (profile.externalUrls || []).map(l => l.title);
@@ -1292,6 +1516,7 @@ export class ProfileExtractionService {
       hashtagFrequency,
       allMentions,
       uniqueMentions,
+      topMentions,
       externalLinkTitles,
       locationNames
     };
@@ -1312,7 +1537,19 @@ export class ProfileExtractionService {
   // ===========================================================================
 
   private buildMetadata(profile: ApifyFullProfile): ExtractionMetadata {
-    const processingTimeMs = Date.now() - this.startTime;
+    const rawProcessingTime = Date.now() - this.startTime;
+    // Ensure at least 1ms is reported (avoids confusing 0 values if extraction is very fast)
+    const processingTimeMs = Math.max(1, rawProcessingTime);
+
+    // Validation: log warning if processing time seems suspicious
+    if (rawProcessingTime < 1) {
+      logger.warn('[ProfileExtraction] Processing time suspiciously low', {
+        rawProcessingTime,
+        startTime: this.startTime,
+        endTime: Date.now()
+      });
+    }
+
     const postCount = profile.latestPosts?.length || 0;
 
     // Calculate data completeness - capped at 100% to prevent display issues
@@ -1337,7 +1574,8 @@ export class ProfileExtractionService {
   }
 
   private buildErrorResult(validation: ValidationResult, rawProfile: unknown): ExtractionOutput {
-    const processingTimeMs = Date.now() - this.startTime;
+    const rawProcessingTime = Date.now() - this.startTime;
+    const processingTimeMs = Math.max(1, rawProcessingTime);
     const username = (rawProfile as any)?.username || 'unknown';
 
     const primaryError = validation.errors[0] || {
@@ -1370,119 +1608,167 @@ export class ProfileExtractionService {
   private logExtractionSummary(result: ExtractionResult): void {
     const logContext = { service: 'ProfileExtraction' };
 
-    logger.info('='.repeat(80), logContext);
-    logger.info('EXTRACTION COMPLETE - SUMMARY', logContext);
-    logger.info('='.repeat(80), logContext);
+    // =========================================================================
+    // INFO LEVEL: Compact category summary for production monitoring
+    // =========================================================================
 
-    logger.info('METADATA', {
+    // Calculate metric counts per category (estimated based on data availability)
+    const categoryCounts = {
+      profile: 17,  // Fixed profile metrics count
+      engagement: result.engagementMetrics._reason ? 0 : 11,
+      frequency: result.frequencyMetrics._reason ? 0 : 8,
+      format: result.formatMetrics._reason ? 0 : 11,
+      content: result.contentMetrics._reason ? 0 : 14,
+      video: result.videoMetrics._reason ? 0 : 5,
+      risk: 2,
+      derived: 4,
+      text: 8
+    };
+
+    // Build compact category summary string
+    const categoryParts = Object.entries(categoryCounts)
+      .filter(([_, count]) => count > 0)
+      .map(([name, count]) => `${name}:${count}`);
+
+    logger.info('EXTRACTION COMPLETE', {
       ...logContext,
       username: result.metadata.username,
       processingTimeMs: result.metadata.processingTimeMs,
-      samplePostCount: result.metadata.samplePostCount,
-      totalPostCount: result.metadata.totalPostCount,
-      dataCompleteness: `${result.metadata.dataCompleteness}%`,
-      metricsCalculated: result.metadata.metricsCalculated,
-      metricsSkipped: result.metadata.metricsSkipped,
-      extractionVersion: result.metadata.extractionVersion
+      samplePosts: result.metadata.samplePostCount,
+      totalPosts: result.metadata.totalPostCount,
+      completeness: `${result.metadata.dataCompleteness}%`,
+      metrics: `${result.metadata.metricsCalculated} calculated, ${result.metadata.metricsSkipped} skipped`,
+      breakdown: categoryParts.join(' | '),
+      version: result.metadata.extractionVersion
     });
 
-    logger.info('VALIDATION FLAGS', {
+    // Log warnings at WARN level (always visible)
+    if (result.validation.warnings.length > 0) {
+      logger.warn('Extraction warnings', {
+        ...logContext,
+        username: result.metadata.username,
+        warnings: result.validation.warnings.map(w => w.message)
+      });
+    }
+
+    // Log skipped metrics at INFO level (important for debugging data issues)
+    if (this.skippedReasons.length > 0) {
+      logger.info('Metrics skipped due to missing data', {
+        ...logContext,
+        username: result.metadata.username,
+        skippedGroups: this.skippedReasons.map(r => `${r.metricGroup}: ${r.reason}`)
+      });
+    }
+
+    // =========================================================================
+    // DEBUG LEVEL: Detailed per-group breakdown for development/debugging
+    // =========================================================================
+
+    logger.debug('=== DETAILED EXTRACTION RESULTS ===', logContext);
+
+    logger.debug('VALIDATION FLAGS', {
       ...logContext,
       ...result.validation.flags
     });
 
-    if (result.validation.warnings.length > 0) {
-      logger.warn('VALIDATION WARNINGS', {
-        ...logContext,
-        warnings: result.validation.warnings
-      });
-    }
-
-    logger.info('PROFILE METRICS (Group 1)', {
+    logger.debug('PROFILE METRICS', {
       ...logContext,
       followersCount: result.profileMetrics.followersCount,
       followsCount: result.profileMetrics.followsCount,
       postsCount: result.profileMetrics.postsCount,
+      authorityRatioRaw: result.profileMetrics.authorityRatioRaw,
       authorityRatio: result.profileMetrics.authorityRatio,
       verified: result.profileMetrics.verified,
-      isBusinessAccount: result.profileMetrics.isBusinessAccount
+      isBusinessAccount: result.profileMetrics.isBusinessAccount,
+      hasExternalLink: result.profileMetrics.hasExternalLink,
+      externalLinksCount: result.profileMetrics.externalLinksCount,
+      highlightReelCount: result.profileMetrics.highlightReelCount,
+      hasBio: result.profileMetrics.hasBio,
+      bioLength: result.profileMetrics.bioLength
     });
 
-    logger.info('ENGAGEMENT METRICS (Group 2a)', {
+    logger.debug('ENGAGEMENT METRICS', {
       ...logContext,
-      engagementRate: result.engagementMetrics.engagementRate,
+      totalLikes: result.engagementMetrics.totalLikes,
+      totalComments: result.engagementMetrics.totalComments,
       avgLikesPerPost: result.engagementMetrics.avgLikesPerPost,
       avgCommentsPerPost: result.engagementMetrics.avgCommentsPerPost,
+      engagementRate: result.engagementMetrics.engagementRate,
+      commentToLikeRatio: result.engagementMetrics.commentToLikeRatio,
       engagementConsistency: result.engagementMetrics.engagementConsistency,
       _reason: result.engagementMetrics._reason
     });
 
-    logger.info('FREQUENCY METRICS (Group 2b)', {
+    logger.debug('FREQUENCY METRICS', {
       ...logContext,
       postingFrequency: result.frequencyMetrics.postingFrequency,
       daysSinceLastPost: result.frequencyMetrics.daysSinceLastPost,
       postingConsistency: result.frequencyMetrics.postingConsistency,
+      avgDaysBetweenPosts: result.frequencyMetrics.avgDaysBetweenPosts,
+      postingPeriodDays: result.frequencyMetrics.postingPeriodDays,
       _reason: result.frequencyMetrics._reason
     });
 
-    logger.info('FORMAT METRICS (Group 2c)', {
+    logger.debug('FORMAT METRICS', {
       ...logContext,
+      reelsCount: result.formatMetrics.reelsCount,
+      videoCount: result.formatMetrics.videoCount,
+      nonReelsVideoCount: result.formatMetrics.nonReelsVideoCount,
+      imageCount: result.formatMetrics.imageCount,
+      carouselCount: result.formatMetrics.carouselCount,
       formatDiversity: result.formatMetrics.formatDiversity,
       dominantFormat: result.formatMetrics.dominantFormat,
       reelsRate: result.formatMetrics.reelsRate,
-      imageRate: result.formatMetrics.imageRate,
       _reason: result.formatMetrics._reason
     });
 
-    logger.info('CONTENT METRICS (Group 2d)', {
+    logger.debug('CONTENT METRICS', {
       ...logContext,
       avgHashtagsPerPost: result.contentMetrics.avgHashtagsPerPost,
+      uniqueHashtagCount: result.contentMetrics.uniqueHashtagCount,
+      hashtagDiversity: result.contentMetrics.hashtagDiversity,
       avgCaptionLength: result.contentMetrics.avgCaptionLength,
       locationTaggingRate: result.contentMetrics.locationTaggingRate,
+      altTextRate: result.contentMetrics.altTextRate,
       commentsEnabledRate: result.contentMetrics.commentsEnabledRate,
       _reason: result.contentMetrics._reason
     });
 
-    logger.info('VIDEO METRICS (Group 3)', {
+    logger.debug('VIDEO METRICS', {
       ...logContext,
       videoPostCount: result.videoMetrics.videoPostCount,
+      totalVideoViews: result.videoMetrics.totalVideoViews,
       avgVideoViews: result.videoMetrics.avgVideoViews,
       videoViewsPerFollower: result.videoMetrics.videoViewsPerFollower,
+      videoViewToLikeRatio: result.videoMetrics.videoViewToLikeRatio,
       _reason: result.videoMetrics._reason
     });
 
-    logger.info('RISK SCORES (Group 4)', {
+    logger.debug('RISK SCORES', {
       ...logContext,
       fakeFollowerRiskScore: result.riskScores.fakeFollowerRiskScore,
       warnings: result.riskScores.fakeFollowerWarnings
     });
 
-    logger.info('DERIVED METRICS (Group 4)', {
+    logger.debug('DERIVED METRICS', {
       ...logContext,
       contentDensity: result.derivedMetrics.contentDensity,
-      viralPostCount: result.derivedMetrics.viralPostCount,
+      recentViralPostCount: result.derivedMetrics.recentViralPostCount,
+      recentPostsSampled: result.derivedMetrics.recentPostsSampled,
       viralPostRate: result.derivedMetrics.viralPostRate
     });
 
-    logger.info('TEXT DATA FOR AI (Group 5)', {
+    logger.debug('TEXT DATA FOR AI', {
       ...logContext,
       bioLength: result.textDataForAI.biography.length,
       captionCount: result.textDataForAI.recentCaptions.length,
       uniqueHashtagCount: result.textDataForAI.uniqueHashtags.length,
       uniqueMentionCount: result.textDataForAI.uniqueMentions.length,
-      topHashtags: result.textDataForAI.hashtagFrequency.slice(0, 5)
+      topHashtags: result.textDataForAI.hashtagFrequency.slice(0, 5),
+      topMentions: result.textDataForAI.topMentions.slice(0, 3)
     });
 
-    if (this.skippedReasons.length > 0) {
-      logger.info('SKIPPED METRICS', {
-        ...logContext,
-        reasons: this.skippedReasons
-      });
-    }
-
-    logger.info('='.repeat(80), logContext);
-    logger.info(`EXTRACTION FINISHED: ${result.metadata.metricsCalculated} metrics calculated, ${result.metadata.metricsSkipped} skipped`, logContext);
-    logger.info('='.repeat(80), logContext);
+    logger.debug('=== END DETAILED RESULTS ===', logContext);
   }
 
   // ===========================================================================
@@ -1550,13 +1836,46 @@ export class ProfileExtractionService {
    * - Leading/trailing whitespace
    * - Trailing punctuation (commas, periods, exclamation marks, etc.)
    * - Leading # symbol (if present, will be added back in display)
+   * - Normalizes to lowercase for consistent deduplication
    */
   private cleanHashtag(tag: string): string {
     return tag
       .trim()
-      .replace(/^#+/, '')                    // Remove leading # symbols
-      .replace(/[,\.!?\)]+$/, '')            // Remove trailing punctuation
+      .toLowerCase()                          // Normalize to lowercase
+      .replace(/^#+/, '')                     // Remove leading # symbols
+      .replace(/[,\.!?\)]+$/, '')             // Remove trailing punctuation
       .trim();
+  }
+
+  /**
+   * Get time-based multiplier for post age.
+   * Used to normalize engagement for recent posts that are still accumulating engagement.
+   *
+   * Multipliers:
+   * - < 24 hours: 0.5 (engagement still growing rapidly, weight less)
+   * - 1-7 days: 0.8 (some growth still happening)
+   * - > 7 days: 1.0 (engagement stabilized)
+   */
+  private getPostAgeMultiplier(timestamp: string): number {
+    try {
+      const postDate = new Date(timestamp);
+      const now = Date.now();
+      const ageHours = (now - postDate.getTime()) / (1000 * 60 * 60);
+
+      if (ageHours < 24) {
+        // Very recent - engagement still growing rapidly
+        return 0.5;
+      } else if (ageHours < 168) { // < 1 week
+        // Recent - some growth still happening
+        return 0.8;
+      } else {
+        // Old enough - engagement stabilized
+        return 1.0;
+      }
+    } catch {
+      // If timestamp parsing fails, return neutral multiplier
+      return 1.0;
+    }
   }
 }
 

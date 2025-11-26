@@ -124,7 +124,7 @@ export interface ScraperConfig {
 export const ANALYSIS_CONFIG: Record<AnalysisType, AnalysisTypeConfig> = {
   light: {
     credit_cost: 1,
-    posts_limit: 6,
+    posts_limit: 12,   // Use all 12 posts from Apify for better metric accuracy
     ai_model: 'gpt-5-nano',
     ai_max_tokens: 800,
     timing: {
@@ -140,7 +140,7 @@ export const ANALYSIS_CONFIG: Record<AnalysisType, AnalysisTypeConfig> = {
   },
   deep: {
     credit_cost: 1,    // Uses deep_analyses credits, same cost per credit
-    posts_limit: 6,    // Same posts for now, can be expanded
+    posts_limit: 12,   // Use all 12 posts from Apify for better metric accuracy
     ai_model: 'gpt-5',
     ai_max_tokens: 2000, // More tokens for deeper analysis with GPT-5
     timing: {
@@ -211,7 +211,7 @@ export const SCRAPING_PRICING: Record<AnalysisType, ScrapingPricing> = {
     vendor: 'apify'
   },
   deep: {
-    fixed_cost_per_run: 0.003,  // Same scraping cost (same posts_limit for now)
+    fixed_cost_per_run: 0.003,  // Same scraping cost (same posts_limit)
     vendor: 'apify'
   }
 };

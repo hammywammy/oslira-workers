@@ -169,12 +169,40 @@ export interface ValidationWarning {
 // ============================================================================
 
 /**
+ * External link with metadata from Apify
+ */
+export interface ExternalLinkInfo {
+  url: string;
+  title: string;
+  linkType: string;
+}
+
+/**
  * Profile-level metrics (Group 1 - Always calculable)
  */
 export interface ProfileMetrics {
   followersCount: number;
   followsCount: number;
   postsCount: number;
+  /**
+   * Raw authority ratio: followers / following
+   * No cap, exact calculation for comparison/display.
+   * Examples: 198,486 (highly authoritative), 10 (moderate), 0.5 (low)
+   */
+  authorityRatioRaw: number | null;
+  /**
+   * Normalized authority score (0-100) using logarithmic scaling.
+   * Better differentiation between highly authoritative accounts.
+   *
+   * Formula: Math.min(100, Math.log10(rawRatio) * 25)
+   * Examples:
+   * - rawRatio = 198,486 → score = 100 (capped)
+   * - rawRatio = 10,000 → score = 100
+   * - rawRatio = 1,000 → score = 75
+   * - rawRatio = 100 → score = 50
+   * - rawRatio = 10 → score = 25
+   * - rawRatio = 1 → score = 0
+   */
   authorityRatio: number | null;
   isBusinessAccount: boolean;
   verified: boolean;
@@ -182,6 +210,8 @@ export interface ProfileMetrics {
   businessCategoryName: string | null;
   hasExternalLink: boolean;
   externalUrl: string | null;
+  /** Full array of external links with metadata */
+  externalUrls: ExternalLinkInfo[];
   externalLinksCount: number;
   highlightReelCount: number;
   igtvVideoCount: number;
@@ -225,17 +255,33 @@ export interface FrequencyMetrics {
 
 /**
  * Content format metrics (Group 2 - Requires posts)
+ *
+ * Format hierarchy:
+ * - Reels: Videos with productType='clips' (short-form vertical videos)
+ * - Videos: ALL video content (type='Video'), INCLUDES reels
+ * - Non-Reels Videos: Traditional videos that are NOT reels (IGTV, regular videos)
+ * - Images: Static single images (type='Image')
+ * - Carousels: Multi-image/video posts (type='Sidecar')
+ *
+ * Note: reelsCount + nonReelsVideoCount = videoCount
  */
 export interface FormatMetrics {
+  /** Reels only (productType='clips') - short-form vertical videos */
   reelsCount: number;
+  /** ALL videos including reels (type='Video') */
   videoCount: number;
+  /** Non-reels videos only (traditional videos, IGTV) */
+  nonReelsVideoCount: number;
+  /** Static single images */
   imageCount: number;
+  /** Multi-image/video carousel posts */
   carouselCount: number;
   reelsRate: number | null;
   videoRate: number | null;
   imageRate: number | null;
   carouselRate: number | null;
-  formatDiversity: number; // 1-4 scale
+  /** Format diversity score (0-4): how many different formats are used */
+  formatDiversity: number;
   dominantFormat: 'reels' | 'video' | 'image' | 'carousel' | 'mixed' | null;
   _reason: string | null;
 }
@@ -280,7 +326,15 @@ export interface VideoMetrics {
   /**
    * Average video views as a percentage of follower count.
    * Can exceed 100% for viral content (non-followers viewing).
-   * Renamed from "videoViewRate" for clarity since it's not a true rate.
+   *
+   * Interpretation guide:
+   * - < 50%: Low reach (videos don't reach most followers)
+   * - 50-100%: Normal reach (most followers see videos)
+   * - 100-300%: Good viral reach (content reaching beyond followers)
+   * - > 300%: Exceptional viral reach (significant non-follower views)
+   *
+   * Note: This is a reach multiplier, NOT a per-follower view count.
+   * A value of 323.6% means average video views are 3.24x the follower count.
    */
   videoViewsPerFollower: number | null;
   videoViewToLikeRatio: number | null;
@@ -301,7 +355,21 @@ export interface RiskScores {
  */
 export interface DerivedMetrics {
   contentDensity: number | null;
-  viralPostCount: number; // posts with 2x+ average engagement
+  /**
+   * Number of recent posts with 2x+ average engagement.
+   * Based on the scraped sample (typically 12 posts), NOT full account history.
+   *
+   * Example: "1 of 12 recent posts viral" - NOT representative of overall viral rate.
+   * Use this as a directional indicator, not a statistically significant metric.
+   */
+  recentViralPostCount: number;
+  /** Number of posts sampled for viral detection */
+  recentPostsSampled: number;
+  /**
+   * @deprecated Renamed to make sample size clearer.
+   * Percentage is misleading with small sample sizes.
+   * Use recentViralPostCount and recentPostsSampled instead.
+   */
   viralPostRate: number | null;
   _reason: string | null;
 }
@@ -317,12 +385,22 @@ export interface TextDataForAI {
   hashtagFrequency: HashtagFrequency[];
   allMentions: string[];
   uniqueMentions: string[];
+  /** Top mentioned usernames with frequency counts (top 5) */
+  topMentions: MentionFrequency[];
   externalLinkTitles: string[];
   locationNames: string[];
 }
 
 export interface HashtagFrequency {
   hashtag: string;
+  count: number;
+}
+
+/**
+ * Mention frequency data for AI analysis
+ */
+export interface MentionFrequency {
+  username: string;
   count: number;
 }
 
@@ -436,10 +514,11 @@ export interface GapDetection {
  * Contains all 52 metrics from the extraction result in a flat structure
  */
 export interface RawMetricsFlat {
-  // Profile metrics (16)
+  // Profile metrics (18)
   followersCount: number;
   followsCount: number;
   postsCount: number;
+  authorityRatioRaw: number | null;
   authorityRatio: number | null;
   isBusinessAccount: boolean;
   verified: boolean;
@@ -447,6 +526,7 @@ export interface RawMetricsFlat {
   businessCategoryName: string | null;
   hasExternalLink: boolean;
   externalUrl: string | null;
+  externalUrls: ExternalLinkInfo[];
   externalLinksCount: number;
   highlightReelCount: number;
   igtvVideoCount: number;
@@ -477,9 +557,10 @@ export interface RawMetricsFlat {
   timeBetweenPostsDays: number[];
   postingConsistency: number | null;
 
-  // Format metrics (10)
+  // Format metrics (11)
   reelsCount: number;
   videoCount: number;
+  nonReelsVideoCount: number;
   imageCount: number;
   carouselCount: number;
   reelsRate: number | null;
@@ -519,9 +600,11 @@ export interface RawMetricsFlat {
   fakeFollowerRiskScore: number | null;
   fakeFollowerWarnings: string[];
 
-  // Derived metrics (3)
+  // Derived metrics (4)
   contentDensity: number | null;
-  viralPostCount: number;
+  recentViralPostCount: number;
+  recentPostsSampled: number;
+  /** @deprecated Use recentViralPostCount and recentPostsSampled instead */
   viralPostRate: number | null;
 }
 
