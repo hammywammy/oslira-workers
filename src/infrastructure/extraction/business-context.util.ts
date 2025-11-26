@@ -16,6 +16,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '@/shared/utils/logger.util';
+import { formatCount } from '@/shared/utils/number-format.util';
 import type { BusinessContext } from './extraction.types';
 
 // ============================================================================

@@ -31,27 +31,47 @@ export class PromptBuilder {
    * Build business context (CACHED - 800 tokens)
    * This section is reused across all analyses for the same business profile
    *
-   * FIXED: Correctly maps database JSONB fields (business_context & ideal_customer_profile)
+   * CONSOLIDATION NOTE: Database has overlapping fields. Priority order:
+   * 1. business_context (primary source) - contains user-entered onboarding data
+   * 2. ideal_customer_profile (secondary) - may have additional ICP settings
+   * 3. Generated fields (fallback) - AI-generated summaries
+   *
+   * TODO: Consider database migration to consolidate these fields
+   * to avoid ~200 tokens of redundant data per analysis
    */
   buildBusinessContext(business: BusinessProfile): string {
     // Extract data from JSONB fields (database schema)
     const context = business.business_context || {};
     const icp = business.ideal_customer_profile || {};
 
+    // Use single source of truth with fallback priority
+    const businessSummary = context.business_summary
+      || business.business_summary_generated
+      || 'Not provided';
+    const targetAudience = context.target_description
+      || icp.target_audience
+      || 'Not specified';
+    const communicationTone = context.communication_tone
+      || icp.brand_voice
+      || 'Professional and engaging';
+    const minFollowers = context.icp_min_followers ?? icp.icp_min_followers ?? 0;
+    const maxFollowers = context.icp_max_followers ?? icp.icp_max_followers ?? null;
+    const maxFollowersDisplay = maxFollowers !== null ? maxFollowers.toLocaleString() : 'unlimited';
+
     return `# BUSINESS CONTEXT (Your Client)
 
 **Company:** ${business.business_name || business.full_name}
 **One-Liner:** ${business.business_one_liner || 'Not provided'}
-**Business Summary:** ${context.business_summary || business.business_summary_generated || 'Not provided'}
+**Business Summary:** ${businessSummary}
 
 ## Target Audience
-${icp.target_audience || context.target_description || 'Not specified'}
+${targetAudience}
 
 ## Communication Tone
-${icp.brand_voice || context.communication_tone || 'Professional and engaging'}
+${communicationTone}
 
 ## Ideal Customer Profile (ICP)
-- **Follower Range:** ${icp.icp_min_followers ?? context.icp_min_followers ?? 0} - ${icp.icp_max_followers ?? context.icp_max_followers ?? 'unlimited'}
+- **Follower Range:** ${minFollowers.toLocaleString()} - ${maxFollowersDisplay}
 - **Target Company Sizes:** ${context.target_company_sizes?.join(', ') || 'Any'}
 
 ---`;

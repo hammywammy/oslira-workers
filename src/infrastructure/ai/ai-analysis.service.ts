@@ -111,52 +111,15 @@ export class AIAnalysisService {
     const prompts = this.promptBuilder.buildLightAnalysisPrompt(business, profile);
 
     // =========================================================================
-    // COMPREHENSIVE LOGGING - Shows ALL data fed to AI
+    // PROFILE ASSESSMENT AI (Light) - INPUT LOGGING
     // =========================================================================
-    console.log('═══════════════════════════════════════════════════════════════');
-    console.log('🤖 AI ANALYSIS INPUT - Full Context Preview');
-    console.log('═══════════════════════════════════════════════════════════════');
-
-    // Log business data extraction
-    const context = business.business_context || {};
-    const icp = business.ideal_customer_profile || {};
-
-    console.log('📊 BUSINESS DATA (from database):');
-    console.log('  • business_name:', business.business_name || 'MISSING');
-    console.log('  • full_name:', business.full_name || 'MISSING');
-    console.log('  • business_one_liner:', business.business_one_liner || 'MISSING');
-    console.log('  • business_summary_generated:', business.business_summary_generated || 'MISSING');
-
-    console.log('\n📦 business_context (JSONB):');
-    console.log('  • business_summary:', context.business_summary || 'MISSING');
-    console.log('  • communication_tone:', context.communication_tone || 'MISSING');
-    console.log('  • target_description:', context.target_description || 'MISSING');
-    console.log('  • icp_min_followers:', context.icp_min_followers ?? 0);
-    console.log('  • icp_max_followers:', context.icp_max_followers ?? 'unlimited');
-    console.log('  • target_company_sizes:', context.target_company_sizes || 'MISSING');
-
-    console.log('\n🎯 ideal_customer_profile (JSONB):');
-    console.log('  • target_audience:', icp.target_audience || 'MISSING');
-    console.log('  • brand_voice:', icp.brand_voice || 'MISSING');
-    console.log('  • icp_min_followers:', icp.icp_min_followers ?? 0);
-    console.log('  • icp_max_followers:', icp.icp_max_followers ?? 'unlimited');
-
-    console.log('\n📝 PROFILE DATA:');
-    console.log('  • username:', profile.username);
-    console.log('  • follower_count:', profile.follower_count.toLocaleString());
-    console.log('  • bio:', (profile.bio || 'No bio').substring(0, 100));
-    console.log('  • posts:', profile.posts.length);
-
-    console.log('\n🎨 PROMPTS SENT TO AI:');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('SYSTEM PROMPT:');
-    console.log(prompts.system);
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('USER PROMPT (first 500 chars):');
-    console.log(prompts.user.substring(0, 500) + '...');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('USER PROMPT (full length):', prompts.user.length, 'characters');
-    console.log('═══════════════════════════════════════════════════════════════\n');
+    console.log('[ProfileAssessmentAI] Starting analysis', {
+      analysisType: 'light',
+      username: profile.username,
+      businessName: business.business_name,
+      followerCount: profile.follower_count,
+      postsCount: profile.posts.length
+    });
 
     // Increase tokens on retry
     const maxTokens = attempt === 1 ? 800 : 1200;
@@ -185,16 +148,14 @@ export class AIAnalysisService {
       };
 
       // Log AI response
-      console.log('═══════════════════════════════════════════════════════════════');
-      console.log('✅ AI ANALYSIS OUTPUT');
-      console.log('═══════════════════════════════════════════════════════════════');
-      console.log('📊 Result:');
-      console.log('  • overall_score:', result.overall_score);
-      console.log('  • summary_text:', result.summary_text);
-      console.log('  • model_used:', result.model_used);
-      console.log('  • total_cost: $' + result.total_cost.toFixed(6));
-      console.log('  • tokens:', result.input_tokens, 'in /', result.output_tokens, 'out');
-      console.log('═══════════════════════════════════════════════════════════════\n');
+      console.log('[ProfileAssessmentAI] Analysis complete', {
+        overall_score: result.overall_score,
+        summary_length: result.summary_text.length,
+        model_used: result.model_used,
+        total_cost: result.total_cost,
+        tokens_in: result.input_tokens,
+        tokens_out: result.output_tokens
+      });
 
       return result;
 
@@ -227,53 +188,16 @@ export class AIAnalysisService {
     const model = getAIModel('deep');
     const baseMaxTokens = getAIMaxTokens('deep');
 
-    // =========================================================================
-    // COMPREHENSIVE LOGGING - Shows ALL data fed to AI
-    // =========================================================================
-    console.log('═══════════════════════════════════════════════════════════════');
-    console.log('🤖 DEEP AI ANALYSIS INPUT - Full Context Preview');
-    console.log('═══════════════════════════════════════════════════════════════');
-
-    // Log business data extraction
-    const context = business.business_context || {};
-    const icp = business.ideal_customer_profile || {};
-
-    console.log('📊 BUSINESS DATA (from database):');
-    console.log('  • business_name:', business.business_name || 'MISSING');
-    console.log('  • full_name:', business.full_name || 'MISSING');
-    console.log('  • business_one_liner:', business.business_one_liner || 'MISSING');
-    console.log('  • business_summary_generated:', business.business_summary_generated || 'MISSING');
-
-    console.log('\n📦 business_context (JSONB):');
-    console.log('  • business_summary:', context.business_summary || 'MISSING');
-    console.log('  • communication_tone:', context.communication_tone || 'MISSING');
-    console.log('  • target_description:', context.target_description || 'MISSING');
-    console.log('  • icp_min_followers:', context.icp_min_followers ?? 0);
-    console.log('  • icp_max_followers:', context.icp_max_followers ?? 'unlimited');
-    console.log('  • target_company_sizes:', context.target_company_sizes || 'MISSING');
-
-    console.log('\n🎯 ideal_customer_profile (JSONB):');
-    console.log('  • target_audience:', icp.target_audience || 'MISSING');
-    console.log('  • brand_voice:', icp.brand_voice || 'MISSING');
-    console.log('  • icp_min_followers:', icp.icp_min_followers ?? 0);
-    console.log('  • icp_max_followers:', icp.icp_max_followers ?? 'unlimited');
-
-    console.log('\n📝 PROFILE DATA:');
-    console.log('  • username:', profile.username);
-    console.log('  • follower_count:', profile.follower_count.toLocaleString());
-    console.log('  • bio:', (profile.bio || 'No bio').substring(0, 100));
-    console.log('  • posts:', profile.posts.length);
-
-    console.log('\n🎨 DEEP PROMPTS SENT TO AI:');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('SYSTEM PROMPT:');
-    console.log(prompts.system);
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('USER PROMPT (first 800 chars):');
-    console.log(prompts.user.substring(0, 800) + '...');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('USER PROMPT (full length):', prompts.user.length, 'characters');
-    console.log('═══════════════════════════════════════════════════════════════\n');
+    // Profile Assessment AI (Deep) - Structured logging
+    console.log('[ProfileAssessmentAI] Starting deep analysis', {
+      username: profile.username,
+      businessName: business.business_name,
+      followerCount: profile.follower_count,
+      postsCount: profile.posts.length,
+      model,
+      maxTokens: baseMaxTokens,
+      promptLength: prompts.user.length
+    });
 
     // Increase tokens on retry
     const maxTokens = attempt === 1 ? baseMaxTokens : baseMaxTokens * 1.5;
@@ -302,17 +226,14 @@ export class AIAnalysisService {
       };
 
       // Log AI response
-      console.log('═══════════════════════════════════════════════════════════════');
-      console.log('✅ DEEP AI ANALYSIS OUTPUT');
-      console.log('═══════════════════════════════════════════════════════════════');
-      console.log('📊 Result:');
-      console.log('  • overall_score:', result.overall_score);
-      console.log('  • summary_text:', result.summary_text.substring(0, 200) + '...');
-      console.log('  • summary_length:', result.summary_text.length, 'chars');
-      console.log('  • model_used:', result.model_used);
-      console.log('  • total_cost: $' + result.total_cost.toFixed(6));
-      console.log('  • tokens:', result.input_tokens, 'in /', result.output_tokens, 'out');
-      console.log('═══════════════════════════════════════════════════════════════\n');
+      console.log('[ProfileAssessmentAI] Analysis complete', {
+        overall_score: result.overall_score,
+        summary_length: result.summary_text.length,
+        model_used: result.model_used,
+        total_cost: result.total_cost,
+        tokens_in: result.input_tokens,
+        tokens_out: result.output_tokens
+      });
 
       return result;
 

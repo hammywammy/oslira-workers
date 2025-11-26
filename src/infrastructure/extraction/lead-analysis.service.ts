@@ -18,6 +18,11 @@
 
 import type { Env } from '@/shared/types/env.types';
 import { logger } from '@/shared/utils/logger.util';
+import {
+  formatAbbreviated,
+  formatPercentage,
+  formatCount
+} from '@/shared/utils/number-format.util';
 import { AIGatewayClient, type AIResponse } from '@/infrastructure/ai/ai-gateway.client';
 import type {
   CalculatedMetrics,
@@ -170,11 +175,17 @@ export async function analyzeLeadWithAI(
     );
 
     // Call GPT-5 with structured output
+    // OPTIMIZATION: Use 'medium' reasoning effort to reduce reasoning tokens
+    // This balances analysis quality with speed/cost:
+    // - 'high': ~2500 reasoning tokens, ~70s (default if not specified)
+    // - 'medium': ~1000-1500 reasoning tokens, ~40-50s (target)
+    // - 'low': May degrade analysis quality for complex profiles
     const response = await aiClient.callStructured({
       model: LEAD_ANALYSIS_MODEL,
       system_prompt: systemPrompt,
       user_prompt: userPrompt,
       max_tokens: MAX_OUTPUT_TOKENS,
+      reasoning_effort: 'medium',
       tool_schema: LEAD_ANALYSIS_TOOL_SCHEMA
     });
 
@@ -338,12 +349,13 @@ function buildUserPrompt(metrics: CalculatedMetrics, textData: TextDataForAI): s
 - Highlight Reels: ${raw.highlightReelCount}`;
 
   // Format composite scores
+  // NOTE: Profile Health Score measures ACCOUNT QUALITY, not business fit
   const scoresSection = `## Composite Scores (0-100)
 - Engagement Health: ${scores.engagementHealth}
 - Content Sophistication: ${scores.contentSophistication}
 - Account Maturity: ${scores.accountMaturity}
 - Fake Follower Risk: ${scores.fakeFollowerRisk}
-- **Opportunity Score: ${scores.opportunityScore}**`;
+- **Profile Health Score: ${scores.profileHealthScore}** (measures account quality, NOT business fit)`;
 
   // Format gap detection
   const gapsSection = `## Detected Gaps
@@ -388,32 +400,16 @@ Based on this data, provide your lead analysis using the submit_lead_analysis to
 // HELPERS
 // ============================================================================
 
+// Note: formatNumber and formatPercentage are imported from @/shared/utils/number-format.util
+// This ensures consistent formatting across the entire codebase
+
 /**
- * Format large numbers with K/M suffixes
+ * Format large numbers with K/M suffixes for display
+ * Uses centralized formatAbbreviated for consistent rounding
  */
 function formatNumber(value: number | null | undefined): string {
   if (value === null || value === undefined) return 'N/A';
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
-  return value.toString();
-}
-
-/**
- * Format percentage with smart decimal handling
- * - Value = 0: show "0%" (clean display)
- * - Values < 0.01%: show "<0.01%" (cleaner than 4 decimal places)
- * - Values < 1%: show 2 decimals (e.g., "0.14%")
- * - Values >= 1%: show 1 decimal (e.g., "7.1%")
- * - Values >= 10%: show whole number (e.g., "12%")
- * This prevents misleading "0.0000%" display
- */
-function formatPercentage(value: number | null | undefined): string {
-  if (value === null || value === undefined) return 'N/A';
-  if (value === 0) return '0%';
-  if (value < 0.01) return '<0.01%';
-  if (value < 1) return `${value.toFixed(2)}%`;
-  if (value < 10) return `${value.toFixed(1)}%`;
-  return `${Math.round(value)}%`;
+  return formatAbbreviated(value, 1);
 }
 
 /**

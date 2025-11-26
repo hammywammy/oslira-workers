@@ -653,11 +653,11 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       calculatedMetrics = phase2Result.calculatedMetrics;
       textDataForAI = phase2Result.textDataForAI;
 
-      // Step 7: PARALLEL AI Analysis - Run Phase 2 and Deep AI simultaneously
+      // Step 7: PARALLEL AI Analysis - Run both AI analyses simultaneously
       // OPTIMIZATION: Runs both AI calls in parallel (saves ~14s)
-      // - Phase 2 AI: GPT-5 lead analysis (~62s)
-      // - Deep AI: Profile scoring (~14s)
-      // Total time: max(62, 14) = ~62s instead of 62+14 = ~76s sequential
+      // - Lead Qualification AI: GPT-5 comprehensive analysis (~50-60s) - leadTier, strengths, opportunities
+      // - Profile Assessment AI: Quick scoring (~14s) - overall_score, summary_text
+      // Total time: max(60, 14) = ~60s instead of 60+14 = ~74s sequential
       const parallelAIResult = await step.do('parallel_ai_analysis', {
         retries: { limit: 1, delay: '2 seconds' }
       }, async (): Promise<{
@@ -678,27 +678,35 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
           const aiStart = Date.now();
 
-          // Prepare both AI tasks
-          const phase2Task = (async (): Promise<AIResponsePayload | null> => {
+          // PARALLEL AI EXECUTION
+          // Both tasks are IIFEs that start executing immediately
+          // Promise.all waits for the slower one (usually Lead Qualification at ~50-60s)
+          // Total time should be max(leadQual, profileAssess) not leadQual + profileAssess
+
+          const leadQualificationTask = (async (): Promise<AIResponsePayload | null> => {
             if (!calculatedMetrics || !textDataForAI) {
-              console.log(`[Workflow][${params.run_id}] [Parallel] Phase 2 skipped - no metrics`);
+              console.log(`[Workflow][${params.run_id}] [Parallel] Lead Qualification AI skipped - no metrics`);
               return null;
             }
 
             try {
-              console.log(`[Workflow][${params.run_id}] [Parallel] Phase 2 AI starting...`);
-              const phase2Start = Date.now();
+              const leadQualStart = Date.now();
+              console.log(`[Workflow][${params.run_id}] [Parallel] Lead Qualification AI starting (setup)...`);
 
               // Fetch business context for AI prompt
               const supabase = await SupabaseClientFactory.createAdminClient(this.env);
               const businessContextResult = await fetchBusinessContext(supabase, params.business_profile_id);
 
               if (!businessContextResult.success) {
-                console.warn(`[Workflow][${params.run_id}] [Parallel] Failed to fetch business context:`, businessContextResult.error);
+                console.warn(`[Workflow][${params.run_id}] [Parallel] Lead Qualification AI - Failed to fetch business context:`, businessContextResult.error);
                 return null;
               }
 
-              // Run GPT-5 lead analysis
+              const setupDuration = Date.now() - leadQualStart;
+              console.log(`[Workflow][${params.run_id}] [Parallel] Lead Qualification AI call starting (setup took ${setupDuration}ms)...`);
+              const aiCallStart = Date.now();
+
+              // Run GPT-5 lead qualification analysis
               const aiResult = await analyzeLeadWithAI(
                 {
                   calculatedMetrics: calculatedMetrics!,
@@ -711,60 +719,75 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
                 secrets.aiGatewayToken
               );
 
-              const phase2Duration = Date.now() - phase2Start;
+              const aiCallDuration = Date.now() - aiCallStart;
+              const totalDuration = Date.now() - leadQualStart;
 
               if (!aiResult.success) {
-                console.warn(`[Workflow][${params.run_id}] [Parallel] Phase 2 AI failed:`, aiResult.error);
+                console.warn(`[Workflow][${params.run_id}] [Parallel] Lead Qualification AI failed:`, aiResult.error);
                 return null;
               }
 
-              console.log(`[Workflow][${params.run_id}] [Parallel] Phase 2 AI complete`, {
+              console.log(`[Workflow][${params.run_id}] [Parallel] Lead Qualification AI complete`, {
                 leadTier: aiResult.data.analysis.leadTier,
-                durationMs: phase2Duration
+                setupMs: setupDuration,
+                aiCallMs: aiCallDuration,
+                totalMs: totalDuration
               });
 
               return aiResult.data;
             } catch (error: any) {
-              console.error(`[Workflow][${params.run_id}] [Parallel] Phase 2 AI error:`, error.message);
+              console.error(`[Workflow][${params.run_id}] [Parallel] Lead Qualification AI error:`, error.message);
               return null;
             }
           })();
 
-          const deepAITask = (async () => {
-            console.log(`[Workflow][${params.run_id}] [Parallel] Deep AI starting...`);
-            const deepStart = Date.now();
+          const profileAssessmentTask = (async () => {
+            console.log(`[Workflow][${params.run_id}] [Parallel] Profile Assessment AI starting...`);
+            const assessStart = Date.now();
 
             // Transform camelCase cache profile to snake_case AI profile
             const aiProfile = toAIProfile(profile!);
 
-            const aiService = await AIAnalysisService.create(this.env);
+            // OPTIMIZATION: Reuse pre-fetched secrets from step 1b instead of re-fetching
+            // This saves 3 async getSecret() calls and ensures true parallel execution
+            const aiService = new AIAnalysisService(
+              this.env,
+              secrets.openaiKey,
+              secrets.claudeKey,
+              secrets.aiGatewayToken
+            );
             const result = await aiService.executeAnalysis(params.analysis_type as AnalysisType, business, aiProfile);
 
-            const deepDuration = Date.now() - deepStart;
+            const assessDuration = Date.now() - assessStart;
 
-            console.log(`[Workflow][${params.run_id}] [Parallel] Deep AI complete`, {
+            console.log(`[Workflow][${params.run_id}] [Parallel] Profile Assessment AI complete`, {
               score: result.overall_score,
               model: result.model_used,
-              durationMs: deepDuration
+              durationMs: assessDuration
             });
 
             return result;
           })();
 
-          // Run BOTH in parallel
-          const [phase2Response, deepResult] = await Promise.all([phase2Task, deepAITask]);
+          // Run BOTH in parallel - total time = max(leadQual, profileAssess)
+          const [leadQualResponse, profileAssessResult] = await Promise.all([leadQualificationTask, profileAssessmentTask]);
 
           timing.ai_analysis = Date.now() - aiStart;
 
+          // Log parallel execution results with verification
+          // If truly parallel, totalDurationMs should be close to the max of the two, not the sum
           console.log(`[Workflow][${params.run_id}] PARALLEL AI Analysis complete`, {
             totalDurationMs: timing.ai_analysis,
-            phase2Success: !!phase2Response,
-            deepScore: deepResult.overall_score
+            leadQualSuccess: !!leadQualResponse,
+            leadTier: leadQualResponse?.analysis?.leadTier || 'N/A',
+            profileScore: profileAssessResult.overall_score,
+            profileModel: profileAssessResult.model_used,
+            parallelEfficiency: `Total ${timing.ai_analysis}ms - should be ~max(leadQual ~60s, profileAssess ~14s)`
           });
 
           return {
-            phase2Response,
-            deepAIResult: deepResult
+            phase2Response: leadQualResponse,
+            deepAIResult: profileAssessResult
           };
         } catch (error: any) {
           console.error(`[Workflow][${params.run_id}] Step 7 FAILED:`, this.serializeError(error));
@@ -965,27 +988,102 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
           // Log detailed cost breakdown for transparency
           const apifyCost = metrics.cost.items.scraping.usd;
+          const totalCostUsd = metrics.cost.total_usd;
+
           console.log(`[Workflow][${params.run_id}] Operations logged - COST BREAKDOWN`, {
-            total_cost_usd: metrics.cost.total_usd,
+            total_cost_usd: totalCostUsd,
             breakdown: {
-              deep_ai: `$${aiResult.total_cost.toFixed(6)}`,
-              phase2_ai: `$${phase2AICost.toFixed(6)}`,
+              profile_assessment_ai: `$${aiResult.total_cost.toFixed(6)}`,
+              lead_qualification_ai: `$${phase2AICost.toFixed(6)}`,
               apify_scraping: `$${apifyCost.toFixed(6)}`,
               sum_check: `$${(aiResult.total_cost + phase2AICost + apifyCost).toFixed(6)}`
             },
             cache_hit: timing.cache_hit,
             total_duration_ms: metrics.duration.total_ms
           });
+
+          // COST ALERT THRESHOLDS
+          // Alert when analysis costs exceed expected range
+          const COST_WARN_THRESHOLD = 0.05;     // $0.05 per analysis
+          const COST_CRITICAL_THRESHOLD = 0.10; // $0.10 per analysis
+
+          if (totalCostUsd >= COST_CRITICAL_THRESHOLD) {
+            console.error(`[CostAlert][${params.run_id}] CRITICAL: Analysis cost $${totalCostUsd.toFixed(4)} exceeds critical threshold $${COST_CRITICAL_THRESHOLD}`, {
+              username: params.username,
+              analysisType: params.analysis_type,
+              totalCost: totalCostUsd,
+              threshold: COST_CRITICAL_THRESHOLD,
+              breakdown: {
+                profileAssessmentAI: aiResult.total_cost,
+                leadQualificationAI: phase2AICost,
+                scraping: apifyCost
+              }
+            });
+          } else if (totalCostUsd >= COST_WARN_THRESHOLD) {
+            console.warn(`[CostAlert][${params.run_id}] WARNING: Analysis cost $${totalCostUsd.toFixed(4)} exceeds warning threshold $${COST_WARN_THRESHOLD}`, {
+              username: params.username,
+              analysisType: params.analysis_type,
+              totalCost: totalCostUsd,
+              threshold: COST_WARN_THRESHOLD
+            });
+          }
         } catch (error: any) {
           console.error(`[Workflow][${params.run_id}] Step 11 FAILED (non-fatal):`, this.serializeError(error));
           // Don't throw - logging failures shouldn't break the workflow
         }
       });
 
+      // SLA TRACKING
+      // Track workflow duration against SLA targets
+      const totalDurationMs = Date.now() - workflowStartTime;
+      const SLA_TARGET_MS = 60_000;      // 60 seconds (target)
+      const SLA_WARNING_MS = 90_000;     // 90 seconds (warning)
+      const SLA_CRITICAL_MS = 120_000;   // 120 seconds (critical)
+
+      const slaStatus =
+        totalDurationMs <= SLA_TARGET_MS ? 'met' :
+        totalDurationMs <= SLA_WARNING_MS ? 'warning' :
+        totalDurationMs <= SLA_CRITICAL_MS ? 'critical' :
+        'severe';
+
+      const slaLog = {
+        runId: params.run_id,
+        username: params.username,
+        analysisType: params.analysis_type,
+        durationMs: totalDurationMs,
+        durationSec: (totalDurationMs / 1000).toFixed(1),
+        slaStatus,
+        slaTargetMs: SLA_TARGET_MS,
+        exceededBy: totalDurationMs > SLA_TARGET_MS ? `${((totalDurationMs - SLA_TARGET_MS) / 1000).toFixed(1)}s` : null,
+        componentTiming: {
+          cacheCheckMs: timing.cache_check ?? 0,
+          scrapingMs: timing.scraping ?? 0,
+          preChecksMs: timing.pre_checks ?? 0,
+          aiAnalysisMs: timing.ai_analysis ?? 0,
+          dbUpsertMs: timing.db_upsert ?? 0
+        }
+      };
+
+      if (slaStatus === 'severe') {
+        console.error(`[SLA][${params.run_id}] SEVERE: Analysis took ${slaLog.durationSec}s, severely exceeding target (>${SLA_CRITICAL_MS / 1000}s)`, slaLog);
+      } else if (slaStatus === 'critical') {
+        console.error(`[SLA][${params.run_id}] CRITICAL: Analysis took ${slaLog.durationSec}s, exceeding critical threshold`, slaLog);
+      } else if (slaStatus === 'warning') {
+        console.warn(`[SLA][${params.run_id}] WARNING: Analysis took ${slaLog.durationSec}s, exceeding target`, slaLog);
+      } else {
+        console.log(`[SLA][${params.run_id}] SLA MET: Analysis completed in ${slaLog.durationSec}s`, {
+          slaStatus,
+          durationMs: totalDurationMs,
+          targetMs: SLA_TARGET_MS
+        });
+      }
+
       console.log(`[Workflow][${params.run_id}] SUCCESS`, {
         leadId,
         analysisId,
-        score: aiResult.overall_score
+        score: aiResult.overall_score,
+        durationMs: totalDurationMs,
+        slaStatus
       });
 
       return {
