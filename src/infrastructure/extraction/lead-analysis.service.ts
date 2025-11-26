@@ -53,12 +53,6 @@ const LEAD_ANALYSIS_TOOL_SCHEMA = {
         enum: ['hot', 'warm', 'cold'],
         description: 'Lead qualification tier based on fit with business services'
       },
-      confidence: {
-        type: 'number',
-        minimum: 0,
-        maximum: 100,
-        description: 'Confidence score for the analysis (0-100)'
-      },
       summary: {
         type: 'string',
         description: 'Brief 2-3 sentence summary of the ICP profile and their fit'
@@ -96,11 +90,14 @@ const LEAD_ANALYSIS_TOOL_SCHEMA = {
       fitReasoning: {
         type: 'string',
         description: 'Detailed explanation of why this ICP is/isn\'t a good fit (2-4 sentences)'
+      },
+      partnershipAssessment: {
+        type: 'string',
+        description: 'Quick, conversational partnership summary for salespeople (4-6 sentences). Use clear, direct business language WITHOUT excessive metrics or jargon. Cover: brief content/engagement observation, ICP fit analysis, alignment with value proposition, red flags or positive signals, and a clear pursue/don\'t pursue recommendation with rationale.'
       }
     },
     required: [
       'leadTier',
-      'confidence',
       'summary',
       'strengths',
       'weaknesses',
@@ -108,7 +105,8 @@ const LEAD_ANALYSIS_TOOL_SCHEMA = {
       'outreachHooks',
       'recommendedActions',
       'riskFactors',
-      'fitReasoning'
+      'fitReasoning',
+      'partnershipAssessment'
     ],
     additionalProperties: false
   }
@@ -207,7 +205,6 @@ export async function analyzeLeadWithAI(
     logger.info('[LeadAnalysis] Analysis complete', {
       username: input.calculatedMetrics.raw.username,
       leadTier: analysis.leadTier,
-      confidence: analysis.confidence,
       tokensIn: response.usage.input_tokens,
       tokensOut: response.usage.output_tokens,
       cost: response.usage.total_cost,
@@ -261,6 +258,7 @@ Analyze Instagram profiles (ICPs - Ideal Customer Profiles) to determine if they
 **Target Audience:** ${business.targetAudience}
 **Value Proposition:** ${business.valueProposition}
 **Pain Points We Solve:** ${business.painPoints.join(', ')}
+**ICP Follower Range:** ${business.icpMinFollowers.toLocaleString()} - ${business.icpMaxFollowers ? business.icpMaxFollowers.toLocaleString() : 'unlimited'}
 
 ## Lead Qualification Criteria
 
@@ -288,7 +286,13 @@ Analyze Instagram profiles (ICPs - Ideal Customer Profiles) to determine if they
 2. Reference actual metrics when explaining reasoning
 3. Identify 3-5 personalized outreach hooks based on their content
 4. Consider both opportunities AND risks
-5. Be honest about fit - not every lead is a good one`;
+5. Be honest about fit - not every lead is a good one
+
+## Partnership Assessment Summary (IMPORTANT)
+Write a 4-6 sentence conversational summary that salespeople can quickly read and act on WITHOUT needing to analyze metrics themselves.
+- Use clear, direct business language - NOT technical jargon or metric-heavy analysis
+- Structure: (1) Brief content/engagement observation, (2) ICP fit analysis (compare to target follower range), (3) Alignment with value proposition (signals of needing our product), (4) Red flags or positive signals, (5) Clear recommendation with brief rationale
+- Example tone: "While engagement is strong with 955K average likes per post, the content focuses on creator spotlights rather than B2B topics. The profile's 697M followers far exceeds the ICP range of 0-100K for startup agencies. Recent posts show no signals of CRM needs or lead research pain points. Recommendation: do not pursue; focus instead on small B2B agencies with bios mentioning outbound or lead generation."`;
 }
 
 /**
@@ -320,10 +324,10 @@ function buildUserPrompt(metrics: CalculatedMetrics, textData: TextDataForAI): s
 
 ### Content Strategy
 - Dominant Format: ${raw.dominantFormat ?? 'N/A'}
-- Reels Rate: ${((raw.reelsRate ?? 0) * 100).toFixed(0)}%
+- Reels Rate: ${(raw.reelsRate ?? 0).toFixed(2)}%
 - Avg Hashtags/Post: ${raw.avgHashtagsPerPost?.toFixed(1) ?? 'N/A'}
 - Avg Caption Length: ${raw.avgCaptionLength?.toFixed(0) ?? 'N/A'} chars
-- Location Tagging Rate: ${((raw.locationTaggingRate ?? 0) * 100).toFixed(0)}%
+- Location Tagging Rate: ${(raw.locationTaggingRate ?? 0).toFixed(2)}%
 
 ### Profile Features
 - Business Account: ${raw.isBusinessAccount ? 'Yes' : 'No'}
@@ -410,7 +414,6 @@ function isValidAnalysis(analysis: any): analysis is AILeadAnalysis {
     analysis &&
     typeof analysis.leadTier === 'string' &&
     ['hot', 'warm', 'cold'].includes(analysis.leadTier) &&
-    typeof analysis.confidence === 'number' &&
     typeof analysis.summary === 'string' &&
     Array.isArray(analysis.strengths) &&
     Array.isArray(analysis.weaknesses) &&
@@ -418,7 +421,8 @@ function isValidAnalysis(analysis: any): analysis is AILeadAnalysis {
     Array.isArray(analysis.outreachHooks) &&
     Array.isArray(analysis.recommendedActions) &&
     Array.isArray(analysis.riskFactors) &&
-    typeof analysis.fitReasoning === 'string'
+    typeof analysis.fitReasoning === 'string' &&
+    typeof analysis.partnershipAssessment === 'string'
   );
 }
 

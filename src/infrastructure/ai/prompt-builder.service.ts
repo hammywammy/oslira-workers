@@ -51,7 +51,7 @@ ${icp.target_audience || context.target_description || 'Not specified'}
 ${icp.brand_voice || context.communication_tone || 'Professional and engaging'}
 
 ## Ideal Customer Profile (ICP)
-- **Follower Range:** ${icp.icp_min_followers || context.icp_min_followers || 0} - ${icp.icp_max_followers || context.icp_max_followers || 'unlimited'}
+- **Follower Range:** ${icp.icp_min_followers ?? context.icp_min_followers ?? 0} - ${icp.icp_max_followers ?? context.icp_max_followers ?? 'unlimited'}
 - **Target Company Sizes:** ${context.target_company_sizes?.join(', ') || 'Any'}
 
 ---`;
