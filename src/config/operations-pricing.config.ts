@@ -165,6 +165,13 @@ export const ANALYSIS_CONFIG: Record<AnalysisType, AnalysisTypeConfig> = {
  * Source: OpenAI/Anthropic pricing pages
  */
 export const AI_MODEL_PRICING: Record<string, AIModelPricing> = {
+  'gpt-5': {
+    per_1m_input: 1.25,
+    per_1m_output: 10.00,
+    provider: 'openai',
+    max_tokens: 16384,
+    supports_json_schema: true
+  },
   'gpt-5-nano': {
     per_1m_input: 0.15,
     per_1m_output: 0.60,
