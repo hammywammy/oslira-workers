@@ -891,13 +891,18 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
           const totalDuration = Date.now() - workflowStartTime;
 
+          // Calculate total AI cost (Step 7 + Phase 2)
+          // Phase 2 cost is tracked in phase2AIResponse.tokenUsage.cost
+          const phase2AICost = phase2AIResponse?.tokenUsage?.cost ?? 0;
+          const totalAICost = aiResult.total_cost + phase2AICost;
+
           // Build metrics using centralized config (handles pricing, actor ID, etc.)
           const metrics = buildOperationsMetrics({
             analysisType: params.analysis_type as AnalysisType,
-            aiCost: aiResult.total_cost,
+            aiCost: totalAICost,
             aiModel: aiResult.model_used,
-            tokensIn: aiResult.input_tokens,
-            tokensOut: aiResult.output_tokens,
+            tokensIn: aiResult.input_tokens + (phase2AIResponse?.tokenUsage?.input ?? 0),
+            tokensOut: aiResult.output_tokens + (phase2AIResponse?.tokenUsage?.output ?? 0),
             cacheHit: timing.cache_hit,
             timing: {
               cache_check: timing.cache_check,
@@ -919,6 +924,8 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
           console.log(`[Workflow][${params.run_id}] Operations logged`, {
             total_cost: metrics.cost.total_usd,
+            step7_ai_cost: aiResult.total_cost,
+            phase2_ai_cost: phase2AICost,
             total_duration_ms: metrics.duration.total_ms
           });
         } catch (error: any) {

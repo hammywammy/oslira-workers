@@ -161,7 +161,7 @@ function flattenRawMetrics(extraction: ExtractionResult): RawMetricsFlat {
     videoPostCount: videoMetrics.videoPostCount,
     totalVideoViews: videoMetrics.totalVideoViews,
     avgVideoViews: videoMetrics.avgVideoViews,
-    videoViewRate: videoMetrics.videoViewRate,
+    videoViewsPerFollower: videoMetrics.videoViewsPerFollower,
     videoViewToLikeRatio: videoMetrics.videoViewToLikeRatio,
 
     // Risk scores (2)

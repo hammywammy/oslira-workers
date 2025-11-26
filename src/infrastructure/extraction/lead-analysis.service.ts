@@ -31,7 +31,7 @@ import type {
 // CONSTANTS
 // ============================================================================
 
-const LEAD_ANALYSIS_MODEL = 'gpt-5';
+export const LEAD_ANALYSIS_MODEL = 'gpt-5';
 const MAX_OUTPUT_TOKENS = 4000;
 
 // ============================================================================
@@ -195,7 +195,8 @@ export async function analyzeLeadWithAI(
       model: LEAD_ANALYSIS_MODEL,
       tokenUsage: {
         input: response.usage.input_tokens,
-        output: response.usage.output_tokens
+        output: response.usage.output_tokens,
+        cost: response.usage.total_cost
       },
       analysis
     };
@@ -311,7 +312,7 @@ function buildUserPrompt(metrics: CalculatedMetrics, textData: TextDataForAI): s
 - Total Posts: ${raw.postsCount}
 
 ### Engagement (from ${metrics.sampleSize} recent posts)
-- Engagement Rate: ${raw.engagementRate?.toFixed(2) ?? 'N/A'}%
+- Engagement Rate: ${formatPercentage(raw.engagementRate)}
 - Avg Likes/Post: ${formatNumber(raw.avgLikesPerPost)}
 - Avg Comments/Post: ${raw.avgCommentsPerPost?.toFixed(1) ?? 'N/A'}
 - Comment-to-Like Ratio: ${raw.commentToLikeRatio?.toFixed(3) ?? 'N/A'}
@@ -324,10 +325,10 @@ function buildUserPrompt(metrics: CalculatedMetrics, textData: TextDataForAI): s
 
 ### Content Strategy
 - Dominant Format: ${raw.dominantFormat ?? 'N/A'}
-- Reels Rate: ${(raw.reelsRate ?? 0).toFixed(2)}%
+- Reels Rate: ${formatPercentage(raw.reelsRate)}
 - Avg Hashtags/Post: ${raw.avgHashtagsPerPost?.toFixed(1) ?? 'N/A'}
 - Avg Caption Length: ${raw.avgCaptionLength?.toFixed(0) ?? 'N/A'} chars
-- Location Tagging Rate: ${(raw.locationTaggingRate ?? 0).toFixed(2)}%
+- Location Tagging Rate: ${formatPercentage(raw.locationTaggingRate)}
 
 ### Profile Features
 - Business Account: ${raw.isBusinessAccount ? 'Yes' : 'No'}
@@ -395,6 +396,20 @@ function formatNumber(value: number | null | undefined): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
   if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
   return value.toString();
+}
+
+/**
+ * Format percentage with smart decimal handling
+ * - Values < 0.01%: show 4 decimals (e.g., "0.0043%")
+ * - Values < 1%: show 3 decimals (e.g., "0.143%")
+ * - Values >= 1%: show 2 decimals (e.g., "7.11%")
+ * This prevents misleading "0.00%" display for very low engagement rates
+ */
+function formatPercentage(value: number | null | undefined): string {
+  if (value === null || value === undefined) return 'N/A';
+  if (value < 0.01) return `${value.toFixed(4)}%`;
+  if (value < 1) return `${value.toFixed(3)}%`;
+  return `${value.toFixed(2)}%`;
 }
 
 /**
