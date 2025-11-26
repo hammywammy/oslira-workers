@@ -145,7 +145,10 @@ export type LeadAnalysisOutput = LeadAnalysisResult | LeadAnalysisError;
  */
 export async function analyzeLeadWithAI(
   input: LeadAnalysisInput,
-  env: Env
+  env: Env,
+  openaiKey: string,
+  claudeKey: string,
+  aiGatewayToken: string
 ): Promise<LeadAnalysisOutput> {
   const startTime = Date.now();
 
@@ -163,9 +166,9 @@ export async function analyzeLeadWithAI(
     // Create AI client
     const aiClient = new AIGatewayClient(
       env,
-      env.OPENAI_API_KEY,
-      env.ANTHROPIC_API_KEY,
-      env.AI_GATEWAY_TOKEN
+      openaiKey,
+      claudeKey,
+      aiGatewayToken
     );
 
     // Call GPT-5 with structured output

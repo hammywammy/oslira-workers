@@ -135,6 +135,25 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         }
       });
 
+      // Step 1b: Fetch secrets early (for Phase 2 AI analysis)
+      const secrets = await step.do('fetch_secrets', async () => {
+        try {
+          console.log(`[Workflow][${params.run_id}] Step 1b: Fetching API secrets`);
+
+          const [openaiKey, claudeKey, aiGatewayToken] = await Promise.all([
+            getSecret('OPENAI_API_KEY', this.env, this.env.APP_ENV),
+            getSecret('ANTHROPIC_API_KEY', this.env, this.env.APP_ENV),
+            getSecret('CLOUDFLARE_AI_GATEWAY_TOKEN', this.env, this.env.APP_ENV)
+          ]);
+
+          console.log(`[Workflow][${params.run_id}] Secrets fetched successfully`);
+          return { openaiKey, claudeKey, aiGatewayToken };
+        } catch (error: any) {
+          console.error(`[Workflow][${params.run_id}] Step 1b FAILED:`, this.serializeError(error));
+          throw error;
+        }
+      });
+
       // Step 2: Check duplicate analysis (no retries - fail fast)
       // OPTIMIZED: Uses single JOIN query instead of two sequential queries (saves 2-3s)
       await step.do('check_duplicate', async () => {
@@ -587,7 +606,10 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
                 textData: textDataForAI!,
                 businessContext: businessContextResult.data
               },
-              this.env
+              this.env,
+              secrets.openaiKey,
+              secrets.claudeKey,
+              secrets.aiGatewayToken
             );
 
             if (!aiResult.success) {
