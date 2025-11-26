@@ -81,7 +81,8 @@ function flattenRawMetrics(extraction: ExtractionResult): RawMetricsFlat {
     contentMetrics,
     videoMetrics,
     riskScores,
-    derivedMetrics
+    derivedMetrics,
+    textDataForAI
   } = extraction;
 
   return {
@@ -141,16 +142,19 @@ function flattenRawMetrics(extraction: ExtractionResult): RawMetricsFlat {
     formatDiversity: formatMetrics.formatDiversity,
     dominantFormat: formatMetrics.dominantFormat,
 
-    // Content metrics (17)
+    // Content metrics (19 - includes topHashtags and topMentions)
     totalHashtags: contentMetrics.totalHashtags,
     avgHashtagsPerPost: contentMetrics.avgHashtagsPerPost,
     uniqueHashtagCount: contentMetrics.uniqueHashtagCount,
     hashtagDiversity: contentMetrics.hashtagDiversity,
+    topHashtags: textDataForAI.hashtagFrequency.slice(0, 10), // Top 10 hashtags
     totalMentions: contentMetrics.totalMentions,
     avgMentionsPerPost: contentMetrics.avgMentionsPerPost,
     uniqueMentionCount: contentMetrics.uniqueMentionCount,
+    topMentions: textDataForAI.topMentions.slice(0, 5), // Top 5 mentions
     totalCaptionLength: contentMetrics.totalCaptionLength,
     avgCaptionLength: contentMetrics.avgCaptionLength,
+    avgCaptionLengthNonEmpty: contentMetrics.avgCaptionLengthNonEmpty,
     maxCaptionLength: contentMetrics.maxCaptionLength,
     postsWithLocation: contentMetrics.postsWithLocation,
     locationTaggingRate: contentMetrics.locationTaggingRate,

@@ -301,6 +301,8 @@ export interface ContentMetrics {
 
   totalCaptionLength: number;
   avgCaptionLength: number | null;
+  /** Average caption length excluding empty captions */
+  avgCaptionLengthNonEmpty: number | null;
   maxCaptionLength: number;
 
   postsWithLocation: number;
@@ -577,16 +579,21 @@ export interface RawMetricsFlat {
   formatDiversity: number;
   dominantFormat: 'reels' | 'video' | 'image' | 'carousel' | 'mixed' | null;
 
-  // Content metrics (17)
+  // Content metrics (19 - added topHashtags and topMentions)
   totalHashtags: number;
   avgHashtagsPerPost: number | null;
   uniqueHashtagCount: number;
   hashtagDiversity: number | null;
+  /** Top hashtags with frequency counts (top 10) */
+  topHashtags: HashtagFrequency[];
   totalMentions: number;
   avgMentionsPerPost: number | null;
   uniqueMentionCount: number;
+  /** Top mentions with frequency counts (top 5) */
+  topMentions: MentionFrequency[];
   totalCaptionLength: number;
   avgCaptionLength: number | null;
+  avgCaptionLengthNonEmpty: number | null;
   maxCaptionLength: number;
   postsWithLocation: number;
   locationTaggingRate: number | null;
