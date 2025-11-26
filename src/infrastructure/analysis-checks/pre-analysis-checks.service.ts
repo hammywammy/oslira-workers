@@ -43,7 +43,6 @@ import { DEFAULT_CHECKS_CONFIG } from './types';
 // Import all checks
 import { PrivateProfileCheck } from './checks/private-profile.check';
 import { ProfileNotFoundCheck } from './checks/profile-not-found.check';
-import { ICPFollowerLimitCheck } from './checks/icp-follower-limit.check';
 
 export class PreAnalysisChecksService {
   private checks: IPreAnalysisCheck[] = [];
@@ -62,7 +61,6 @@ export class PreAnalysisChecksService {
     // Register built-in checks
     this.registerCheck(new ProfileNotFoundCheck());
     this.registerCheck(new PrivateProfileCheck());
-    this.registerCheck(new ICPFollowerLimitCheck());
 
     // Sort by priority after registration
     this.sortChecksByPriority();

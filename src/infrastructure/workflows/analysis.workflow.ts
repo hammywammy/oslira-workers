@@ -661,7 +661,6 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           const aiProfile = toAIProfile(profile);
 
           // Step 8a: Upsert lead with Instagram URL first (to get lead_id)
-          // Include calculated_metrics if Phase 2 extraction succeeded
           const lead = await leadsRepo.upsertLead({
             account_id: params.account_id,
             business_profile_id: params.business_profile_id,
@@ -674,15 +673,10 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             profile_pic_url: aiProfile.profile_pic_url, // Instagram URL initially
             is_verified: aiProfile.is_verified,
             is_private: aiProfile.is_private,
-            is_business_account: aiProfile.is_business_account,
-            // Phase 2: Include calculated metrics if available
-            calculated_metrics: calculatedMetrics || undefined
+            is_business_account: aiProfile.is_business_account
           });
 
-          console.log(`[Workflow][${params.run_id}] Lead upserted: ${lead.lead_id}`, {
-            hasCalculatedMetrics: !!calculatedMetrics,
-            opportunityScore: calculatedMetrics?.scores?.opportunityScore
-          });
+          console.log(`[Workflow][${params.run_id}] Lead upserted: ${lead.lead_id}`);
 
           // Step 8b: Cache avatar to R2 (FIRE-AND-FORGET - don't wait)
           // This saves 1-2s on the critical path while still caching the avatar
@@ -749,9 +743,11 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           }
 
           // UPDATE existing analysis record (created in handler before workflow started)
+          // Include calculated_metrics from Phase 2 extraction if available
           const analysis = await analysisRepo.updateAnalysis(params.run_id, {
             overall_score: aiResult.overall_score,
             ai_response: aiResponse,
+            calculated_metrics: calculatedMetrics || undefined,
             status: 'complete',
             completed_at: new Date().toISOString()
           });
