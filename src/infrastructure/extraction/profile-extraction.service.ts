@@ -319,9 +319,10 @@ export class ProfileExtractionService {
     // Check posts exist
     const hasPosts = posts.length > 0;
 
-    // Check engagement data in posts
+    // Check engagement data in posts - at least one post has likes OR comments data
+    // Using != null to check for both null and undefined
     const hasEngagementData = hasPosts && posts.some(
-      p => p.likesCount !== undefined && p.commentsCount !== undefined
+      p => p.likesCount != null || p.commentsCount != null
     );
 
     // Check video view data

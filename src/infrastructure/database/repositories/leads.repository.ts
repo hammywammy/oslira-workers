@@ -23,8 +23,6 @@ export interface Lead {
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
-  // Phase 2: Calculated metrics JSONB
-  calculated_metrics: any | null;
 }
 
 export interface UpsertLeadData {
@@ -41,8 +39,6 @@ export interface UpsertLeadData {
   is_verified: boolean;
   is_private: boolean;
   is_business_account: boolean;
-  // Phase 2: Calculated metrics JSONB (optional)
-  calculated_metrics?: any;
 }
 
 export interface UpsertLeadResult {
@@ -90,11 +86,6 @@ export class LeadsRepository extends BaseRepository<Lead> {
         created_at: now
       })
     };
-
-    // Phase 2: Include calculated_metrics if provided
-    if (data.calculated_metrics !== undefined) {
-      payload.calculated_metrics = data.calculated_metrics;
-    }
 
     const { data: result, error } = await this.supabase
       .from('leads')

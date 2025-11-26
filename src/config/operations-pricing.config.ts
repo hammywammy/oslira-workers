@@ -141,12 +141,12 @@ export const ANALYSIS_CONFIG: Record<AnalysisType, AnalysisTypeConfig> = {
   deep: {
     credit_cost: 1,    // Uses deep_analyses credits, same cost per credit
     posts_limit: 6,    // Same posts for now, can be expanded
-    ai_model: 'gpt-5-nano',
-    ai_max_tokens: 1600, // 2x more tokens for deeper summary
+    ai_model: 'gpt-5',
+    ai_max_tokens: 2000, // More tokens for deeper analysis with GPT-5
     timing: {
       setup: 1,
       scraping: 7.5,
-      ai_analysis: 12,   // Longer due to more detailed output
+      ai_analysis: 15,   // Longer due to GPT-5 and detailed output
       teardown: 1
     },
     prompt: {
