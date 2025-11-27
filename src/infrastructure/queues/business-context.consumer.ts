@@ -1,8 +1,9 @@
-// infrastructure/queues/business-context.consumer.ts - WITH COMPREHENSIVE LOGGING
+// infrastructure/queues/business-context.consumer.ts
 
 import type { Env } from '@/shared/types/env.types';
 import type { MessageBatch, Message } from '@cloudflare/workers-types';
 import type { BusinessContextQueueMessage } from '@/shared/types/business-context.types';
+import { logger } from '@/shared/utils/logger.util';
 
 /**
  * BUSINESS CONTEXT QUEUE CONSUMER - WITH LOGGING
@@ -14,62 +15,62 @@ export async function handleBusinessContextQueue(
   batch: MessageBatch<BusinessContextQueueMessage>,
   env: Env
 ): Promise<void> {
-  console.log('='.repeat(80));
-  console.log(`[BusinessContextQueue] BATCH PROCESSING STARTED`);
-  console.log(`[BusinessContextQueue] Batch size: ${batch.messages.length}`);
-  console.log(`[BusinessContextQueue] Queue name: ${batch.queue}`);
-  console.log('='.repeat(80));
+  // Batch boundary
+  logger.info('Batch processing started');
+  logger.info('Processing business context batch', { batchSize: batch.messages.length });
+  logger.info('Queue info', { queueName: batch.queue });
+  // Batch boundary
 
   for (const message of batch.messages) {
-    console.log('-'.repeat(80));
-    console.log(`[BusinessContextQueue] MESSAGE PROCESSING STARTED`);
-    console.log(`[BusinessContextQueue] Message ID: ${message.id}`);
-    console.log(`[BusinessContextQueue] Attempt: ${message.attempts}`);
-    console.log(`[BusinessContextQueue] Timestamp: ${message.timestamp}`);
-    console.log(`[BusinessContextQueue] Body:`, JSON.stringify(message.body, null, 2));
-    console.log('-'.repeat(80));
+    // Message boundary
+    logger.info('Message processing started');
+    logger.info('Processing message', { messageId: message.id });
+    logger.info('Message attempt info', { attempt: message.attempts });
+    logger.info('Message timestamp', { timestamp: message.timestamp });
+    logger.info('Message body', message.body);
+    // Message boundary
 
     try {
       await processBusinessContextMessage(message, env);
       
-      console.log(`[BusinessContextQueue] MESSAGE PROCESSED SUCCESSFULLY`);
-      console.log(`[BusinessContextQueue] Acknowledging message ${message.id}`);
+      logger.info('Message processed successfully');
+      logger.info('Acknowledging message', { messageId: message.id });
       message.ack();
-      console.log(`[BusinessContextQueue] Message acknowledged`);
+      logger.info('Message acknowledged');
       
     } catch (error: any) {
-      console.error('[BusinessContextQueue] MESSAGE PROCESSING FAILED');
-      console.error('[BusinessContextQueue] Error name:', error.name);
-      console.error('[BusinessContextQueue] Error message:', error.message);
-      console.error('[BusinessContextQueue] Error stack:', error.stack);
+      logger.error('Message processing failed');
+      logger.error('Error details', { errorName: error.name);
+      logger.error('Error message', { errorMessage: error.message);
+      logger.error('Error stack', { errorStack: error.stack);
 
       // Retry logic
       if (message.attempts < 3) {
         const delay = Math.pow(2, message.attempts) * 10;
-        console.log(`[BusinessContextQueue] RETRYING message ${message.id}`);
-        console.log(`[BusinessContextQueue] Retry delay: ${delay}s`);
-        console.log(`[BusinessContextQueue] Attempt: ${message.attempts + 1}/3`);
+        logger.info('Retrying message', { messageId: message.id });
+        logger.info('Retry delay', { delaySeconds: delay });
+        logger.info('Retry attempt', { attempt: message.attempts + 1, maxAttempts: 3 });
         
         message.retry({ delaySeconds: delay });
-        console.log(`[BusinessContextQueue] Retry scheduled`);
+        logger.info('Retry scheduled');
       } else {
-        console.error(`[BusinessContextQueue] MAX RETRIES EXCEEDED for message ${message.id}`);
-        console.error(`[BusinessContextQueue] Run ID: ${message.body.run_id}`);
+        logger.error('Max retries exceeded', { messageId: message.id });
+        logger.error('Failed message run ID', { runId: message.body.run_id });
         
         await markGenerationFailed(message.body, error.message, env);
         
-        console.log(`[BusinessContextQueue] Acknowledging failed message ${message.id}`);
+        logger.info('Acknowledging failed message', { messageId: message.id });
         message.ack();
-        console.log(`[BusinessContextQueue] Failed message acknowledged`);
+        logger.info('Failed message acknowledged');
       }
     }
 
-    console.log('-'.repeat(80));
+    // Message boundary
   }
 
-  console.log('='.repeat(80));
-  console.log(`[BusinessContextQueue] BATCH PROCESSING COMPLETE`);
-  console.log('='.repeat(80));
+  // Batch boundary
+  logger.info('Batch processing complete');
+  // Batch boundary
 }
 
 /**
@@ -81,23 +82,23 @@ async function processBusinessContextMessage(
 ): Promise<void> {
   const data = message.body;
 
-  console.log(`[BusinessContextQueue] Processing message for run_id: ${data.run_id}`);
-  console.log(`[BusinessContextQueue] Account ID: ${data.account_id}`);
-  console.log(`[BusinessContextQueue] Requested at: ${data.requested_at}`);
+  logger.info('Processing business context message', { runId: data.run_id });
+  logger.info('Account info', { accountId: data.account_id });
+  logger.info('Request timestamp', { requestedAt: data.requested_at });
 
   // Check if workflow binding exists
   if (!env.BUSINESS_CONTEXT_WORKFLOW) {
-    console.error('[BusinessContextQueue] CRITICAL: BUSINESS_CONTEXT_WORKFLOW binding is undefined!');
-    console.error('[BusinessContextQueue] Available env bindings:', Object.keys(env));
+    logger.error('CRITICAL: BUSINESS_CONTEXT_WORKFLOW binding is undefined');
+    logger.error('Available env bindings', { bindings: Object.keys(env));
     throw new Error('BUSINESS_CONTEXT_WORKFLOW binding not found');
   }
 
-  console.log('[BusinessContextQueue] BUSINESS_CONTEXT_WORKFLOW binding exists: YES');
-  console.log('[BusinessContextQueue] Workflow binding type:', typeof env.BUSINESS_CONTEXT_WORKFLOW);
+  logger.info('BUSINESS_CONTEXT_WORKFLOW binding exists');
+  logger.info('Workflow binding type', { type: typeof env.BUSINESS_CONTEXT_WORKFLOW);
 
   // Trigger workflow
-  console.log('[BusinessContextQueue] Creating workflow instance...');
-  console.log('[BusinessContextQueue] Workflow params:', JSON.stringify({
+  logger.info('Creating workflow instance');
+  logger.info('Workflow params', JSON.stringify({
     run_id: data.run_id,
     account_id: data.account_id,
     user_inputs: data.user_inputs,
@@ -115,16 +116,16 @@ async function processBusinessContextMessage(
       }
     });
 
-    console.log('[BusinessContextQueue] Workflow instance created');
-    console.log('[BusinessContextQueue] Workflow object:', workflow);
-    console.log('[BusinessContextQueue] Workflow ID:', data.run_id);
-    console.log('[BusinessContextQueue] Workflow triggered successfully');
+    logger.info('Workflow instance created');
+    logger.info('Workflow object', { workflow });
+    logger.info('Workflow ID', { workflowId: data.run_id });
+    logger.info('Workflow triggered successfully');
     
   } catch (error: any) {
-    console.error('[BusinessContextQueue] FAILED to create workflow');
-    console.error('[BusinessContextQueue] Error name:', error.name);
-    console.error('[BusinessContextQueue] Error message:', error.message);
-    console.error('[BusinessContextQueue] Error stack:', error.stack);
+    logger.error('Failed to create workflow');
+    logger.error('Error details', { errorName: error.name);
+    logger.error('Error message', { errorMessage: error.message);
+    logger.error('Error stack', { errorStack: error.stack);
     throw error;
   }
 }
@@ -137,38 +138,38 @@ async function markGenerationFailed(
   errorMessage: string,
   env: Env
 ): Promise<void> {
-  console.log(`[BusinessContextQueue] Marking generation as failed: ${data.run_id}`);
-  console.log(`[BusinessContextQueue] Error message:`, errorMessage);
+  logger.info('Marking generation as failed', { runId: data.run_id });
+  logger.info('Failure error message', { errorMessage });
 
   try {
     if (!env.BUSINESS_CONTEXT_PROGRESS) {
-      console.error('[BusinessContextQueue] CRITICAL: BUSINESS_CONTEXT_PROGRESS binding is undefined!');
+      logger.error('CRITICAL: BUSINESS_CONTEXT_PROGRESS binding is undefined');
       return;
     }
 
     const progressId = env.BUSINESS_CONTEXT_PROGRESS.idFromName(data.run_id);
-    console.log('[BusinessContextQueue] Progress DO ID:', progressId);
+    logger.info('Progress DO ID', { progressId: progressId);
     
     const progressDO = env.BUSINESS_CONTEXT_PROGRESS.get(progressId);
-    console.log('[BusinessContextQueue] Progress DO stub created');
+    logger.info('Progress DO stub created');
 
     const response = await progressDO.fetch('http://do/fail', {
       method: 'POST',
       body: JSON.stringify({ message: errorMessage })
     });
 
-    console.log('[BusinessContextQueue] DO fail response status:', response.status);
+    logger.info('DO fail response status', { status: response.status);
     
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('[BusinessContextQueue] DO fail request FAILED:', errorText);
+      logger.error('DO fail request failed', { error: errorText);
     } else {
-      console.log(`[BusinessContextQueue] Successfully marked ${data.run_id} as failed`);
+      logger.info('Successfully marked as failed', { runId: data.run_id });
     }
   } catch (error: any) {
-    console.error('[BusinessContextQueue] FAILED to mark as failed in DO');
-    console.error('[BusinessContextQueue] Error name:', error.name);
-    console.error('[BusinessContextQueue] Error message:', error.message);
-    console.error('[BusinessContextQueue] Error stack:', error.stack);
+    logger.error('Failed to mark as failed in DO');
+    logger.error('Error details', { errorName: error.name);
+    logger.error('Error message', { errorMessage: error.message);
+    logger.error('Error stack', { errorStack: error.stack);
   }
 }
