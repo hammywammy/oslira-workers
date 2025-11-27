@@ -940,17 +940,17 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           const supabase = await SupabaseClientFactory.createAdminClient(this.env);
           const analysisRepo = new AnalysisRepository(supabase);
 
-          // Structure ai_response JSONB - merge old format with Phase 2 if available
-          // Old format: { score } for backward compatibility (summary removed - bloat)
-          // Phase 2 format: Full AIResponsePayload with leadTier, strengths, opportunities, etc.
+          // Structure ai_response JSONB - flatten Phase 2 fields to top level
+          // Format: { score, leadTier, strengths, weaknesses, riskFactors, fitReasoning, opportunities, recommendedActions }
           const aiResponse: any = {
             // Always include basic fields (backward compat)
             score: aiResult.overall_score
           };
 
-          // Merge Phase 2 AI response if available
+          // Flatten Phase 2 AI response fields to top level if available
           if (phase2AIResponse) {
-            aiResponse.phase2 = phase2AIResponse;
+            // Flatten analysis fields directly to top level (no nesting)
+            Object.assign(aiResponse, phase2AIResponse.analysis);
             console.log(`[Workflow][${params.run_id}] Including Phase 2 AI response:`, {
               leadTier: phase2AIResponse.analysis.leadTier
             });
