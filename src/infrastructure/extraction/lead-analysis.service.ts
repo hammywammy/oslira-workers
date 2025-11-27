@@ -141,7 +141,7 @@ export async function analyzeLeadWithAI(
 
   logger.info('[LeadAnalysis] Starting AI analysis', {
     businessName: input.businessContext.businessName,
-    sampleSize: input.extractedData.sampleSize
+    sampleSize: input.extractedData.metadata.sampleSize
   });
 
   try {
@@ -290,21 +290,21 @@ Write a 4-6 sentence conversational summary that salespeople can quickly read an
  * Focuses on: Is this lead warm? Is this account real? Is this worth contacting?
  */
 function buildUserPrompt(data: ExtractedData, textData: TextDataForAI): string {
-  // Format actionable signals only
-  const signalsSection = `## Actionable Signals (from ${data.sampleSize} recent posts)
+  // Format actionable signals only (using nested structure: metadata, static, calculated)
+  const signalsSection = `## Actionable Signals (from ${data.metadata.sampleSize} recent posts)
 
 ### Engagement Quality
-- Engagement Rate: ${formatPercentage(data.engagementScore)}
-- Engagement Consistency: ${data.engagementConsistency?.toFixed(1) ?? 'N/A'}/100 (indicates authentic vs bought engagement)
+- Engagement Rate: ${formatPercentage(data.calculated.engagementScore)}
+- Engagement Consistency: ${data.calculated.engagementConsistency?.toFixed(1) ?? 'N/A'}/100 (indicates authentic vs bought engagement)
 
 ### Activity Status
-- Days Since Last Post: ${data.daysSinceLastPost ?? 'N/A'} (recency indicator)
+- Days Since Last Post: ${data.static.daysSinceLastPost ?? 'N/A'} (recency indicator)
 
 ### Business Type
-${data.businessCategoryName ? `- Business Category: ${data.businessCategoryName}` : '- Not a business account or category unknown'}
+${data.static.businessCategoryName ? `- Business Category: ${data.static.businessCategoryName}` : '- Not a business account or category unknown'}
 
 ### Authenticity Assessment
-- ${data.fakeFollowerWarning || 'Engagement patterns look healthy and authentic'}`;
+- ${data.calculated.fakeFollowerWarning || 'Engagement patterns look healthy and authentic'}`;
 
   // Format content insights
   const contentSection = `## Content Insights
@@ -316,10 +316,10 @@ ${textData.biography || '(No bio)'}
 ${textData.recentCaptions.slice(0, 3).map((c, i) => `${i + 1}. "${truncate(c, 150)}"`).join('\n')}
 
 ### Top Hashtags
-${data.topHashtags.length > 0 ? data.topHashtags.map(h => `#${h.hashtag} (${h.count}x)`).join(', ') : '(None used)'}
+${data.static.topHashtags.length > 0 ? data.static.topHashtags.map(h => `#${h.hashtag} (${h.count}x)`).join(', ') : '(None used)'}
 
 ### Top Mentions/Partnerships
-${data.topMentions.length > 0 ? data.topMentions.map(m => `@${m.username} (${m.count}x)`).join(', ') : '(None)'}`;
+${data.static.topMentions.length > 0 ? data.static.topMentions.map(m => `@${m.username} (${m.count}x)`).join(', ') : '(None)'}`;
 
   return `Analyze this Instagram profile for lead qualification. Focus on actionable signals only:
 
