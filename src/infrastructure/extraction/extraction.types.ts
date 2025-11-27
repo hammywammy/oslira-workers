@@ -471,172 +471,53 @@ export type ExtractionOutput =
   | ExtractionError;
 
 // ============================================================================
-// CALCULATED METRICS OUTPUT (Phase 2 - Score Calculation)
+// EXTRACTED DATA OUTPUT (Lean, Actionable Insights)
 // ============================================================================
 
 /**
- * Composite scores calculated from raw metrics (0-100 scale)
+ * Extracted data for database storage (extracted_data JSONB column)
  *
- * IMPORTANT: These scores measure PROFILE QUALITY, not business fit.
- * Business fit is determined separately by AI analysis (leadTier, overall_score).
+ * Contains ONLY actionable signals for lead qualification:
+ * - Is this lead warm?
+ * - Is this account real?
+ * - Is this worth contacting?
+ *
+ * Everything redundant (stored elsewhere) or vanity (not actionable) is removed.
  */
-export interface CompositeScores {
-  /** Engagement health score combining rate, consistency, and comment ratio */
-  engagementHealth: number;
-  /** Content sophistication based on hashtags, captions, locations, and format diversity */
-  contentSophistication: number;
-  /** Account maturity based on posting consistency, highlights, and profile completeness */
-  accountMaturity: number;
-  /** Fake follower risk score (higher = more suspicious) */
-  fakeFollowerRisk: number;
-  /**
-   * Profile Health Score (weighted combination of quality scores)
-   *
-   * IMPORTANT: Measures ACCOUNT QUALITY only - NOT business fit!
-   * A high profile health score means the account is well-maintained,
-   * but does NOT mean it's a good lead for the business.
-   *
-   * Formula: (engagementHealth × 0.3) + (contentSophistication × 0.25)
-   *          + (accountMaturity × 0.25) + ((100 - fakeFollowerRisk) × 0.2)
-   *
-   * @renamed from opportunityScore to clarify what it measures
-   */
-  profileHealthScore: number;
-}
-
-/**
- * Gap detection flags - areas where the ICP has room for improvement
- */
-export interface GapDetection {
-  /** Low engagement rate (<1%) with decent followers (>1000) */
-  engagementGap: boolean;
-  /** Basic content strategy: low hashtags (<3 avg), short captions (<100 avg), no locations */
-  contentGap: boolean;
-  /** No external links despite business features */
-  conversionGap: boolean;
-  /** Not using Reels despite algorithm preference */
-  platformGap: boolean;
-}
-
-/**
- * Flattened raw metrics for database storage
- * Contains all 52 metrics from the extraction result in a flat structure
- */
-export interface RawMetricsFlat {
-  // Profile metrics (18)
-  followersCount: number;
-  followsCount: number;
-  postsCount: number;
-  authorityRatioRaw: number | null;
-  authorityRatio: number | null;
-  isBusinessAccount: boolean;
-  verified: boolean;
-  hasChannel: boolean;
-  businessCategoryName: string | null;
-  hasExternalLink: boolean;
-  externalUrl: string | null;
-  externalUrls: ExternalLinkInfo[];
-  externalLinksCount: number;
-  highlightReelCount: number;
-  igtvVideoCount: number;
-  hasBio: boolean;
-  bioLength: number;
-  username: string;
-
-  // Engagement metrics (11)
-  totalLikes: number | null;
-  totalComments: number | null;
-  totalEngagement: number | null;
-  avgLikesPerPost: number | null;
-  avgCommentsPerPost: number | null;
-  avgEngagementPerPost: number | null;
-  engagementRate: number | null;
-  commentToLikeRatio: number | null;
-  engagementStdDev: number | null;
-  engagementConsistency: number | null;
-  engagementRatePerPost: number[];
-
-  // Frequency metrics (8)
-  oldestPostTimestamp: string | null;
-  newestPostTimestamp: string | null;
-  postingPeriodDays: number | null;
-  postingFrequency: number | null;
-  daysSinceLastPost: number | null;
-  avgDaysBetweenPosts: number | null;
-  timeBetweenPostsDays: number[];
-  postingConsistency: number | null;
-
-  // Format metrics (11)
-  reelsCount: number;
-  videoCount: number;
-  nonReelsVideoCount: number;
-  imageCount: number;
-  carouselCount: number;
-  reelsRate: number | null;
-  videoRate: number | null;
-  imageRate: number | null;
-  carouselRate: number | null;
-  formatDiversity: number;
-  dominantFormat: 'reels' | 'video' | 'image' | 'carousel' | 'mixed' | null;
-
-  // Content metrics (19 - added topHashtags and topMentions)
-  totalHashtags: number;
-  avgHashtagsPerPost: number | null;
-  uniqueHashtagCount: number;
-  hashtagDiversity: number | null;
-  /** Top hashtags with frequency counts (top 10) */
-  topHashtags: HashtagFrequency[];
-  totalMentions: number;
-  avgMentionsPerPost: number | null;
-  uniqueMentionCount: number;
-  /** Top mentions with frequency counts (top 5) */
-  topMentions: MentionFrequency[];
-  totalCaptionLength: number;
-  avgCaptionLength: number | null;
-  avgCaptionLengthNonEmpty: number | null;
-  maxCaptionLength: number;
-  postsWithLocation: number;
-  locationTaggingRate: number | null;
-  postsWithAltText: number;
-  altTextRate: number | null;
-  postsWithCommentsDisabled: number;
-  commentsDisabledRate: number | null;
-  commentsEnabledRate: number | null;
-
-  // Video metrics (4)
-  videoPostCount: number;
-  totalVideoViews: number | null;
-  avgVideoViews: number | null;
-  videoViewToLikeRatio: number | null;
-
-  // Risk scores (2)
-  fakeFollowerRiskScore: number | null;
-  fakeFollowerWarnings: string[];
-
-  // Derived metrics (4)
-  contentDensity: number | null;
-  recentViralPostCount: number;
-  recentPostsSampled: number;
-  /** @deprecated Use recentViralPostCount and recentPostsSampled instead */
-  viralPostRate: number | null;
-}
-
-/**
- * Complete calculated metrics for database storage (calculated_metrics JSONB column)
- */
-export interface CalculatedMetrics {
+export interface ExtractedData {
   /** Schema version for backwards compatibility */
   version: '1.0';
-  /** ISO timestamp when calculation was performed */
-  calculatedAt: string;
+  /** ISO timestamp when extraction was performed */
+  extractedAt: string;
   /** Number of posts analyzed */
   sampleSize: number;
-  /** Flattened raw metrics */
-  raw: RawMetricsFlat;
-  /** Composite scores (0-100 scale) */
-  scores: CompositeScores;
-  /** Gap detection flags */
-  gaps: GapDetection;
+
+  // ========== ENGAGEMENT SIGNALS ==========
+  /** Engagement rate (%) - key signal for account health */
+  engagementScore: number | null;
+  /** Engagement consistency (0-100) - indicates authentic engagement */
+  engagementConsistency: number | null;
+
+  // ========== RECENCY SIGNALS ==========
+  /** Days since last post - indicates account activity */
+  daysSinceLastPost: number | null;
+
+  // ========== CONTENT SIGNALS ==========
+  /** Top hashtags with frequency counts (top 10) - indicates content themes */
+  topHashtags: HashtagFrequency[];
+  /** Top mentioned usernames with frequency counts (top 5) - indicates partnerships */
+  topMentions: MentionFrequency[];
+
+  // ========== BUSINESS SIGNALS ==========
+  /** Business category if account is a business account */
+  businessCategoryName: string | null;
+
+  // ========== RISK SIGNALS ==========
+  /**
+   * Soft warning about potential fake followers (not a hard numeric score)
+   * Examples: "Some engagement patterns look inconsistent", "Account appears authentic", etc.
+   */
+  fakeFollowerWarning: string | null;
 }
 
 // ============================================================================
@@ -667,9 +548,6 @@ export interface AILeadAnalysis {
   /** Lead qualification tier */
   leadTier: 'hot' | 'warm' | 'cold';
 
-  /** Brief summary of the ICP profile */
-  summary: string;
-
   /** Key strengths identified in the ICP */
   strengths: string[];
 
@@ -679,9 +557,6 @@ export interface AILeadAnalysis {
   /** Specific opportunities to pitch the business services */
   opportunities: string[];
 
-  /** Personalized outreach hooks based on ICP's content */
-  outreachHooks: string[];
-
   /** Recommended next actions for the business */
   recommendedActions: string[];
 
@@ -690,33 +565,17 @@ export interface AILeadAnalysis {
 
   /** Why this ICP is/isn't a good fit */
   fitReasoning: string;
-
-  /**
-   * Partnership Assessment Summary
-   * Quick, conversational summary for salespeople (4-6 sentences)
-   * Uses clear, direct language without excessive metrics
-   * Covers: content observation, ICP fit, alignment with value prop, signals, and recommendation
-   */
-  partnershipAssessment: string;
 }
 
 /**
  * Complete AI response for database storage (ai_response JSONB column)
+ * Note: analyzedAt, tokenUsage, and cost are tracked separately in the database
  */
 export interface AIResponsePayload {
   /** Schema version for backwards compatibility */
   version: '1.0';
-  /** ISO timestamp when analysis was performed */
-  analyzedAt: string;
   /** AI model used for analysis */
   model: string;
-  /** Token usage and cost for tracking */
-  tokenUsage: {
-    input: number;
-    output: number;
-    /** Cost in USD for this AI call */
-    cost: number;
-  };
   /** The actual analysis result */
   analysis: AILeadAnalysis;
 }

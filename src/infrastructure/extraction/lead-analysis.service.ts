@@ -8,8 +8,8 @@
  * personalized insights and outreach recommendations.
  *
  * Process:
- * 1. Receive CalculatedMetrics + BusinessContext
- * 2. Build comprehensive prompt with metrics and context
+ * 1. Receive ExtractedData + BusinessContext
+ * 2. Build lean prompt with actionable signals only
  * 3. Call GPT-5 via AI Gateway with structured output
  * 4. Return AIResponsePayload for database storage
  *
@@ -25,7 +25,7 @@ import {
 } from '@/shared/utils/number-format.util';
 import { AIGatewayClient, type AIResponse } from '@/infrastructure/ai/ai-gateway.client';
 import type {
-  CalculatedMetrics,
+  ExtractedData,
   BusinessContext,
   AILeadAnalysis,
   AIResponsePayload,
@@ -58,10 +58,6 @@ const LEAD_ANALYSIS_TOOL_SCHEMA = {
         enum: ['hot', 'warm', 'cold'],
         description: 'Lead qualification tier based on fit with business services'
       },
-      summary: {
-        type: 'string',
-        description: 'Brief 2-3 sentence summary of the ICP profile and their fit'
-      },
       strengths: {
         type: 'array',
         items: { type: 'string' },
@@ -77,11 +73,6 @@ const LEAD_ANALYSIS_TOOL_SCHEMA = {
         items: { type: 'string' },
         description: 'Specific opportunities to pitch business services (3-5 items)'
       },
-      outreachHooks: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'Personalized conversation starters based on ICP content (3-5 items)'
-      },
       recommendedActions: {
         type: 'array',
         items: { type: 'string' },
@@ -95,23 +86,16 @@ const LEAD_ANALYSIS_TOOL_SCHEMA = {
       fitReasoning: {
         type: 'string',
         description: 'Detailed explanation of why this ICP is/isn\'t a good fit (2-4 sentences)'
-      },
-      partnershipAssessment: {
-        type: 'string',
-        description: 'Quick, conversational partnership summary for salespeople (4-6 sentences). Use clear, direct business language WITHOUT excessive metrics or jargon. Cover: brief content/engagement observation, ICP fit analysis, alignment with value proposition, red flags or positive signals, and a clear pursue/don\'t pursue recommendation with rationale.'
       }
     },
     required: [
       'leadTier',
-      'summary',
       'strengths',
       'weaknesses',
       'opportunities',
-      'outreachHooks',
       'recommendedActions',
       'riskFactors',
-      'fitReasoning',
-      'partnershipAssessment'
+      'fitReasoning'
     ],
     additionalProperties: false
   }
@@ -122,7 +106,7 @@ const LEAD_ANALYSIS_TOOL_SCHEMA = {
 // ============================================================================
 
 export interface LeadAnalysisInput {
-  calculatedMetrics: CalculatedMetrics;
+  extractedData: ExtractedData;
   textData: TextDataForAI;
   businessContext: BusinessContext;
 }
@@ -156,15 +140,14 @@ export async function analyzeLeadWithAI(
   const startTime = Date.now();
 
   logger.info('[LeadAnalysis] Starting AI analysis', {
-    username: input.calculatedMetrics.raw.username,
     businessName: input.businessContext.businessName,
-    sampleSize: input.calculatedMetrics.sampleSize
+    sampleSize: input.extractedData.sampleSize
   });
 
   try {
     // Build prompts
     const systemPrompt = buildSystemPrompt(input.businessContext);
-    const userPrompt = buildUserPrompt(input.calculatedMetrics, input.textData);
+    const userPrompt = buildUserPrompt(input.extractedData, input.textData);
 
     // Create AI client
     const aiClient = new AIGatewayClient(
@@ -199,23 +182,16 @@ export async function analyzeLeadWithAI(
       throw new Error('GPT-5 returned invalid analysis structure');
     }
 
-    // Build response payload
+    // Build response payload (analyzedAt and tokenUsage tracked separately in DB)
     const payload: AIResponsePayload = {
       version: '1.0',
-      analyzedAt: new Date().toISOString(),
       model: LEAD_ANALYSIS_MODEL,
-      tokenUsage: {
-        input: response.usage.input_tokens,
-        output: response.usage.output_tokens,
-        cost: response.usage.total_cost
-      },
       analysis
     };
 
     const processingTime = Date.now() - startTime;
 
     logger.info('[LeadAnalysis] Analysis complete', {
-      username: input.calculatedMetrics.raw.username,
       leadTier: analysis.leadTier,
       tokensIn: response.usage.input_tokens,
       tokensOut: response.usage.output_tokens,
@@ -232,7 +208,6 @@ export async function analyzeLeadWithAI(
     const processingTime = Date.now() - startTime;
 
     logger.error('[LeadAnalysis] Analysis failed', {
-      username: input.calculatedMetrics.raw.username,
       error: error.message,
       processingTimeMs: processingTime
     });
@@ -310,63 +285,29 @@ Write a 4-6 sentence conversational summary that salespeople can quickly read an
 /**
  * Build user prompt with ICP metrics and content
  */
-function buildUserPrompt(metrics: CalculatedMetrics, textData: TextDataForAI): string {
-  const { raw, scores, gaps } = metrics;
+/**
+ * Build user prompt with lean, actionable signals only
+ * Focuses on: Is this lead warm? Is this account real? Is this worth contacting?
+ */
+function buildUserPrompt(data: ExtractedData, textData: TextDataForAI): string {
+  // Format actionable signals only
+  const signalsSection = `## Actionable Signals (from ${data.sampleSize} recent posts)
 
-  // Format key metrics
-  const metricsSection = `## Profile Metrics
+### Engagement Quality
+- Engagement Rate: ${formatPercentage(data.engagementScore)}
+- Engagement Consistency: ${data.engagementConsistency?.toFixed(1) ?? 'N/A'}/100 (indicates authentic vs bought engagement)
 
-### Audience
-- Followers: ${formatNumber(raw.followersCount)}
-- Following: ${formatNumber(raw.followsCount)}
-- Authority Ratio: ${raw.authorityRatio?.toFixed(2) ?? 'N/A'}
-- Total Posts: ${raw.postsCount}
+### Activity Status
+- Days Since Last Post: ${data.daysSinceLastPost ?? 'N/A'} (recency indicator)
 
-### Engagement (from ${metrics.sampleSize} recent posts)
-- Engagement Rate: ${formatPercentage(raw.engagementRate)}
-- Avg Likes/Post: ${formatNumber(raw.avgLikesPerPost)}
-- Avg Comments/Post: ${raw.avgCommentsPerPost?.toFixed(1) ?? 'N/A'}
-- Comment-to-Like Ratio: ${raw.commentToLikeRatio?.toFixed(3) ?? 'N/A'}
-- Engagement Consistency: ${raw.engagementConsistency?.toFixed(1) ?? 'N/A'}/100
+### Business Type
+${data.businessCategoryName ? `- Business Category: ${data.businessCategoryName}` : '- Not a business account or category unknown'}
 
-### Posting Behavior
-- Posts/Month: ${raw.postingFrequency?.toFixed(1) ?? 'N/A'}
-- Days Since Last Post: ${raw.daysSinceLastPost ?? 'N/A'}
-- Posting Consistency: ${raw.postingConsistency?.toFixed(1) ?? 'N/A'}/100
+### Authenticity Assessment
+- ${data.fakeFollowerWarning || 'Engagement patterns look healthy and authentic'}`;
 
-### Content Strategy
-- Dominant Format: ${raw.dominantFormat ?? 'N/A'}
-- Reels Rate: ${formatPercentage(raw.reelsRate)}
-- Avg Hashtags/Post: ${raw.avgHashtagsPerPost?.toFixed(1) ?? 'N/A'}
-- Avg Caption Length: ${raw.avgCaptionLength?.toFixed(0) ?? 'N/A'} chars
-- Location Tagging Rate: ${formatPercentage(raw.locationTaggingRate)}
-
-### Profile Features
-- Business Account: ${raw.isBusinessAccount ? 'Yes' : 'No'}
-- Verified: ${raw.verified ? 'Yes' : 'No'}
-- Has External Link: ${raw.hasExternalLink ? 'Yes' : 'No'}
-- Has Bio: ${raw.hasBio ? 'Yes' : 'No'}
-- Highlight Reels: ${raw.highlightReelCount}`;
-
-  // Format composite scores
-  // NOTE: Profile Health Score measures ACCOUNT QUALITY, not business fit
-  const scoresSection = `## Composite Scores (0-100)
-- Engagement Health: ${scores.engagementHealth}
-- Content Sophistication: ${scores.contentSophistication}
-- Account Maturity: ${scores.accountMaturity}
-- Fake Follower Risk: ${scores.fakeFollowerRisk}
-- **Profile Health Score: ${scores.profileHealthScore}** (measures account quality, NOT business fit)`;
-
-  // Format gap detection
-  const gapsSection = `## Detected Gaps
-${gaps.engagementGap ? '- ENGAGEMENT GAP: Low engagement rate despite audience size' : ''}
-${gaps.contentGap ? '- CONTENT GAP: Basic content strategy (low hashtags, short captions, or missing locations)' : ''}
-${gaps.conversionGap ? '- CONVERSION GAP: No external links despite business potential' : ''}
-${gaps.platformGap ? '- PLATFORM GAP: Under-utilizing Reels format' : ''}
-${!gaps.engagementGap && !gaps.contentGap && !gaps.conversionGap && !gaps.platformGap ? '- No significant gaps detected' : ''}`;
-
-  // Format content samples
-  const contentSection = `## Content Samples
+  // Format content insights
+  const contentSection = `## Content Insights
 
 ### Bio
 ${textData.biography || '(No bio)'}
@@ -374,26 +315,24 @@ ${textData.biography || '(No bio)'}
 ### Recent Captions (excerpts)
 ${textData.recentCaptions.slice(0, 3).map((c, i) => `${i + 1}. "${truncate(c, 150)}"`).join('\n')}
 
-### Top Hashtags Used
-${textData.hashtagFrequency.slice(0, 10).map(h => `#${h.hashtag} (${h.count}x)`).join(', ') || '(None)'}
+### Top Hashtags
+${data.topHashtags.length > 0 ? data.topHashtags.map(h => `#${h.hashtag} (${h.count}x)`).join(', ') : '(None used)'}
 
-### Mentions
-${textData.uniqueMentions.slice(0, 5).join(', ') || '(None)'}
+### Top Mentions/Partnerships
+${data.topMentions.length > 0 ? data.topMentions.map(m => `@${m.username} (${m.count}x)`).join(', ') : '(None)'}`;
 
-### Locations Tagged
-${textData.locationNames.slice(0, 5).join(', ') || '(None)'}`;
+  return `Analyze this Instagram profile for lead qualification. Focus on actionable signals only:
 
-  return `Analyze this Instagram profile and determine lead qualification:
-
-${metricsSection}
-
-${scoresSection}
-
-${gapsSection}
+${signalsSection}
 
 ${contentSection}
 
-Based on this data, provide your lead analysis using the submit_lead_analysis tool.`;
+**Your Task**: Based on these lean signals, determine:
+1. Is this lead warm (engaged, active, real)?
+2. Is this account authentic?
+3. Is this worth contacting?
+
+Provide your analysis using the submit_lead_analysis tool.`;
 }
 
 // ============================================================================
@@ -429,15 +368,12 @@ function isValidAnalysis(analysis: any): analysis is AILeadAnalysis {
     analysis &&
     typeof analysis.leadTier === 'string' &&
     ['hot', 'warm', 'cold'].includes(analysis.leadTier) &&
-    typeof analysis.summary === 'string' &&
     Array.isArray(analysis.strengths) &&
     Array.isArray(analysis.weaknesses) &&
     Array.isArray(analysis.opportunities) &&
-    Array.isArray(analysis.outreachHooks) &&
     Array.isArray(analysis.recommendedActions) &&
     Array.isArray(analysis.riskFactors) &&
-    typeof analysis.fitReasoning === 'string' &&
-    typeof analysis.partnershipAssessment === 'string'
+    typeof analysis.fitReasoning === 'string'
   );
 }
 

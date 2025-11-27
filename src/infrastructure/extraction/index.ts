@@ -67,12 +67,9 @@ export type {
   ExtractionOutput
 } from './extraction.types';
 
-// Types - Calculated Metrics (Phase 2)
+// Types - Extracted Data (Phase 2)
 export type {
-  CompositeScores,
-  GapDetection,
-  RawMetricsFlat,
-  CalculatedMetrics
+  ExtractedData
 } from './extraction.types';
 
 // Types - AI Analysis (Phase 2)
@@ -82,14 +79,8 @@ export type {
   AIResponsePayload
 } from './extraction.types';
 
-// Services - Score Calculation (Phase 2)
-export {
-  calculateScores,
-  type ScoreCalculationResult
-} from './score-calculator.service';
-
 // Services - Output Transformation (Phase 2)
-export { transformToCalculatedMetrics } from './output-transformer.service';
+export { transformToExtractedData } from './output-transformer.service';
 
 // Services - Lead Analysis (Phase 2)
 export {
