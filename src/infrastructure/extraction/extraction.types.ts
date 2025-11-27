@@ -525,7 +525,9 @@ export interface ExtractedData {
   calculated: {
     // Core engagement metrics
     engagementScore: number | null;
+    engagementRate: number | null;
     engagementConsistency: number | null;
+    postingFrequency: number | null;
 
     // Risk assessment
     fakeFollowerWarning: string | null;
