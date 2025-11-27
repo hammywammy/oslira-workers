@@ -13,6 +13,7 @@ import { LeadsRepository } from '@/infrastructure/database/repositories/leads.re
 import { z } from 'zod';
 import { getCreditCost, getCreditType, type AnalysisType } from '@/config/operations-pricing.config';
 import { logger } from '@/shared/utils/logger.util';
+import { JWTService } from '@/infrastructure/auth/jwt.service';
 
 /**
  * ASYNC ANALYSIS HANDLERS
@@ -253,31 +254,43 @@ export async function internalBroadcast(c: Context<{ Bindings: Env }>) {
  * Frontend connects ONCE to this endpoint, receives updates for ALL analyses.
  *
  * NOTE: WebSocket connections can't send Authorization headers in browsers,
- * so auth is handled via getAuthContext which checks cookies/headers.
+ * so auth is handled via query parameter token.
  */
 export async function globalWebSocketUpgrade(c: Context<{ Bindings: Env }>) {
   try {
-    // Upgrade to WebSocket (check before auth to fail fast)
     const upgradeHeader = c.req.header('Upgrade');
     if (upgradeHeader !== 'websocket') {
       return errorResponse(c, 'Expected WebSocket', 'INVALID_REQUEST', 400);
     }
 
-    // Get auth context (checks Authorization header or cookies)
-    const auth = getAuthContext(c);
+    // GET TOKEN FROM QUERY PARAMETER
+    const token = c.req.query('token');
+    if (!token) {
+      return errorResponse(c, 'Missing token', 'UNAUTHORIZED', 401);
+    }
+
+    // VERIFY TOKEN MANUALLY
+    const jwtService = new JWTService(c.env);
+    const payload = await jwtService.verify(token);
+
+    if (!payload) {
+      return errorResponse(c, 'Invalid or expired token', 'UNAUTHORIZED', 401);
+    }
+
+    const accountId = payload.accountId;
 
     logger.info('[GlobalWebSocket] Upgrade request', {
-      accountId: auth.accountId,
+      accountId,
       headers: Object.fromEntries(c.req.raw.headers.entries())
     });
 
     // Get broadcaster DO for this account
-    const broadcasterId = c.env.GLOBAL_BROADCASTER.idFromName(auth.accountId);
+    const broadcasterId = c.env.GLOBAL_BROADCASTER.idFromName(accountId);
     const broadcasterDO = c.env.GLOBAL_BROADCASTER.get(broadcasterId);
 
     // Proxy WebSocket upgrade to DO
     return broadcasterDO.fetch(
-      `http://do/websocket?accountId=${auth.accountId}`,
+      `http://do/websocket?accountId=${accountId}`,
       {
         headers: c.req.raw.headers
       }

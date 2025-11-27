@@ -29,9 +29,8 @@ export function registerAnalysisRoutes(app: Hono<{ Bindings: Env }>) {
   // TODO: Add IP whitelist or internal auth token for production
   app.post('/api/internal/broadcast', internalBroadcast);
 
-  // Global WebSocket endpoint - authenticated via auth middleware
+  // Global WebSocket endpoint - authenticated via query parameter token
   // Frontend connects once to receive ALL analysis progress updates
-  app.use('/api/analysis/ws', authMiddleware);
   app.get('/api/analysis/ws', globalWebSocketUpgrade);
 
   // All analysis routes require authentication
