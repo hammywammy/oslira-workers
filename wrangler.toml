@@ -67,12 +67,16 @@ script_name = "oslira-workers"
 # ===========================
 [[migrations]]
 tag = "v1"
-new_classes = ["GlobalBroadcasterDO"]
-# Note: AnalysisProgressDO will be automatically cleaned up since binding was removed
+new_classes = ["AnalysisProgressDO"]
 
 [[migrations]]
 tag = "v2"
 new_classes = ["BusinessContextProgressDO"]
+
+[[migrations]]
+tag = "v3"
+new_classes = ["GlobalBroadcasterDO"]
+deleted_classes = ["AnalysisProgressDO"]
 
 # ===========================
 # QUEUES
