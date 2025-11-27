@@ -346,4 +346,159 @@ function detectGaps(extraction: ExtractionResult): GapDetection {
   return gaps;
 }
 
+// ============================================================================
+// ENGAGEMENT SCORE (0-100 NORMALIZED QUALITY SCALE)
+// ============================================================================
+
+/**
+ * Calculate Engagement Score (0-100 normalized quality scale)
+ *
+ * Converts raw engagement rate (decimal) into a human-readable quality score.
+ * Based on Instagram industry benchmarks:
+ *
+ * Scale:
+ * - 0-20: Extremely low (<0.5% ER)
+ * - 20-40: Weak (0.5-1.5% ER)
+ * - 40-60: Average (1.5-3% ER)
+ * - 60-80: Strong (3-6% ER)
+ * - 80-100: Exceptional (>6% ER)
+ *
+ * @param engagementRate - Decimal engagement rate (e.g., 0.044 for 4.4%)
+ */
+export function calculateEngagementScore(engagementRate: number | null): number | null {
+  if (engagementRate === null) {
+    return null;
+  }
+
+  // Convert decimal to percentage for calculation
+  const erPercent = engagementRate * 100;
+
+  let score: number;
+
+  if (erPercent < 0.5) {
+    // Extremely low: 0-20 points
+    // Linear scale from 0% = 0 points to 0.5% = 20 points
+    score = (erPercent / 0.5) * 20;
+  } else if (erPercent < 1.5) {
+    // Weak: 20-40 points
+    // Linear scale from 0.5% = 20 points to 1.5% = 40 points
+    score = 20 + ((erPercent - 0.5) / 1.0) * 20;
+  } else if (erPercent < 3.0) {
+    // Average: 40-60 points
+    // Linear scale from 1.5% = 40 points to 3% = 60 points
+    score = 40 + ((erPercent - 1.5) / 1.5) * 20;
+  } else if (erPercent < 6.0) {
+    // Strong: 60-80 points
+    // Linear scale from 3% = 60 points to 6% = 80 points
+    score = 60 + ((erPercent - 3.0) / 3.0) * 20;
+  } else {
+    // Exceptional: 80-100 points
+    // Linear scale from 6% = 80 points to 10%+ = 100 points (capped)
+    score = 80 + Math.min(((erPercent - 6.0) / 4.0) * 20, 20);
+  }
+
+  const clamped = clamp(0, 100, score);
+
+  logger.debug('[ScoreCalculator] Engagement score calculated', {
+    engagementRate,
+    engagementRatePercent: (erPercent).toFixed(2) + '%',
+    rawScore: score,
+    finalScore: clamped,
+    tier: clamped < 20 ? 'extremely_low' :
+          clamped < 40 ? 'weak' :
+          clamped < 60 ? 'average' :
+          clamped < 80 ? 'strong' : 'exceptional'
+  });
+
+  return round(clamped);
+}
+
+// ============================================================================
+// NEW SCORING SYSTEM (0-100 TOTAL)
+// ============================================================================
+
+/**
+ * Calculate Readiness Score (0-25 points, 25% of total)
+ *
+ * Measures content quality, professionalism, and sophistication.
+ * Based on contentSophistication score (0-100) scaled to 0-25.
+ *
+ * Components from contentSophistication:
+ * - Hashtag usage and strategy
+ * - Caption quality and length
+ * - Location tagging
+ * - Format diversity
+ */
+export function calculateReadinessScore(extraction: ExtractionResult): number {
+  const contentSophistication = calculateContentSophistication(extraction);
+
+  // Scale 0-100 score to 0-25
+  const readinessScore = (contentSophistication / 100) * 25;
+
+  logger.debug('[ScoreCalculator] Readiness score calculated', {
+    contentSophistication,
+    readinessScore: round(readinessScore)
+  });
+
+  return round(readinessScore);
+}
+
+/**
+ * Calculate Partner Engagement Score (0-15 points, 15% of total)
+ *
+ * Measures active engaged audience quality.
+ * Based on engagementHealth score (0-100) scaled to 0-15.
+ *
+ * Components from engagementHealth:
+ * - Engagement rate
+ * - Engagement consistency
+ * - Comment to like ratio
+ */
+export function calculatePartnerEngagementScore(extraction: ExtractionResult): number {
+  const engagementHealth = calculateEngagementHealth(extraction);
+
+  // Scale 0-100 score to 0-15
+  const partnerEngagementScore = (engagementHealth / 100) * 15;
+
+  logger.debug('[ScoreCalculator] Partner engagement score calculated', {
+    engagementHealth,
+    partnerEngagementScore: round(partnerEngagementScore)
+  });
+
+  return round(partnerEngagementScore);
+}
+
+/**
+ * Calculate Authority Score (0-10 points, 10% of total)
+ *
+ * Measures account maturity and credibility.
+ * Combines accountMaturity (70%) and authorityRatio (30%) scaled to 0-10.
+ *
+ * Components:
+ * - Account maturity: posting consistency, profile completeness
+ * - Authority ratio: followers vs following ratio
+ */
+export function calculateAuthorityScore(extraction: ExtractionResult): number {
+  const accountMaturity = calculateAccountMaturity(extraction);
+  const { profileMetrics } = extraction;
+
+  // Get authority ratio (0-100 scale) or 0 if null
+  const authorityRatio = profileMetrics.authorityRatio ?? 0;
+
+  // Weighted combination: 70% maturity, 30% authority ratio
+  const combinedScore = (accountMaturity * 0.7) + (authorityRatio * 0.3);
+
+  // Scale to 0-10
+  const authorityScore = (combinedScore / 100) * 10;
+
+  logger.debug('[ScoreCalculator] Authority score calculated', {
+    accountMaturity,
+    authorityRatio,
+    combinedScore,
+    authorityScore: round(authorityScore)
+  });
+
+  return round(authorityScore);
+}
+
 // Export is already done via the function declaration above

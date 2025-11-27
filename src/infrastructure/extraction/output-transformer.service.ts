@@ -17,7 +17,13 @@ import type {
   ExtractionResult,
   ExtractedData
 } from './extraction.types';
-import { calculateScores } from './score-calculator.service';
+import {
+  calculateScores,
+  calculateEngagementScore,
+  calculateReadinessScore,
+  calculatePartnerEngagementScore,
+  calculateAuthorityScore
+} from './score-calculator.service';
 
 // ============================================================================
 // TRANSFORMER SERVICE
@@ -45,6 +51,14 @@ export function transformToExtractedData(extraction: ExtractionResult): Extracte
 
   // Calculate composite scores
   const { scores } = calculateScores(extraction);
+
+  // Calculate engagement score (0-100 normalized quality scale)
+  const engagementScore = calculateEngagementScore(engagementMetrics.engagementRate);
+
+  // Calculate new scoring system components
+  const readinessScore = calculateReadinessScore(extraction);
+  const partnerEngagementScore = calculatePartnerEngagementScore(extraction);
+  const authorityScore = calculateAuthorityScore(extraction);
 
   // Generate soft warning from fake follower risk
   const fakeFollowerWarning = generateFakeFollowerWarning(
@@ -88,10 +102,9 @@ export function transformToExtractedData(extraction: ExtractionResult): Extracte
 
     calculated: {
       // Core engagement metrics
-      engagementScore: engagementMetrics.engagementRate,
-      engagementRate: engagementMetrics.engagementRate,
+      engagementScore,                               // 0-100 normalized quality scale
+      engagementRate: engagementMetrics.engagementRate,  // Decimal (e.g., 0.044 = 4.4%)
       engagementConsistency: engagementMetrics.engagementConsistency,
-      postingFrequency: frequencyMetrics.postingFrequency,
 
       // Risk assessment
       fakeFollowerWarning,
@@ -101,7 +114,12 @@ export function transformToExtractedData(extraction: ExtractionResult): Extracte
       accountMaturity: scores.accountMaturity,
       engagementHealth: scores.engagementHealth,
       profileHealthScore: scores.profileHealthScore,
-      contentSophistication: scores.contentSophistication
+      contentSophistication: scores.contentSophistication,
+
+      // New scoring system (0-100 total)
+      readinessScore,             // 0-25 points: Content quality, professionalism, sophistication
+      partnerEngagementScore,     // 0-15 points: Active engaged audience
+      authorityScore              // 0-10 points: Account maturity and credibility
     }
   };
 
@@ -112,6 +130,17 @@ export function transformToExtractedData(extraction: ExtractionResult): Extracte
     sampleSize: extractedData.metadata.sampleSize,
     hasHashtags: extractedData.static.topHashtags.length > 0,
     hasMentions: extractedData.static.topMentions.length > 0,
+    engagement: {
+      rate: extractedData.calculated.engagementRate,
+      ratePercent: extractedData.calculated.engagementRate ? (extractedData.calculated.engagementRate * 100).toFixed(2) + '%' : null,
+      score: extractedData.calculated.engagementScore
+    },
+    newScores: {
+      readinessScore: extractedData.calculated.readinessScore,
+      partnerEngagementScore: extractedData.calculated.partnerEngagementScore,
+      authorityScore: extractedData.calculated.authorityScore,
+      subtotal: extractedData.calculated.readinessScore + extractedData.calculated.partnerEngagementScore + extractedData.calculated.authorityScore
+    },
     processingTimeMs: processingTime
   });
 
