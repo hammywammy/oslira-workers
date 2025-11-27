@@ -26,6 +26,7 @@ import {
   type PreAnalysisChecksSummary,
   type AnalysisResultType
 } from '@/infrastructure/analysis-checks';
+import { logger } from '@/shared/utils/logger.util';
 
 // Phase 2: Profile Extraction & Data Transformation
 import {
@@ -150,6 +151,14 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
     const creditsCost = getCreditCost(params.analysis_type);
     const workflowStartTime = Date.now();
 
+    // Context for structured logging
+    const logContext = {
+      runId: params.run_id,
+      username: params.username,
+      accountId: params.account_id,
+      analysisType: params.analysis_type
+    };
+
     // Timing tracker
     const timing = {
       cache_check: 0,
@@ -164,9 +173,8 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
     let scrapeErrorInfo: ApifyErrorItem | null = null;
 
     try {
-      console.log(`[Workflow][${params.run_id}] START`, {
-        username: params.username,
-        type: params.analysis_type,
+      logger.info('Analysis workflow started', {
+        ...logContext,
         credits: creditsCost
       });
 
@@ -175,7 +183,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       // This ensures SSE connections can establish without race conditions
       await step.do('connect_progress', async () => {
         try {
-          console.log(`[Workflow][${params.run_id}] Connecting to progress tracker`);
+          logger.info('Connecting to progress tracker', logContext);
 
           const id = this.env.ANALYSIS_PROGRESS.idFromName(params.run_id);
           const progressDO = this.env.ANALYSIS_PROGRESS.get(id);
@@ -185,16 +193,20 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           const progress = await progressResponse.json();
 
           if (!progress) {
-            console.error(`[Workflow][${params.run_id}] Progress tracker not initialized!`);
+            logger.error('Progress tracker not initialized', logContext);
             throw new Error('Progress tracker not initialized by API handler');
           }
 
-          console.log(`[Workflow][${params.run_id}] Connected to progress tracker successfully`, {
+          logger.info('Connected to progress tracker successfully', {
+            ...logContext,
             status: progress.status,
             progress: progress.progress
           });
         } catch (error: any) {
-          console.error(`[Workflow][${params.run_id}] Step 1 FAILED:`, this.serializeError(error));
+          logger.error('Step 1 (connect_progress) failed', {
+            ...logContext,
+            error: this.serializeError(error)
+          });
           throw error;
         }
       });
@@ -202,7 +214,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       // Step 1b: Fetch secrets early (for Phase 2 AI analysis)
       const secrets = await step.do('fetch_secrets', async () => {
         try {
-          console.log(`[Workflow][${params.run_id}] Step 1b: Fetching API secrets`);
+          logger.info('Fetching API secrets', logContext);
 
           const [openaiKey, claudeKey, aiGatewayToken] = await Promise.all([
             getSecret('OPENAI_API_KEY', this.env, this.env.APP_ENV),
@@ -210,10 +222,13 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             getSecret('CLOUDFLARE_AI_GATEWAY_TOKEN', this.env, this.env.APP_ENV)
           ]);
 
-          console.log(`[Workflow][${params.run_id}] Secrets fetched successfully`);
+          logger.info('Secrets fetched successfully', logContext);
           return { openaiKey, claudeKey, aiGatewayToken };
         } catch (error: any) {
-          console.error(`[Workflow][${params.run_id}] Step 1b FAILED:`, this.serializeError(error));
+          logger.error('Step 1b (fetch_secrets) failed', {
+            ...logContext,
+            error: this.serializeError(error)
+          });
           throw error;
         }
       });
@@ -222,14 +237,11 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       // OPTIMIZED: Uses single JOIN query instead of two sequential queries (saves 2-3s)
       await step.do('check_duplicate', async () => {
         try {
-          console.log(`[Workflow][${params.run_id}] Step 2: Checking for duplicates`);
-          // NOTE: Progress update moved to critical steps only (see MUST DO #3)
+          logger.info('Checking for duplicate analysis', logContext);
 
           const supabase = await SupabaseClientFactory.createAdminClient(this.env);
           const analysisRepo = new AnalysisRepository(supabase);
 
-          // ONE query instead of two (findByUsername + findInProgressAnalysis)
-          console.log(`[Workflow][${params.run_id}] Checking for in-progress analysis for @${params.username}`);
           const result = await analysisRepo.findLeadWithInProgressAnalysis(
             params.account_id,
             params.business_profile_id,
@@ -238,13 +250,19 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           );
 
           if (result.hasInProgress) {
-            console.error(`[Workflow][${params.run_id}] Duplicate analysis found for lead: ${result.leadId}`);
+            logger.error('Duplicate analysis found', {
+              ...logContext,
+              leadId: result.leadId
+            });
             throw new Error('Analysis already in progress for this profile');
           }
 
-          console.log(`[Workflow][${params.run_id}] No duplicates found (excluding self)`);
+          logger.info('No duplicate analysis found', logContext);
         } catch (error: any) {
-          console.error(`[Workflow][${params.run_id}] Step 2 FAILED:`, this.serializeError(error));
+          logger.error('Step 2 (check_duplicate) failed', {
+            ...logContext,
+            error: this.serializeError(error)
+          });
           throw error;
         }
       });
@@ -254,12 +272,16 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       // NOTE: Progress update skipped - non-critical step (see CRITICAL_PROGRESS_STEPS)
       const business = await step.do('setup_parallel', async () => {
         try {
-          console.log(`[Workflow][${params.run_id}] Steps 3-4: Running setup in parallel`);
+          logger.info('Running setup in parallel', logContext);
 
           const [_, businessProfile] = await Promise.all([
             // Task 1: Verify & deduct balance (MODULAR - routes to correct credit type)
             (async () => {
-              console.log(`[Workflow][${params.run_id}] [Parallel] Verifying balance (cost: ${creditsCost}, type: ${params.analysis_type})`);
+              logger.info('Verifying balance', {
+                ...logContext,
+                cost: creditsCost,
+                type: params.analysis_type
+              });
               const supabase = await SupabaseClientFactory.createAdminClient(this.env);
               const creditsRepo = new CreditsRepository(supabase);
 
@@ -271,7 +293,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
               );
 
               if (!hasBalance) {
-                console.error(`[Workflow][${params.run_id}] Insufficient ${params.analysis_type} analyses balance`);
+                logger.error('Insufficient balance for analysis', logContext);
                 throw new Error(`Insufficient ${params.analysis_type} analyses balance`);
               }
 
@@ -284,7 +306,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
                 `${params.analysis_type} analysis for @${params.username}`
               );
 
-              console.log(`[Workflow][${params.run_id}] [Parallel] Balance deducted successfully`);
+              logger.info('Balance deducted successfully', logContext);
             })(),
 
             // Task 2: Load business profile
@@ -295,11 +317,11 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
               const profile = await businessRepo.findById(params.business_profile_id);
 
               if (!profile) {
-                console.error(`[Workflow][${params.run_id}] Business profile not found`);
+                logger.error('Business profile not found', logContext);
                 throw new Error('Business profile not found');
               }
 
-              console.log(`[Workflow][${params.run_id}] [Parallel] Business profile loaded:`, profile.business_name);
+              logger.info('[Parallel] Business profile loaded:', { ...logContext, profile.business_name });
               return profile;
             })()
           ]);
@@ -373,7 +395,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
               await cacheService.set(params.username, result.profile, params.analysis_type);
               console.log(`[Workflow][${params.run_id}] Profile cached`);
             } else {
-              console.log(`[Workflow][${params.run_id}] Scrape returned error:`, result.error);
+              logger.info('Scrape returned error:', { ...logContext, result.error });
             }
 
             return result;
@@ -538,7 +560,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
               completed_at: new Date().toISOString()
             });
 
-            console.log(`[Workflow][${params.run_id}] Bypass analysis saved:`, analysis.id);
+            logger.info('Bypass analysis saved:', { ...logContext, analysis.id });
             return analysis.id;
           } catch (error: any) {
             console.error(`[Workflow][${params.run_id}] Bypass analysis save failed:`, this.serializeError(error));
@@ -1054,7 +1076,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             }
           });
 
-          console.log(`[Workflow][${params.run_id}] Analysis updated with results:`, analysis.id);
+          logger.info('Analysis updated with results:', { ...logContext, analysis.id });
           return analysis.id;
         } catch (error: any) {
           // CRITICAL ERROR LOGGING - Comprehensive error details before failure propagates

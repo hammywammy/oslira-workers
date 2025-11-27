@@ -12,6 +12,7 @@ import { AnalysisRepository } from '@/infrastructure/database/repositories/analy
 import { LeadsRepository } from '@/infrastructure/database/repositories/leads.repository';
 import { z } from 'zod';
 import { getCreditCost, getCreditType, type AnalysisType } from '@/config/operations-pricing.config';
+import { logger } from '@/shared/utils/logger.util';
 
 /**
  * ASYNC ANALYSIS HANDLERS
@@ -76,7 +77,8 @@ export async function analyzeInstagramLead(c: Context<{ Bindings: Env }>) {
     );
 
     if (!hasBalance) {
-      console.warn(`[Analyze][${requestId}] Insufficient ${creditType} balance`, {
+      logger.warn('Insufficient balance for analysis', {
+        requestId,
         accountId: auth.accountId,
         analysisType,
         creditType,
@@ -102,7 +104,8 @@ export async function analyzeInstagramLead(c: Context<{ Bindings: Env }>) {
       );
 
       if (inProgressAnalysis) {
-        console.warn(`[Analyze][${requestId}] Analysis already in progress`, {
+        logger.warn('Analysis already in progress for profile', {
+          requestId,
           accountId: auth.accountId,
           username: input.username,
           existingRunId: inProgressAnalysis.run_id
@@ -145,7 +148,8 @@ export async function analyzeInstagramLead(c: Context<{ Bindings: Env }>) {
       status: 'pending'
     });
 
-    console.log(`[Analyze][${requestId}] Created placeholder records`, {
+    logger.info('Created placeholder records for analysis', {
+      requestId,
       leadId: leadResult.lead_id,
       runId,
       isNewLead: leadResult.is_new
@@ -168,9 +172,13 @@ export async function analyzeInstagramLead(c: Context<{ Bindings: Env }>) {
         })
       });
 
-      console.log(`[Analyze][${requestId}] Progress tracker initialized`);
-    } catch (error: any) {
-      console.error(`[Analyze][${requestId}] Failed to initialize progress:`, error.message);
+      logger.info('Progress tracker initialized', { requestId, runId });
+    } catch (error) {
+      logger.error('Failed to initialize progress tracker', {
+        requestId,
+        runId,
+        error: error instanceof Error ? error.message : String(error)
+      });
       throw new Error('Failed to initialize progress tracker');
     }
 
@@ -186,10 +194,11 @@ export async function analyzeInstagramLead(c: Context<{ Bindings: Env }>) {
 
     await c.env.ANALYSIS_WORKFLOW.create({ params: workflowParams });
 
-    console.log(`[Analyze][${requestId}] Started`, {
+    logger.info('Analysis workflow started', {
+      requestId,
       runId,
       username: input.username,
-      type: input.analysisType,
+      analysisType: input.analysisType,
       analysisCost
     });
 
@@ -201,17 +210,18 @@ export async function analyzeInstagramLead(c: Context<{ Bindings: Env }>) {
       message: 'Analysis queued successfully'
     }, 202);
 
-  } catch (error: any) {
-    console.error(`[Analyze][${requestId}] Failed:`, {
-      error: error.message,
-      stack: error.stack?.split('\n')[0]
+  } catch (error) {
+    logger.error('Failed to start analysis', {
+      requestId,
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
     });
 
-    if (error.message.includes('Insufficient') && error.message.includes('balance')) {
+    if (error instanceof Error && error.message.includes('Insufficient') && error.message.includes('balance')) {
       return errorResponse(c, error.message, 'INSUFFICIENT_BALANCE', 402);
     }
 
-    if (error.message.includes('already in progress')) {
+    if (error instanceof Error && error.message.includes('already in progress')) {
       return errorResponse(c, 'Analysis already in progress', 'DUPLICATE_ANALYSIS', 409);
     }
 
@@ -248,10 +258,14 @@ export async function getAnalysisProgress(c: Context<{ Bindings: Env }>) {
 
     return successResponse(c, progress);
 
-  } catch (error: any) {
-    console.error('[Progress] Error:', { error: error.message });
+  } catch (error) {
+    logger.error('Failed to get analysis progress', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      runId: c.req.param('runId')
+    });
 
-    if (error.message.includes('not found')) {
+    if (error instanceof Error && error.message.includes('not found')) {
       return errorResponse(c, 'Analysis not found', 'NOT_FOUND', 404);
     }
 
@@ -281,7 +295,7 @@ export async function streamAnalysisProgressWS(c: Context<{ Bindings: Env }>) {
     // Validate runId format
     validateBody(GetProgressParamsSchema, { runId });
 
-    console.log('[WebSocket] Proxying to DO:', runId);
+    logger.info('Proxying WebSocket to AnalysisProgressDO', { runId });
 
     // Get DO stub
     const progressId = c.env.ANALYSIS_PROGRESS.idFromName(runId);
@@ -297,10 +311,14 @@ export async function streamAnalysisProgressWS(c: Context<{ Bindings: Env }>) {
       headers: c.req.raw.headers
     });
 
-  } catch (error: any) {
-    console.error('[WebSocket] Proxy error:', error);
+  } catch (error) {
+    logger.error('WebSocket proxy error for analysis', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      runId: c.req.param('runId')
+    });
 
-    if (error.name === 'ZodError') {
+    if (error instanceof Error && error.name === 'ZodError') {
       return errorResponse(c, 'Invalid run ID', 'VALIDATION_ERROR', 400);
     }
 
@@ -332,7 +350,7 @@ export async function cancelAnalysis(c: Context<{ Bindings: Env }>) {
       return errorResponse(c, 'Failed to cancel analysis', 'CANCEL_ERROR', 500);
     }
 
-    console.log(`[Cancel] Success:`, { runId });
+    logger.info('Analysis cancelled successfully', { runId });
 
     return successResponse(c, {
       run_id: runId,
@@ -340,10 +358,14 @@ export async function cancelAnalysis(c: Context<{ Bindings: Env }>) {
       message: 'Analysis cancelled successfully'
     });
 
-  } catch (error: any) {
-    console.error('[Cancel] Error:', { error: error.message });
+  } catch (error) {
+    logger.error('Failed to cancel analysis', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      runId: c.req.param('runId')
+    });
 
-    if (error.message.includes('not found')) {
+    if (error instanceof Error && error.message.includes('not found')) {
       return errorResponse(c, 'Analysis not found', 'NOT_FOUND', 404);
     }
 
@@ -383,10 +405,14 @@ export async function getAnalysisResult(c: Context<{ Bindings: Env }>) {
       result: progress.result || {}
     });
 
-  } catch (error: any) {
-    console.error('[Result] Error:', { error: error.message });
+  } catch (error) {
+    logger.error('Failed to get analysis result', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      runId: c.req.param('runId')
+    });
 
-    if (error.message.includes('not found')) {
+    if (error instanceof Error && error.message.includes('not found')) {
       return errorResponse(c, 'Analysis not found', 'NOT_FOUND', 404);
     }
 
@@ -410,7 +436,11 @@ export async function getActiveAnalyses(c: Context<{ Bindings: Env }>) {
     const analysisRepo = new AnalysisRepository(supabase);
     const activeAnalyses = await analysisRepo.getActiveAnalyses(auth.accountId);
 
-    console.log(`[ActiveAnalyses][${requestId}] Found ${activeAnalyses.length} active/recent analyses for account ${auth.accountId}`);
+    logger.info('Found active analyses', {
+      requestId,
+      count: activeAnalyses.length,
+      accountId: auth.accountId
+    });
 
     // If no active analyses, return empty result immediately
     if (activeAnalyses.length === 0) {
@@ -456,8 +486,12 @@ export async function getActiveAnalyses(c: Context<{ Bindings: Env }>) {
           startedAt: analysis.started_at,
           updatedAt: progress?.updated_at || analysis.updated_at
         };
-      } catch (error: any) {
-        console.error(`[ActiveAnalyses][${requestId}] Failed to fetch progress for ${analysis.run_id}:`, error.message);
+      } catch (error) {
+        logger.error('Failed to fetch progress for active analysis', {
+          requestId,
+          runId: analysis.run_id,
+          error: error instanceof Error ? error.message : String(error)
+        });
 
         // Return basic info from database if DO fetch fails
         return {
@@ -475,7 +509,10 @@ export async function getActiveAnalyses(c: Context<{ Bindings: Env }>) {
 
     const analysesWithProgress = await Promise.all(progressPromises);
 
-    console.log(`[ActiveAnalyses][${requestId}] Returning ${analysesWithProgress.length} analyses with progress`);
+    logger.info('Returning active analyses with progress', {
+      requestId,
+      count: analysesWithProgress.length
+    });
 
     return successResponse(c, {
       active_count: analysesWithProgress.length,
@@ -483,10 +520,11 @@ export async function getActiveAnalyses(c: Context<{ Bindings: Env }>) {
       server_time: new Date().toISOString()
     });
 
-  } catch (error: any) {
-    console.error(`[ActiveAnalyses][${requestId}] Error:`, {
-      error: error.message,
-      stack: error.stack?.split('\n')[0]
+  } catch (error) {
+    logger.error('Failed to fetch active analyses', {
+      requestId,
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
     });
 
     return errorResponse(c, 'Failed to fetch active analyses', 'ACTIVE_ANALYSES_ERROR', 500);

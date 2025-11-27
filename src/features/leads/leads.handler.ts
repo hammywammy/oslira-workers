@@ -174,10 +174,15 @@ export async function deleteLead(c: Context<{ Bindings: Env }>) {
 
     return noContentResponse(c);
 
-  } catch (error: any) {
-    console.error('[DeleteLead] Error:', error);
+  } catch (error) {
+    logger.error('Failed to delete lead', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      accountId: auth.accountId,
+      leadId
+    });
 
-    if (error.name === 'ZodError') {
+    if (error instanceof Error && error.name === 'ZodError') {
       return errorResponse(c, 'Invalid lead ID', 'VALIDATION_ERROR', 400);
     }
 

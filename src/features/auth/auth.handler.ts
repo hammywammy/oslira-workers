@@ -602,8 +602,13 @@ export async function handleBootstrap(c: Context<{ Bindings: Env }>) {
 
     return successResponse(c, response);
 
-  } catch (error: any) {
-    console.error('[Bootstrap] Error:', error);
+  } catch (error) {
+    logger.error('Bootstrap failed', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      userId: auth.userId,
+      accountId: auth.accountId
+    });
     return errorResponse(c, 'Bootstrap failed', 'INTERNAL_ERROR', 500);
   }
 }

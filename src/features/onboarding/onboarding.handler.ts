@@ -18,6 +18,7 @@ import {
 import { getAuthContext } from '@/shared/utils/auth.util';
 import { validateBody } from '@/shared/utils/validation.util';
 import { errorResponse } from '@/shared/utils/response.util';
+import { logger } from '@/shared/utils/logger.util';
 
 /**
  * Generate UUID v4
@@ -50,10 +51,10 @@ export async function generateBusinessContext(c: Context<{ Bindings: Env }>) {
     // Generate run ID
     const runId = generateUUID();
 
-    console.log('[GenerateBusinessContext] Starting:', {
-      run_id: runId,
-      account_id: auth.accountId,
-      signature_name: input.signature_name,
+    logger.info('Starting business context generation', {
+      runId,
+      accountId: auth.accountId,
+      signatureName: input.signature_name
     });
 
     // Initialize progress tracker (Durable Object)
@@ -78,7 +79,7 @@ export async function generateBusinessContext(c: Context<{ Bindings: Env }>) {
 
     await c.env.BUSINESS_CONTEXT_QUEUE.send(message);
 
-    console.log('[GenerateBusinessContext] Queued successfully:', runId);
+    logger.info('Business context generation queued successfully', { runId, accountId: auth.accountId });
 
     // Return immediately (202 Accepted)
     return c.json(
@@ -93,15 +94,19 @@ export async function generateBusinessContext(c: Context<{ Bindings: Env }>) {
       },
       202
     );
-  } catch (error: any) {
-    console.error('[GenerateBusinessContext] Error:', error);
+  } catch (error) {
+    logger.error('Failed to start business context generation', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      accountId: auth.accountId
+    });
 
-    if (error.name === 'ZodError') {
+    if (error instanceof Error && error.name === 'ZodError') {
       return c.json(
         {
           error: 'Validation failed',
           message: 'Please check your form data',
-          details: error.errors,
+          details: (error as any).errors,
         },
         400
       );
@@ -131,10 +136,15 @@ export async function getGenerationProgress(c: Context<{ Bindings: Env }>) {
     const data = await response.json();
 
     return c.json(data, 200);
-  } catch (error: any) {
-    console.error('[GetGenerationProgress] Error:', error);
+  } catch (error) {
+    logger.error('Failed to get generation progress', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      runId,
+      accountId: auth.accountId
+    });
 
-    if (error.name === 'ZodError') {
+    if (error instanceof Error && error.name === 'ZodError') {
       return errorResponse(c, 'Invalid run ID', 'VALIDATION_ERROR', 400);
     }
 
@@ -172,8 +182,12 @@ export async function getGenerationResult(c: Context<{ Bindings: Env }>) {
     }
 
     return c.json(data, 200);
-  } catch (error: any) {
-    console.error('[GetGenerationResult] Error:', error);
+  } catch (error) {
+    logger.error('Failed to get generation result', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      runId
+    });
     return errorResponse(c, 'Failed to get result', 'RESULT_ERROR', 500);
   }
 }
@@ -200,7 +214,7 @@ export async function streamBusinessContextWebSocket(c: Context<{ Bindings: Env 
     // Validate runId format (UUID)
     validateBody(GetProgressParamsSchema, { runId });
 
-    console.log('[WebSocket] Proxying to BusinessContextProgressDO:', runId);
+    logger.info('Proxying WebSocket to BusinessContextProgressDO', { runId });
 
     // Get DO stub
     const progressId = c.env.BUSINESS_CONTEXT_PROGRESS.idFromName(runId);
@@ -216,10 +230,14 @@ export async function streamBusinessContextWebSocket(c: Context<{ Bindings: Env 
       headers: c.req.raw.headers
     });
 
-  } catch (error: any) {
-    console.error('[WebSocket] BusinessContext proxy error:', error);
+  } catch (error) {
+    logger.error('WebSocket proxy error for business context', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      runId: c.req.param('runId')
+    });
 
-    if (error.name === 'ZodError') {
+    if (error instanceof Error && error.name === 'ZodError') {
       return errorResponse(c, 'Invalid run ID', 'VALIDATION_ERROR', 400);
     }
 
