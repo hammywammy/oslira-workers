@@ -108,7 +108,7 @@ export class BusinessContextWorkflow extends WorkflowEntrypoint<Env, BusinessCon
             error_name: error.name,
             error_message: error.message,
             error_stack: error.stack?.split('\n').slice(0, 3).join('\n')
-          });
+          } });
           throw error;
         }
       });
@@ -134,7 +134,7 @@ await step.do('mark_business_onboarded', async () => {
       error: dbUpdateError.message,
       error_code: dbUpdateError.code,
       business_profile_id: businessProfileId
-    });
+    } });
     throw new Error(`Failed to mark business onboarded: ${dbUpdateError.message}`);
   }
 
@@ -166,11 +166,7 @@ await step.do('link_stripe_to_subscription', async () => {
       : account?.stripe_customer_id_test;
 
     if (accountError || !stripeCustomerId) {
-      logger.warn('No stripe_customer_id found - skipping subscription link', { ...logContext, {
-        account_id: params.account_id,
-        has_account: !!account,
-        error: accountError?.message
-      });
+      logger.warn('No stripe_customer_id found - skipping subscription link', { ...logContext, account_id: params.account_id, has_account: !!account, error: accountError?.message });
       return;
     }
 
@@ -181,12 +177,7 @@ await step.do('link_stripe_to_subscription', async () => {
       .eq('account_id', params.account_id);
 
     if (updateError) {
-      logger.error('Failed to update subscription with stripe_customer_id', { ...logContext, {
-        error_code: updateError.code,
-        error_message: updateError.message,
-        account_id: params.account_id,
-        stripe_customer_id: stripeCustomerId
-      });
+      logger.error('Failed to update subscription with stripe_customer_id', { ...logContext, error_code: updateError.code, error_message: updateError.message, account_id: params.account_id, stripe_customer_id: stripeCustomerId });
     } else {
       logger.info('Subscription linked to Stripe customer', {
         account_id: params.account_id,
@@ -213,10 +204,7 @@ await step.do('link_stripe_to_subscription', async () => {
 
   } catch (error: any) {
     // Non-fatal - log and continue
-    logger.error('Subscription/Stripe update failed (non-fatal)', { ...logContext, {
-      error_message: error.message,
-      account_id: params.account_id
-    });
+    logger.error('Subscription/Stripe update failed (non-fatal)', { ...logContext, error_message: error.message, account_id: params.account_id });
   }
 });
 
@@ -239,7 +227,7 @@ await step.do('mark_complete', async () => {
 
   if (!completeResponse.ok) {
     const error = await completeResponse.text();
-    logger.error('Complete endpoint failed', { ...logContext, error: error);
+    logger.error('Complete endpoint failed', { ...logContext, error });
     throw new Error(`Failed to mark complete: ${error}`);
   }
 
@@ -281,7 +269,7 @@ await step.do('mark_complete', async () => {
         body: JSON.stringify({ progress, current_step: step, status: 'processing' })
       });
     } catch (error: any) {
-      logger.error('Progress update failed', { runId, error: error.message);
+      logger.error('Progress update failed', { runId, error: error.message });
     }
   }
 

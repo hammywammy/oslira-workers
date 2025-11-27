@@ -72,7 +72,7 @@ export class BusinessContextProgressDO extends DurableObject {
           server.serializeAttachment({ runId, connectedAt: Date.now() });
         }
 
-        logger.info('WebSocket connected', { runId: runId);
+        logger.info('WebSocket connected', { runId: runId });
 
         // Send initial progress immediately
         const progress = await this.getProgress();
@@ -112,12 +112,12 @@ export class BusinessContextProgressDO extends DurableObject {
       // ALL OTHER OPERATIONS - FULL LOGGING
       // =========================================================================
 
-      logger.info('Request received', { method: method, url.pathname);
+      logger.info('Request received', { method, url: url.pathname });
 
       // POST /initialize - Initialize progress state
       if (method === 'POST' && url.pathname === '/initialize') {
         const params = await request.json();
-        logger.info('Initializing', { runId: params.run_id);
+        logger.info('Initializing', { runId: params.run_id });
 
         await this.initialize(params);
 
@@ -219,7 +219,7 @@ export class BusinessContextProgressDO extends DurableObject {
             try {
               ws.close(1000, 'Generation complete');
             } catch (error: any) {
-              logger.error('Error closing WebSocket', { error: error.message);
+              logger.error('Error closing WebSocket', { error: error.message });
             }
           });
 
@@ -249,7 +249,7 @@ export class BusinessContextProgressDO extends DurableObject {
       // POST /fail - Mark as failed
       if (method === 'POST' && url.pathname === '/fail') {
         const error = await request.json();
-        logger.info('Marking failed', { error: error.error_message);
+        logger.info('Marking failed', { error: error.error_message });
 
         await this.failGeneration(error.error_message);
 
@@ -281,7 +281,7 @@ export class BusinessContextProgressDO extends DurableObject {
         return Response.json({ success: true });
       }
 
-      logger.warn('Route not found', { path: url.pathname);
+      logger.warn('Route not found', { path: url.pathname });
       return Response.json({ error: 'Not found' }, { status: 404 });
 
     } catch (error: any) {
@@ -316,7 +316,7 @@ export class BusinessContextProgressDO extends DurableObject {
         ws.send(JSON.stringify({ type: 'progress', data: progress }));
       }
     } catch (error: any) {
-      logger.error('WebSocket message error', { error: error.message);
+      logger.error('WebSocket message error', { error: error.message });
       ws.send(JSON.stringify({ type: 'error', message: 'Invalid message' }));
     }
   }
@@ -371,7 +371,7 @@ export class BusinessContextProgressDO extends DurableObject {
       try {
         ws.send(message);
       } catch (error: any) {
-        logger.error('Broadcast send failed', { error: error.message);
+        logger.error('Broadcast send failed', { error: error.message });
       }
     });
   }
@@ -408,7 +408,7 @@ export class BusinessContextProgressDO extends DurableObject {
       await this.state.storage.setAlarm(Date.now() + 24 * 60 * 60 * 1000);
 
     } catch (error: any) {
-      logger.error('Initialize failed', { error: error.message);
+      logger.error('Initialize failed', { error: error.message });
       throw error;
     }
   }
@@ -422,7 +422,7 @@ export class BusinessContextProgressDO extends DurableObject {
       const progress = await this.state.storage.get<BusinessContextProgressState>('progress');
       return progress || null;
     } catch (error: any) {
-      logger.error('Get progress failed', { error: error.message);
+      logger.error('Get progress failed', { error: error.message });
       throw error;
     }
   }
@@ -455,7 +455,7 @@ export class BusinessContextProgressDO extends DurableObject {
       // Broadcast to all WebSocket clients
       this.broadcastProgress(updated);
     } catch (error: any) {
-      logger.error('Update failed', { error: error.message);
+      logger.error('Update failed', { error: error.message });
       throw error;
     }
   }
@@ -492,11 +492,11 @@ export class BusinessContextProgressDO extends DurableObject {
         try {
           ws.close(1000, 'Generation complete');
         } catch (error: any) {
-          logger.error('Error closing WebSocket', { error: error.message);
+          logger.error('Error closing WebSocket', { error: error.message });
         }
       });
     } catch (error: any) {
-      logger.error('Complete failed', { error: error.message);
+      logger.error('Complete failed', { error: error.message });
       throw error;
     }
   }
@@ -532,11 +532,11 @@ export class BusinessContextProgressDO extends DurableObject {
         try {
           ws.close(1000, 'Generation failed');
         } catch (error: any) {
-          logger.error('Error closing WebSocket', { error: error.message);
+          logger.error('Error closing WebSocket', { error: error.message });
         }
       });
     } catch (error: any) {
-      logger.error('Mark failed operation failed', { error: error.message);
+      logger.error('Mark failed operation failed', { error: error.message });
       throw error;
     }
   }
@@ -554,14 +554,14 @@ export class BusinessContextProgressDO extends DurableObject {
         try {
           ws.close(1000, 'DO cleanup - session expired');
         } catch (error: any) {
-          logger.error('Error closing WebSocket', { error: error.message);
+          logger.error('Error closing WebSocket', { error: error.message });
         }
       });
 
       await this.state.storage.deleteAll();
       logger.info('Cleanup complete');
     } catch (error: any) {
-      logger.error('Cleanup failed', { error: error.message);
+      logger.error('Cleanup failed', { error: error.message });
     }
   }
 }
