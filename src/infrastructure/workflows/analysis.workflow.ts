@@ -443,7 +443,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       // This step determines if we should bypass AI analysis
       const preChecksResult = await step.do('pre_analysis_checks', async (): Promise<PreAnalysisChecksSummary> => {
         try {
-          console.log(`[Workflow][${params.run_id}] Step 6b: Running pre-analysis checks`);
+          logger.info('Running pre-analysis checks', logContext);
 
           const checksStart = Date.now();
           const checksService = new PreAnalysisChecksService();
@@ -460,7 +460,8 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
           timing.pre_checks = Date.now() - checksStart;
 
-          console.log(`[Workflow][${params.run_id}] Pre-analysis checks complete:`, {
+          logger.info('Pre-analysis checks complete', {
+            ...logContext,
             allPassed: result.allPassed,
             checksRun: result.checksRun,
             failedCheck: result.failedCheck?.checkName,
@@ -468,8 +469,11 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           });
 
           return result;
-        } catch (error: any) {
-          console.error(`[Workflow][${params.run_id}] Step 6b FAILED:`, this.serializeError(error));
+        } catch (error) {
+          logger.error('Step 6b (pre_analysis_checks) failed', {
+            ...logContext,
+            error: this.serializeError(error)
+          });
           // On check error, allow analysis to proceed (fail-open)
           return {
             allPassed: true,
@@ -483,7 +487,8 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       // Handle bypassed analysis (private profile, not found, etc.)
       if (!preChecksResult.allPassed && preChecksResult.failedCheck) {
         const failedCheck = preChecksResult.failedCheck;
-        console.log(`[Workflow][${params.run_id}] Pre-analysis check failed - bypassing AI analysis`, {
+        logger.info('Pre-analysis check failed - bypassing AI analysis', {
+          ...logContext,
           check: failedCheck.checkName,
           resultType: failedCheck.resultType,
           shouldRefund: failedCheck.shouldRefund
@@ -496,7 +501,11 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             retries: { limit: 3, delay: '1 second', backoff: 'exponential' }
           }, async () => {
             try {
-              console.log(`[Workflow][${params.run_id}] Refunding ${creditsCost} ${params.analysis_type} analyses for bypassed check`);
+              logger.info('Refunding credits for bypassed check', {
+                ...logContext,
+                credits: creditsCost,
+                reason: failedCheck.resultType
+              });
               const supabase = await SupabaseClientFactory.createAdminClient(this.env);
               const creditsRepo = new CreditsRepository(supabase);
 
@@ -508,9 +517,12 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
                 `Analysis bypassed (${failedCheck.resultType}): @${params.username}`
               );
 
-              console.log(`[Workflow][${params.run_id}] ${params.analysis_type} analyses refunded for bypass`);
-            } catch (refundError: any) {
-              console.error(`[Workflow][${params.run_id}] Refund failed:`, this.serializeError(refundError));
+              logger.info('Credits refunded for bypass', logContext);
+            } catch (refundError) {
+              logger.error('Refund for bypass failed', {
+                ...logContext,
+                error: this.serializeError(refundError)
+              });
               // Continue anyway - don't fail the workflow for refund issues
             }
           });
@@ -523,7 +535,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             retries: { limit: 3, delay: '1 second' }
           }, async () => {
             try {
-              console.log(`[Workflow][${params.run_id}] Creating lead record for bypassed profile`);
+              logger.info('Creating lead record for bypassed profile', logContext);
               const supabase = await SupabaseClientFactory.createAdminClient(this.env);
               const leadsRepo = new LeadsRepository(supabase);
 
@@ -544,10 +556,16 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
                 is_business_account: aiProfile.is_business_account
               });
 
-              console.log(`[Workflow][${params.run_id}] Bypass lead created: ${lead.lead_id}`);
+              logger.info('Bypass lead created', {
+                ...logContext,
+                leadId: lead.lead_id
+              });
               return lead.lead_id;
-            } catch (error: any) {
-              console.error(`[Workflow][${params.run_id}] Bypass lead creation failed:`, this.serializeError(error));
+            } catch (error) {
+              logger.error('Bypass lead creation failed', {
+                ...logContext,
+                error: this.serializeError(error)
+              });
               return null;
             }
           });
@@ -558,7 +576,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           retries: { limit: 3, delay: '1 second' }
         }, async () => {
           try {
-            console.log(`[Workflow][${params.run_id}] Saving bypassed analysis record`);
+            logger.info('Saving bypassed analysis record', logContext);
             const supabase = await SupabaseClientFactory.createAdminClient(this.env);
             const analysisRepo = new AnalysisRepository(supabase);
 
@@ -578,10 +596,16 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
               completed_at: new Date().toISOString()
             });
 
-            logger.info('Bypass analysis saved:', { ...logContext, analysis.id });
+            logger.info('Bypass analysis saved', {
+              ...logContext,
+              analysisId: analysis.id
+            });
             return analysis.id;
-          } catch (error: any) {
-            console.error(`[Workflow][${params.run_id}] Bypass analysis save failed:`, this.serializeError(error));
+          } catch (error) {
+            logger.error('Bypass analysis save failed', {
+              ...logContext,
+              error: this.serializeError(error)
+            });
             throw error;
           }
         });
@@ -591,7 +615,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           retries: { limit: 2, delay: '500 milliseconds' }
         }, async () => {
           try {
-            console.log(`[Workflow][${params.run_id}] Marking bypassed analysis as complete`);
+            logger.info('Marking bypassed analysis as complete', logContext);
 
             const id = this.env.ANALYSIS_PROGRESS.idFromName(params.run_id);
             const progressDO = this.env.ANALYSIS_PROGRESS.get(id);
@@ -609,16 +633,21 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
               })
             });
 
-            console.log(`[Workflow][${params.run_id}] Bypass progress marked as complete`);
-          } catch (error: any) {
-            console.error(`[Workflow][${params.run_id}] Bypass progress complete failed:`, this.serializeError(error));
+            logger.info('Bypass progress marked as complete', logContext);
+          } catch (error) {
+            logger.error('Bypass progress complete failed', {
+              ...logContext,
+              error: this.serializeError(error)
+            });
           }
         });
 
-        console.log(`[Workflow][${params.run_id}] BYPASSED (${failedCheck.resultType})`, {
+        logger.info('Analysis bypassed', {
+          ...logContext,
           leadId: bypassLeadId,
           analysisId: bypassAnalysisId,
-          reason: failedCheck.reason
+          reason: failedCheck.reason,
+          resultType: failedCheck.resultType
         });
 
         // Return early - skip AI analysis and remaining steps
@@ -648,13 +677,13 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         retries: { limit: 1, delay: '1 second' }
       }, async (): Promise<{ extractedData: ExtractedData | null; textDataForAI: TextDataForAI | null }> => {
         try {
-          console.log(`[Workflow][${params.run_id}] Step 6c: Phase 2 - Extracting actionable data`);
+          logger.info('Extracting actionable data (Phase 2)', logContext);
 
           // Convert cache format to Apify format (fixes likeCount → likesCount mismatch)
           const apifyProfile = profileDataToApifyFormat(profile);
 
           // Log sample post data to verify transformation
-          console.log(`[Workflow][${params.run_id}] Sample post data:`, {
+          logger.info('Sample post data extracted', {
             firstPost: apifyProfile.latestPosts[0] ? {
               hasLikesCount: apifyProfile.latestPosts[0].likesCount !== undefined,
               hasCommentsCount: apifyProfile.latestPosts[0].commentsCount !== undefined,
@@ -668,14 +697,14 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           const extractionResult: ExtractionOutput = extractor.extract(apifyProfile);
 
           if (!extractionResult.success) {
-            console.warn(`[Workflow][${params.run_id}] Phase 2 extraction failed:`, extractionResult.error);
+            logger.warn('Phase 2 extraction failed', { ...logContext, error: extractionResult.error);
             return { extractedData: null, textDataForAI: null };
           }
 
           // Transform to ExtractedData format (lean, actionable signals only)
           const data = transformToExtractedData(extractionResult.data);
 
-          console.log(`[Workflow][${params.run_id}] Phase 2 extraction complete:`, {
+          logger.info('Phase 2 extraction complete', {
             sampleSize: data.metadata.sampleSize,
             hasHashtags: data.static.topHashtags.length > 0,
             hasMentions: data.static.topMentions.length > 0,
@@ -688,7 +717,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           };
 
         } catch (error: any) {
-          console.error(`[Workflow][${params.run_id}] Phase 2 extraction error (non-fatal):`, this.serializeError(error));
+          logger.error('Phase 2 extraction error (non-fatal)', { ...logContext, error: this.serializeError(error));
           // Return null on error
           return { extractedData: null, textDataForAI: null };
         }
@@ -703,11 +732,11 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         retries: { limit: 1, delay: '1 second' }
       }, async (): Promise<string | null> => {
         try {
-          console.log(`[Workflow][${params.run_id}] Step 6d: Detecting profile niche`);
+          logger.info('Detecting profile niche', logContext);
 
           // Only run niche detection if we have extracted data
           if (!extractedData || !textDataForAI) {
-            console.log(`[Workflow][${params.run_id}] Skipping niche detection - no extracted data`);
+            logger.info('Skipping niche detection - no extracted data', logContext);
             return null;
           }
 
@@ -734,11 +763,11 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           );
 
           if (!result.success) {
-            console.warn(`[Workflow][${params.run_id}] Niche detection failed:`, result.error);
+            logger.warn('Niche detection failed', { ...logContext, error: result.error);
             return null;
           }
 
-          console.log(`[Workflow][${params.run_id}] Niche detected:`, {
+          logger.info('Niche detected', {
             niche: result.niche,
             confidence: result.confidence,
             reasoning: result.reasoning
@@ -747,7 +776,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           return result.niche;
 
         } catch (error: any) {
-          console.error(`[Workflow][${params.run_id}] Niche detection error (non-fatal):`, error.message);
+          logger.error('Niche detection error (non-fatal)', { ...logContext, error: error instanceof Error ? error.message : String(error) });
           return null;
         }
       });
@@ -773,7 +802,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         };
       }> => {
         try {
-          console.log(`[Workflow][${params.run_id}] Step 7: PARALLEL AI Analysis starting`);
+          logger.info('Starting parallel AI analysis', logContext);
           const stepInfo = getStepProgress(params.analysis_type as AnalysisType, 'ai_analysis');
           await this.updateProgress(params.run_id, stepInfo.percentage, stepInfo.description);
 
@@ -786,25 +815,25 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
           const leadQualificationTask = (async (): Promise<AIResponsePayload | null> => {
             if (!extractedData || !textDataForAI) {
-              console.log(`[Workflow][${params.run_id}] [Parallel] Lead Qualification AI skipped - no extracted data`);
+              logger.info('[Parallel] Lead Qualification AI skipped - no extracted data', logContext);
               return null;
             }
 
             try {
               const leadQualStart = Date.now();
-              console.log(`[Workflow][${params.run_id}] [Parallel] Lead Qualification AI starting (setup)...`);
+              logger.info('[Parallel] Lead Qualification AI starting (setup)', logContext);
 
               // Fetch business context for AI prompt
               const supabase = await SupabaseClientFactory.createAdminClient(this.env);
               const businessContextResult = await fetchBusinessContext(supabase, params.business_profile_id);
 
               if (!businessContextResult.success) {
-                console.warn(`[Workflow][${params.run_id}] [Parallel] Lead Qualification AI - Failed to fetch business context:`, businessContextResult.error);
+                logger.warn('[Parallel] Lead Qualification AI - Failed to fetch business context', { ...logContext, error: businessContextResult.error);
                 return null;
               }
 
               const setupDuration = Date.now() - leadQualStart;
-              console.log(`[Workflow][${params.run_id}] [Parallel] Lead Qualification AI call starting (setup took ${setupDuration}ms)...`);
+              logger.info('[Parallel] Lead Qualification AI call starting', { ...logContext, setupMs: setupDuration });
               const aiCallStart = Date.now();
 
               // Run GPT-5 lead qualification analysis
@@ -824,11 +853,11 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
               const totalDuration = Date.now() - leadQualStart;
 
               if (!aiResult.success) {
-                console.warn(`[Workflow][${params.run_id}] [Parallel] Lead Qualification AI failed:`, aiResult.error);
+                logger.warn('[Parallel] Lead Qualification AI failed', { ...logContext, error: aiResult.error);
                 return null;
               }
 
-              console.log(`[Workflow][${params.run_id}] [Parallel] Lead Qualification AI complete`, {
+              logger.info('[Parallel] Lead Qualification AI complete', {
                 leadTier: aiResult.data.analysis.leadTier,
                 setupMs: setupDuration,
                 aiCallMs: aiCallDuration,
@@ -837,13 +866,13 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
               return { data: aiResult.data, durationMs: totalDuration };
             } catch (error: any) {
-              console.error(`[Workflow][${params.run_id}] [Parallel] Lead Qualification AI error:`, error.message);
+              logger.error('[Parallel] Lead Qualification AI error', { ...logContext, error: error instanceof Error ? error.message : String(error) });
               return null;
             }
           })();
 
           const profileAssessmentTask = (async () => {
-            console.log(`[Workflow][${params.run_id}] [Parallel] Profile Assessment AI starting...`);
+            logger.info('[Parallel] Profile Assessment AI starting', logContext);
             const assessStart = Date.now();
 
             // Transform camelCase cache profile to snake_case AI profile
@@ -861,7 +890,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
             const assessDuration = Date.now() - assessStart;
 
-            console.log(`[Workflow][${params.run_id}] [Parallel] Profile Assessment AI complete`, {
+            logger.info('[Parallel] Profile Assessment AI complete', {
               score: result.overall_score,
               model: result.model_used,
               durationMs: assessDuration
@@ -893,7 +922,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           const parallelSavingsMs = expectedSequentialMs - timing.ai_analysis;
           const parallelStatus = (timing as any).ai_breakdown.parallelStatus;
 
-          console.log(`[Workflow][${params.run_id}] PARALLEL AI Analysis complete`, {
+          logger.info('Parallel AI Analysis complete', {
             totalDurationMs: timing.ai_analysis,
             leadQualSuccess: !!leadQualResult,
             leadTier: leadQualResult?.data?.analysis?.leadTier || 'N/A',
@@ -921,7 +950,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         } catch (error: any) {
           // CRITICAL ERROR LOGGING - Comprehensive error details before failure propagates
           const errorDetails = this.serializeError(error);
-          console.error(`[Workflow][${params.run_id}] ❌ STEP 7 FAILED - AI ANALYSIS ERROR ❌`, {
+          logger.error('AI analysis failed (Step 7)', {
             step: 'parallel_ai_analysis',
             progress: '95%',
             username: params.username,
@@ -952,7 +981,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         retries: { limit: 3, delay: '1 second' }
       }, async () => {
         try {
-          console.log(`[Workflow][${params.run_id}] Step 8: Upserting lead data`);
+          logger.info('Upserting lead data', logContext);
           const stepInfo = getStepProgress(params.analysis_type, 'upsert_lead');
           await this.updateProgress(params.run_id, stepInfo.percentage, stepInfo.description);
 
@@ -979,7 +1008,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             is_business_account: aiProfile.is_business_account
           });
 
-          console.log(`[Workflow][${params.run_id}] Lead upserted: ${lead.lead_id}`);
+          logger.info('Lead upserted', { ...logContext, leadId: lead.lead_id });
 
           // Step 8b: Cache avatar to R2 (FIRE-AND-FORGET - don't wait)
           // This saves 1-2s on the critical path while still caching the avatar
@@ -998,14 +1027,14 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
                     .from('leads')
                     .update({ profile_pic_url: r2Url })
                     .eq('id', leadIdForClosure);
-                  console.log(`[Workflow][${params.run_id}] Background: Avatar cached and lead updated`);
+                  logger.info('Background: Avatar cached and lead updated', logContext);
                 }
               })
               .catch((err) => {
-                console.error(`[Workflow][${params.run_id}] Background avatar cache failed:`, err);
+                logger.error('Background avatar cache failed', { ...logContext, error: err instanceof Error ? err.message : String(err) });
               });
 
-            console.log(`[Workflow][${params.run_id}] Avatar caching started in background`);
+            logger.info('Avatar caching started in background', logContext);
           }
 
           timing.db_upsert = Date.now() - upsertStart;
@@ -1013,7 +1042,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         } catch (error: any) {
           // CRITICAL ERROR LOGGING - Comprehensive error details before failure propagates
           const errorDetails = this.serializeError(error);
-          console.error(`[Workflow][${params.run_id}] ❌ STEP 8 FAILED - LEAD UPSERT ERROR ❌`, {
+          logger.error('Lead upsert failed (Step 8)', {
             step: 'upsert_lead',
             progress: '97%',
             username: params.username,
@@ -1035,7 +1064,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         retries: { limit: 3, delay: '1 second' }
       }, async () => {
         try {
-          console.log(`[Workflow][${params.run_id}] Step 9: Updating existing analysis record with results`);
+          logger.info('Updating analysis record with results', logContext);
 
           const supabase = await SupabaseClientFactory.createAdminClient(this.env);
           const analysisRepo = new AnalysisRepository(supabase);
@@ -1051,7 +1080,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           if (phase2AIResponse) {
             // Flatten analysis fields directly to top level (no nesting)
             Object.assign(aiResponse, phase2AIResponse.analysis);
-            console.log(`[Workflow][${params.run_id}] Including Phase 2 AI response:`, {
+            logger.info('Including Phase 2 AI response', {
               leadTier: phase2AIResponse.analysis.leadTier
             });
           }
@@ -1059,7 +1088,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           // Add niche to ai_response if detected
           if (detectedNiche) {
             aiResponse.niche = detectedNiche;
-            console.log(`[Workflow][${params.run_id}] Including detected niche: ${detectedNiche}`);
+            logger.info('Including detected niche', { ...logContext, niche: detectedNiche });
           }
 
           // Update extracted_data with leadTier based on overall_score
@@ -1073,7 +1102,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
                 leadTier
               }
             };
-            console.log(`[Workflow][${params.run_id}] Lead tier calculated: ${leadTier} (score: ${aiResult.overall_score})`);
+            logger.info('Lead tier calculated', { ...logContext, leadTier, score: aiResult.overall_score });
           }
 
           // UPDATE existing analysis record (created in handler before workflow started)
@@ -1094,12 +1123,15 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             }
           });
 
-          logger.info('Analysis updated with results:', { ...logContext, analysis.id });
+          logger.info('Analysis updated with results', {
+            ...logContext,
+            analysisId: analysis.id
+          });
           return analysis.id;
-        } catch (error: any) {
+        } catch (error) {
           // CRITICAL ERROR LOGGING - Comprehensive error details before failure propagates
           const errorDetails = this.serializeError(error);
-          console.error(`[Workflow][${params.run_id}] ❌ STEP 9 FAILED - SAVE ANALYSIS ERROR ❌`, {
+          logger.error('Analysis save failed (Step 9)', {
             step: 'save_analysis',
             progress: '98%',
             username: params.username,
@@ -1120,7 +1152,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         retries: { limit: 2, delay: '500 milliseconds' }
       }, async () => {
         try {
-          console.log(`[Workflow][${params.run_id}] Step 10: Marking analysis as complete`);
+          logger.info('Marking analysis as complete', logContext);
 
           const id = this.env.ANALYSIS_PROGRESS.idFromName(params.run_id);
           const progressDO = this.env.ANALYSIS_PROGRESS.get(id);
@@ -1136,9 +1168,9 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             })
           });
 
-          console.log(`[Workflow][${params.run_id}] Progress marked as complete`);
+          logger.info('Progress marked as complete', logContext);
         } catch (error: any) {
-          console.error(`[Workflow][${params.run_id}] Step 10 FAILED:`, this.serializeError(error));
+          logger.error('Complete progress failed (Step 10)', { ...logContext, error: this.serializeError(error));
           throw error;
         }
       });
@@ -1148,7 +1180,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         retries: { limit: 2, delay: '500 milliseconds' }
       }, async () => {
         try {
-          console.log(`[Workflow][${params.run_id}] Step 11: Logging to operations ledger`);
+          logger.info('Logging to operations ledger', logContext);
 
           const supabase = await SupabaseClientFactory.createAdminClient(this.env);
           const operationsRepo = new OperationsLedgerRepository(supabase);
@@ -1198,7 +1230,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           // Get AI breakdown for performance metrics
           const aiBreakdownData = (timing as any).ai_breakdown;
 
-          console.log(`[Workflow][${params.run_id}] Operations logged - COST BREAKDOWN`, {
+          logger.info('Operations logged - COST BREAKDOWN', {
             total_cost_usd: totalCostUsd,
             breakdown: {
               profile_assessment_ai: `$${aiResult.total_cost.toFixed(6)}`,
@@ -1232,7 +1264,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           const COST_CRITICAL_THRESHOLD = 0.10; // $0.10 per analysis
 
           if (totalCostUsd >= COST_CRITICAL_THRESHOLD) {
-            console.error(`[CostAlert][${params.run_id}] CRITICAL: Analysis cost $${totalCostUsd.toFixed(4)} exceeds critical threshold $${COST_CRITICAL_THRESHOLD}`, {
+            logger.error('CRITICAL: Analysis cost exceeds threshold', { ...logContext, alert: 'cost_critical', $${totalCostUsd.toFixed(4)} exceeds critical threshold $${COST_CRITICAL_THRESHOLD}`, {
               username: params.username,
               analysisType: params.analysis_type,
               totalCost: totalCostUsd,
@@ -1244,7 +1276,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
               }
             });
           } else if (totalCostUsd >= COST_WARN_THRESHOLD) {
-            console.warn(`[CostAlert][${params.run_id}] WARNING: Analysis cost $${totalCostUsd.toFixed(4)} exceeds warning threshold $${COST_WARN_THRESHOLD}`, {
+            logger.warn('WARNING: Analysis cost exceeds threshold', { ...logContext, alert: 'cost_warning', $${totalCostUsd.toFixed(4)} exceeds warning threshold $${COST_WARN_THRESHOLD}`, {
               username: params.username,
               analysisType: params.analysis_type,
               totalCost: totalCostUsd,
@@ -1252,7 +1284,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             });
           }
         } catch (error: any) {
-          console.error(`[Workflow][${params.run_id}] Step 11 FAILED (non-fatal):`, this.serializeError(error));
+          logger.error('Operations ledger logging failed (non-fatal)', { ...logContext, error: this.serializeError(error));
           // Don't throw - logging failures shouldn't break the workflow
         }
       });
@@ -1297,20 +1329,20 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       };
 
       if (slaStatus === 'severe') {
-        console.error(`[SLA][${params.run_id}] SEVERE: Analysis took ${slaLog.durationSec}s, severely exceeding target (>${SLA_CRITICAL_MS / 1000}s)`, slaLog);
+        logger.error('SLA SEVERE: Analysis duration severely exceeded target', { ...logContext, sla: 'severe', Analysis took ${slaLog.durationSec}s, severely exceeding target (>${SLA_CRITICAL_MS / 1000}s)`, slaLog);
       } else if (slaStatus === 'critical') {
-        console.error(`[SLA][${params.run_id}] CRITICAL: Analysis took ${slaLog.durationSec}s, exceeding critical threshold`, slaLog);
+        logger.error('SLA CRITICAL: Analysis duration exceeded critical threshold', { ...logContext, sla: 'critical', Analysis took ${slaLog.durationSec}s, exceeding critical threshold`, slaLog);
       } else if (slaStatus === 'warning') {
-        console.warn(`[SLA][${params.run_id}] WARNING: Analysis took ${slaLog.durationSec}s, exceeding target`, slaLog);
+        logger.warn('SLA WARNING: Analysis duration exceeded target', { ...logContext, sla: 'warning', Analysis took ${slaLog.durationSec}s, exceeding target`, slaLog);
       } else {
-        console.log(`[SLA][${params.run_id}] SLA MET: Analysis completed in ${slaLog.durationSec}s`, {
+        logger.info('SLA MET: Analysis completed within target', { ...logContext, sla: 'met', Analysis completed in ${slaLog.durationSec}s`, {
           slaStatus,
           durationMs: totalDurationMs,
           targetMs: SLA_TARGET_MS
         });
       }
 
-      console.log(`[Workflow][${params.run_id}] SUCCESS`, {
+      logger.info('Workflow completed successfully', {
         leadId,
         analysisId,
         score: aiResult.overall_score,
@@ -1336,7 +1368,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       const workflowDuration = Date.now() - workflowStartTime;
 
       // COMPREHENSIVE ERROR LOG - This will show exactly what failed and why
-      console.error(`[Workflow][${params.run_id}] ❌❌❌ WORKFLOW FAILED ❌❌❌`, {
+      logger.error('Workflow failed', {
         username: params.username,
         analysis_type: params.analysis_type,
         run_id: params.run_id,
@@ -1371,7 +1403,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         retries: { limit: 3, delay: '1 second', backoff: 'exponential' }
       }, async () => {
         try {
-          console.log(`[Workflow][${params.run_id}] Attempting to refund ${creditsCost} ${params.analysis_type} analyses`);
+          logger.info('Attempting to refund credits', { ...logContext, credits: creditsCost });
           const supabase = await SupabaseClientFactory.createAdminClient(this.env);
           const creditsRepo = new CreditsRepository(supabase);
 
@@ -1383,9 +1415,9 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             `Analysis failed: ${errorDetails.message}`
           );
 
-          console.log(`[Workflow][${params.run_id}] ${params.analysis_type} analyses refunded: ${creditsCost}`);
+          logger.info('Credits refunded', { ...logContext, credits: creditsCost });
         } catch (refundError: any) {
-          console.error(`[Workflow][${params.run_id}] Refund failed:`, this.serializeError(refundError));
+          logger.error('Refund failed', { ...logContext, error: this.serializeError(refundError));
           // Don't throw - we still want to mark the analysis as failed even if refund fails
         }
       });
@@ -1405,7 +1437,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
     progress: number,
     currentStep: string
   ): Promise<void> {
-    console.log(`[Workflow][${runId}] Updating progress: ${progress}% - ${currentStep}`);
+    logger.debug('Updating progress', { runId, progress, ${progress}% - ${currentStep}`);
 
     const id = this.env.ANALYSIS_PROGRESS.idFromName(runId);
     const stub = this.env.ANALYSIS_PROGRESS.get(id);
@@ -1421,7 +1453,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
     if (!response.ok) {
       const error = await response.text();
-      console.error(`[Workflow][${runId}] Failed to update progress:`, error);
+      logger.error('Failed to update progress', { runId, error: error);
       throw new Error(`Failed to update progress: ${error}`);
     }
   }
@@ -1435,7 +1467,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
     // COORDINATED ERROR LOGGING - Log comprehensive error details BEFORE
     // broadcasting failure to Durable Object
     // ========================================================================
-    console.error(`[Workflow][${runId}] 🔴 MARKING ANALYSIS AS FAILED 🔴`, {
+    logger.error('Marking analysis as failed', {
       error_message: errorMessage,
       error_details: errorDetails || { message: errorMessage },
       timestamp: new Date().toISOString(),
@@ -1446,7 +1478,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
     const id = this.env.ANALYSIS_PROGRESS.idFromName(runId);
     const stub = this.env.ANALYSIS_PROGRESS.get(id);
 
-    console.log(`[Workflow][${runId}] Broadcasting failure to Durable Object...`);
+    logger.info('Broadcasting failure to Durable Object', { runId });
 
     const response = await stub.fetch('http://do/fail', {
       method: 'POST',
@@ -1455,14 +1487,14 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
     if (!response.ok) {
       const error = await response.text();
-      console.error(`[Workflow][${runId}] ❌ Failed to mark DO as failed:`, error);
+      logger.error('Failed to mark DO as failed', { runId, error: error);
     } else {
-      console.log(`[Workflow][${runId}] ✓ Successfully broadcasted failure to DO`);
+      logger.info('Successfully broadcasted failure to DO', { runId });
     }
 
     // Update database record so getActiveAnalyses stops returning this job
     try {
-      console.log(`[Workflow][${runId}] Updating database analysis status to failed...`);
+      logger.info('Updating database analysis status to failed', { runId });
 
       const supabase = await SupabaseClientFactory.createAdminClient(this.env);
       const analysisRepo = new AnalysisRepository(supabase);
@@ -1473,17 +1505,17 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         completed_at: new Date().toISOString()
       });
 
-      console.log(`[Workflow][${runId}] ✓ Successfully updated database analysis status to failed`);
+      logger.info('Successfully updated database analysis status to failed', { runId });
     } catch (dbError: any) {
       const dbErrorDetails = this.serializeError(dbError);
-      console.error(`[Workflow][${runId}] ❌ Failed to update database:`, {
+      logger.error('Failed to update database', {
         database_error: dbErrorDetails,
         original_error: errorMessage
       });
       // Don't throw - we still want the workflow to complete even if DB update fails
     }
 
-    console.error(`[Workflow][${runId}] 🔴 FAILURE HANDLING COMPLETE 🔴 - Error has been logged, broadcasted, and persisted`);
+    logger.error('Failure handling complete', { runId, note: 'Error logged, broadcasted, and persisted' });
   }
 
 }
