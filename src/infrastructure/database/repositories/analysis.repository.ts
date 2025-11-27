@@ -21,7 +21,7 @@ export interface Analysis {
   analysis_type: AnalysisTypeResult;
   overall_score: number;
   ai_response: any;
-  calculated_metrics: any | null;
+  extracted_data: any | null;
   status: 'pending' | 'processing' | 'complete' | 'failed' | 'cancelled';
   error_message: string | null;
   started_at: string | null;
@@ -50,7 +50,7 @@ export interface CreateAnalysisData {
 export interface UpdateAnalysisData {
   overall_score?: number;
   ai_response?: any;
-  calculated_metrics?: any;
+  extracted_data?: any;
   analysis_type?: AnalysisTypeResult;
   status?: 'complete' | 'failed' | 'cancelled';
   error_message?: string;

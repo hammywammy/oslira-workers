@@ -3,183 +3,122 @@
 /**
  * OUTPUT TRANSFORMER SERVICE
  *
- * Transforms ExtractionResult into the flat CalculatedMetrics format
- * for database storage in the calculated_metrics JSONB column.
+ * Transforms ExtractionResult into the lean ExtractedData format
+ * for database storage in the extracted_data JSONB column.
  *
- * This service:
- * 1. Flattens nested metric groups into a single RawMetricsFlat object
- * 2. Integrates composite scores from ScoreCalculatorService
- * 3. Integrates gap detection flags
- * 4. Adds metadata (version, timestamp, sample size)
+ * This service extracts ONLY actionable signals for lead qualification:
+ * - Is this lead warm?
+ * - Is this account real?
+ * - Is this worth contacting?
  */
 
 import { logger } from '@/shared/utils/logger.util';
 import type {
   ExtractionResult,
-  CalculatedMetrics,
-  RawMetricsFlat,
-  CompositeScores,
-  GapDetection
+  ExtractedData
 } from './extraction.types';
-import { calculateScores } from './score-calculator.service';
 
 // ============================================================================
 // TRANSFORMER SERVICE
 // ============================================================================
 
 /**
- * Transform ExtractionResult into CalculatedMetrics for database storage
+ * Transform ExtractionResult into ExtractedData for database storage
+ * Only extracts essential, actionable signals - no vanity metrics
  */
-export function transformToCalculatedMetrics(extraction: ExtractionResult): CalculatedMetrics {
+export function transformToExtractedData(extraction: ExtractionResult): ExtractedData {
   const startTime = Date.now();
 
   logger.debug('[OutputTransformer] Starting transformation', {
     username: extraction.profileMetrics.username
   });
 
-  // Flatten all raw metrics
-  const raw = flattenRawMetrics(extraction);
+  const {
+    engagementMetrics,
+    frequencyMetrics,
+    profileMetrics,
+    riskScores,
+    textDataForAI
+  } = extraction;
 
-  // Calculate scores and gaps
-  const { scores, gaps } = calculateScores(extraction);
+  // Generate soft warning from fake follower risk
+  const fakeFollowerWarning = generateFakeFollowerWarning(
+    riskScores.fakeFollowerRiskScore,
+    riskScores.fakeFollowerWarnings
+  );
 
-  const calculatedMetrics: CalculatedMetrics = {
+  const extractedData: ExtractedData = {
     version: '1.0',
-    calculatedAt: new Date().toISOString(),
+    extractedAt: new Date().toISOString(),
     sampleSize: extraction.metadata.samplePostCount,
-    raw,
-    scores,
-    gaps
+
+    // Engagement signals
+    engagementScore: engagementMetrics.engagementRate,
+    engagementConsistency: engagementMetrics.engagementConsistency,
+
+    // Recency signals
+    daysSinceLastPost: frequencyMetrics.daysSinceLastPost,
+
+    // Content signals
+    topHashtags: textDataForAI.hashtagFrequency.slice(0, 10),
+    topMentions: textDataForAI.topMentions.slice(0, 5),
+
+    // Business signals
+    businessCategoryName: profileMetrics.businessCategoryName,
+
+    // Risk signals
+    fakeFollowerWarning
   };
 
   const processingTime = Date.now() - startTime;
 
   logger.info('[OutputTransformer] Transformation complete', {
-    username: extraction.profileMetrics.username,
-    sampleSize: calculatedMetrics.sampleSize,
-    scores: calculatedMetrics.scores,
-    gaps: calculatedMetrics.gaps,
+    username: profileMetrics.username,
+    sampleSize: extractedData.sampleSize,
+    hasHashtags: extractedData.topHashtags.length > 0,
+    hasMentions: extractedData.topMentions.length > 0,
+    fakeFollowerWarning: extractedData.fakeFollowerWarning,
     processingTimeMs: processingTime
   });
 
-  return calculatedMetrics;
+  return extractedData;
 }
 
 // ============================================================================
-// METRIC FLATTENING
+// HELPER FUNCTIONS
 // ============================================================================
 
 /**
- * Flatten nested extraction result metrics into a single flat object
+ * Generate a soft, human-readable warning about fake followers
+ * Never gives a definitive "this account has fake followers" statement
  */
-function flattenRawMetrics(extraction: ExtractionResult): RawMetricsFlat {
-  const {
-    profileMetrics,
-    engagementMetrics,
-    frequencyMetrics,
-    formatMetrics,
-    contentMetrics,
-    videoMetrics,
-    riskScores,
-    derivedMetrics,
-    textDataForAI
-  } = extraction;
+function generateFakeFollowerWarning(
+  riskScore: number | null,
+  warnings: string[]
+): string | null {
+  if (riskScore === null || riskScore === undefined) {
+    return null;
+  }
 
-  return {
-    // Profile metrics (18)
-    followersCount: profileMetrics.followersCount,
-    followsCount: profileMetrics.followsCount,
-    postsCount: profileMetrics.postsCount,
-    authorityRatioRaw: profileMetrics.authorityRatioRaw,
-    authorityRatio: profileMetrics.authorityRatio,
-    isBusinessAccount: profileMetrics.isBusinessAccount,
-    verified: profileMetrics.verified,
-    hasChannel: profileMetrics.hasChannel,
-    businessCategoryName: profileMetrics.businessCategoryName,
-    hasExternalLink: profileMetrics.hasExternalLink,
-    externalUrl: profileMetrics.externalUrl,
-    externalUrls: profileMetrics.externalUrls,
-    externalLinksCount: profileMetrics.externalLinksCount,
-    highlightReelCount: profileMetrics.highlightReelCount,
-    igtvVideoCount: profileMetrics.igtvVideoCount,
-    hasBio: profileMetrics.hasBio,
-    bioLength: profileMetrics.bioLength,
-    username: profileMetrics.username,
+  // Low risk (0-20): Account appears authentic
+  if (riskScore <= 20) {
+    return 'Engagement patterns look healthy and authentic';
+  }
 
-    // Engagement metrics (11)
-    totalLikes: engagementMetrics.totalLikes,
-    totalComments: engagementMetrics.totalComments,
-    totalEngagement: engagementMetrics.totalEngagement,
-    avgLikesPerPost: engagementMetrics.avgLikesPerPost,
-    avgCommentsPerPost: engagementMetrics.avgCommentsPerPost,
-    avgEngagementPerPost: engagementMetrics.avgEngagementPerPost,
-    engagementRate: engagementMetrics.engagementRate,
-    commentToLikeRatio: engagementMetrics.commentToLikeRatio,
-    engagementStdDev: engagementMetrics.engagementStdDev,
-    engagementConsistency: engagementMetrics.engagementConsistency,
-    engagementRatePerPost: engagementMetrics.engagementRatePerPost,
+  // Medium risk (21-50): Some patterns look inconsistent
+  if (riskScore <= 50) {
+    if (warnings.length > 0) {
+      return `Some engagement patterns to note: ${warnings[0].toLowerCase()}`;
+    }
+    return 'Some engagement patterns could be stronger';
+  }
 
-    // Frequency metrics (8)
-    oldestPostTimestamp: frequencyMetrics.oldestPostTimestamp,
-    newestPostTimestamp: frequencyMetrics.newestPostTimestamp,
-    postingPeriodDays: frequencyMetrics.postingPeriodDays,
-    postingFrequency: frequencyMetrics.postingFrequency,
-    daysSinceLastPost: frequencyMetrics.daysSinceLastPost,
-    avgDaysBetweenPosts: frequencyMetrics.avgDaysBetweenPosts,
-    timeBetweenPostsDays: frequencyMetrics.timeBetweenPostsDays,
-    postingConsistency: frequencyMetrics.postingConsistency,
-
-    // Format metrics (11)
-    reelsCount: formatMetrics.reelsCount,
-    videoCount: formatMetrics.videoCount,
-    nonReelsVideoCount: formatMetrics.nonReelsVideoCount,
-    imageCount: formatMetrics.imageCount,
-    carouselCount: formatMetrics.carouselCount,
-    reelsRate: formatMetrics.reelsRate,
-    videoRate: formatMetrics.videoRate,
-    imageRate: formatMetrics.imageRate,
-    carouselRate: formatMetrics.carouselRate,
-    formatDiversity: formatMetrics.formatDiversity,
-    dominantFormat: formatMetrics.dominantFormat,
-
-    // Content metrics (19 - includes topHashtags and topMentions)
-    totalHashtags: contentMetrics.totalHashtags,
-    avgHashtagsPerPost: contentMetrics.avgHashtagsPerPost,
-    uniqueHashtagCount: contentMetrics.uniqueHashtagCount,
-    hashtagDiversity: contentMetrics.hashtagDiversity,
-    topHashtags: textDataForAI.hashtagFrequency.slice(0, 10), // Top 10 hashtags
-    totalMentions: contentMetrics.totalMentions,
-    avgMentionsPerPost: contentMetrics.avgMentionsPerPost,
-    uniqueMentionCount: contentMetrics.uniqueMentionCount,
-    topMentions: textDataForAI.topMentions.slice(0, 5), // Top 5 mentions
-    totalCaptionLength: contentMetrics.totalCaptionLength,
-    avgCaptionLength: contentMetrics.avgCaptionLength,
-    avgCaptionLengthNonEmpty: contentMetrics.avgCaptionLengthNonEmpty,
-    maxCaptionLength: contentMetrics.maxCaptionLength,
-    postsWithLocation: contentMetrics.postsWithLocation,
-    locationTaggingRate: contentMetrics.locationTaggingRate,
-    postsWithAltText: contentMetrics.postsWithAltText,
-    altTextRate: contentMetrics.altTextRate,
-    postsWithCommentsDisabled: contentMetrics.postsWithCommentsDisabled,
-    commentsDisabledRate: contentMetrics.commentsDisabledRate,
-    commentsEnabledRate: contentMetrics.commentsEnabledRate,
-
-    // Video metrics (4)
-    videoPostCount: videoMetrics.videoPostCount,
-    totalVideoViews: videoMetrics.totalVideoViews,
-    avgVideoViews: videoMetrics.avgVideoViews,
-    videoViewToLikeRatio: videoMetrics.videoViewToLikeRatio,
-
-    // Risk scores (2)
-    fakeFollowerRiskScore: riskScores.fakeFollowerRiskScore,
-    fakeFollowerWarnings: riskScores.fakeFollowerWarnings,
-
-    // Derived metrics (4)
-    contentDensity: derivedMetrics.contentDensity,
-    recentViralPostCount: derivedMetrics.recentViralPostCount,
-    recentPostsSampled: derivedMetrics.recentPostsSampled,
-    viralPostRate: derivedMetrics.viralPostRate
-  };
+  // High risk (51+): Multiple concerning patterns
+  if (warnings.length > 0) {
+    const primaryWarning = warnings[0].toLowerCase();
+    return `Worth reviewing: ${primaryWarning}`;
+  }
+  return 'Several engagement patterns worth reviewing before outreach';
 }
 
 // Export is already done via the function declaration above

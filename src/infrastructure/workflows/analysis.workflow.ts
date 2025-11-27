@@ -27,14 +27,14 @@ import {
   type AnalysisResultType
 } from '@/infrastructure/analysis-checks';
 
-// Phase 2: Profile Extraction & Score Calculation
+// Phase 2: Profile Extraction & Data Transformation
 import {
   createProfileExtractionService,
-  transformToCalculatedMetrics,
+  transformToExtractedData,
   analyzeLeadWithAI,
   fetchBusinessContext,
   type ExtractionOutput,
-  type CalculatedMetrics,
+  type ExtractedData,
   type AIResponsePayload,
   type TextDataForAI,
   type ApifyFullProfile
@@ -595,17 +595,17 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         throw new Error('Profile data is null - this should have been caught by pre-analysis checks');
       }
 
-      // Step 6c: Phase 2 - Extract metrics and calculate scores
-      // This runs the comprehensive profile extraction and score calculation
-      let calculatedMetrics: CalculatedMetrics | null = null;
+      // Step 6c: Phase 2 - Extract actionable data
+      // This runs the profile extraction and transforms to lean, actionable signals
+      let extractedData: ExtractedData | null = null;
       let textDataForAI: TextDataForAI | null = null;
       let phase2AIResponse: AIResponsePayload | null = null;
 
-      const phase2Result = await step.do('extract_and_score', {
+      const phase2Result = await step.do('extract_data', {
         retries: { limit: 1, delay: '1 second' }
-      }, async (): Promise<{ calculatedMetrics: CalculatedMetrics | null; textDataForAI: TextDataForAI | null }> => {
+      }, async (): Promise<{ extractedData: ExtractedData | null; textDataForAI: TextDataForAI | null }> => {
         try {
-          console.log(`[Workflow][${params.run_id}] Step 6c: Phase 2 - Extracting metrics and calculating scores`);
+          console.log(`[Workflow][${params.run_id}] Step 6c: Phase 2 - Extracting actionable data`);
 
           // Convert cache format to Apify format (fixes likeCount → likesCount mismatch)
           const apifyProfile = profileDataToApifyFormat(profile);
@@ -626,31 +626,32 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
           if (!extractionResult.success) {
             console.warn(`[Workflow][${params.run_id}] Phase 2 extraction failed:`, extractionResult.error);
-            return { calculatedMetrics: null, textDataForAI: null };
+            return { extractedData: null, textDataForAI: null };
           }
 
-          // Transform to CalculatedMetrics format (includes scores and gaps)
-          const metrics = transformToCalculatedMetrics(extractionResult.data);
+          // Transform to ExtractedData format (lean, actionable signals only)
+          const data = transformToExtractedData(extractionResult.data);
 
           console.log(`[Workflow][${params.run_id}] Phase 2 extraction complete:`, {
-            sampleSize: metrics.sampleSize,
-            scores: metrics.scores,
-            gaps: metrics.gaps
+            sampleSize: data.sampleSize,
+            hasHashtags: data.topHashtags.length > 0,
+            hasMentions: data.topMentions.length > 0,
+            fakeFollowerWarning: data.fakeFollowerWarning
           });
 
           return {
-            calculatedMetrics: metrics,
+            extractedData: data,
             textDataForAI: extractionResult.data.textDataForAI
           };
 
         } catch (error: any) {
           console.error(`[Workflow][${params.run_id}] Phase 2 extraction error (non-fatal):`, this.serializeError(error));
-          // Return null to fall back to old system
-          return { calculatedMetrics: null, textDataForAI: null };
+          // Return null on error
+          return { extractedData: null, textDataForAI: null };
         }
       });
 
-      calculatedMetrics = phase2Result.calculatedMetrics;
+      extractedData = phase2Result.extractedData;
       textDataForAI = phase2Result.textDataForAI;
 
       // Step 7: PARALLEL AI Analysis - Run both AI analyses simultaneously
@@ -684,8 +685,8 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           // Total time should be max(leadQual, profileAssess) not leadQual + profileAssess
 
           const leadQualificationTask = (async (): Promise<AIResponsePayload | null> => {
-            if (!calculatedMetrics || !textDataForAI) {
-              console.log(`[Workflow][${params.run_id}] [Parallel] Lead Qualification AI skipped - no metrics`);
+            if (!extractedData || !textDataForAI) {
+              console.log(`[Workflow][${params.run_id}] [Parallel] Lead Qualification AI skipped - no extracted data`);
               return null;
             }
 
@@ -709,7 +710,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
               // Run GPT-5 lead qualification analysis
               const aiResult = await analyzeLeadWithAI(
                 {
-                  calculatedMetrics: calculatedMetrics!,
+                  extractedData: extractedData!,
                   textData: textDataForAI!,
                   businessContext: businessContextResult.data
                 },
@@ -827,7 +828,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             error: errorDetails,
             context: {
               has_profile: !!profile,
-              has_calculated_metrics: !!calculatedMetrics,
+              has_extracted_data: !!extractedData,
               has_text_data: !!textDataForAI,
               analysis_type: params.analysis_type,
               timing_before_failure: {
@@ -957,15 +958,15 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           }
 
           // UPDATE existing analysis record (created in handler before workflow started)
-          // Include calculated_metrics from Phase 2 extraction if available
+          // Include extracted_data from Phase 2 extraction if available
           // Include version tracking for A/B testing and debugging
           const analysis = await analysisRepo.updateAnalysis(params.run_id, {
             overall_score: aiResult.overall_score,
             ai_response: aiResponse,
-            calculated_metrics: calculatedMetrics || undefined,
+            extracted_data: extractedData || undefined,
             status: 'complete',
             completed_at: new Date().toISOString(),
-            extraction_version: calculatedMetrics?.version || '1.0',
+            extraction_version: extractedData?.version || '1.0',
             model_versions: {
               profile_assessment: aiResult.model_used,
               lead_qualification: phase2AIResponse?.model || aiResult.model_used
@@ -985,7 +986,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             context: {
               run_id: params.run_id,
               has_phase2_response: !!phase2AIResponse,
-              has_calculated_metrics: !!calculatedMetrics,
+              has_extracted_data: !!extractedData,
               overall_score: aiResult?.overall_score
             }
           });
@@ -1091,11 +1092,9 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
             // Profile metadata for cost/complexity correlation
             profile_metadata: {
-              follower_count: calculatedMetrics?.raw?.followersCount ?? 'N/A',
               analysis_type: params.analysis_type,
-              profile_health_score: calculatedMetrics?.scores?.profileHealthScore ?? 'N/A',
               lead_tier: phase2AIResponse?.analysis?.leadTier ?? 'N/A',
-              fake_follower_risk: calculatedMetrics?.scores?.fakeFollowerRisk ?? 'N/A'
+              fake_follower_warning: extractedData?.fakeFollowerWarning ?? 'N/A'
             },
 
             // Performance metrics for monitoring
