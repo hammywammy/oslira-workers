@@ -317,11 +317,11 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
               const profile = await businessRepo.findById(params.business_profile_id);
 
               if (!profile) {
-                console.error(`[Workflow][${params.run_id}] Business profile not found`);
+                logger.error('Business profile not found', logContext);
                 throw new Error('Business profile not found');
               }
 
-              console.log(`[Workflow][${params.run_id}] [Parallel] Business profile loaded:`, profile.business_name);
+              logger.info('[Parallel] Business profile loaded:', { ...logContext, profile.business_name });
               return profile;
             })()
           ]);
@@ -395,7 +395,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
               await cacheService.set(params.username, result.profile, params.analysis_type);
               console.log(`[Workflow][${params.run_id}] Profile cached`);
             } else {
-              console.log(`[Workflow][${params.run_id}] Scrape returned error:`, result.error);
+              logger.info('Scrape returned error:', { ...logContext, result.error });
             }
 
             return result;
@@ -560,7 +560,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
               completed_at: new Date().toISOString()
             });
 
-            console.log(`[Workflow][${params.run_id}] Bypass analysis saved:`, analysis.id);
+            logger.info('Bypass analysis saved:', { ...logContext, analysis.id });
             return analysis.id;
           } catch (error: any) {
             console.error(`[Workflow][${params.run_id}] Bypass analysis save failed:`, this.serializeError(error));
@@ -1076,7 +1076,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             }
           });
 
-          console.log(`[Workflow][${params.run_id}] Analysis updated with results:`, analysis.id);
+          logger.info('Analysis updated with results:', { ...logContext, analysis.id });
           return analysis.id;
         } catch (error: any) {
           // CRITICAL ERROR LOGGING - Comprehensive error details before failure propagates
