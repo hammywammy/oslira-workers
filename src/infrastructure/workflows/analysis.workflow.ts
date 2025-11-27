@@ -237,14 +237,11 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       // OPTIMIZED: Uses single JOIN query instead of two sequential queries (saves 2-3s)
       await step.do('check_duplicate', async () => {
         try {
-          console.log(`[Workflow][${params.run_id}] Step 2: Checking for duplicates`);
-          // NOTE: Progress update moved to critical steps only (see MUST DO #3)
+          logger.info('Checking for duplicate analysis', logContext);
 
           const supabase = await SupabaseClientFactory.createAdminClient(this.env);
           const analysisRepo = new AnalysisRepository(supabase);
 
-          // ONE query instead of two (findByUsername + findInProgressAnalysis)
-          console.log(`[Workflow][${params.run_id}] Checking for in-progress analysis for @${params.username}`);
           const result = await analysisRepo.findLeadWithInProgressAnalysis(
             params.account_id,
             params.business_profile_id,
@@ -253,13 +250,19 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           );
 
           if (result.hasInProgress) {
-            console.error(`[Workflow][${params.run_id}] Duplicate analysis found for lead: ${result.leadId}`);
+            logger.error('Duplicate analysis found', {
+              ...logContext,
+              leadId: result.leadId
+            });
             throw new Error('Analysis already in progress for this profile');
           }
 
-          console.log(`[Workflow][${params.run_id}] No duplicates found (excluding self)`);
+          logger.info('No duplicate analysis found', logContext);
         } catch (error: any) {
-          console.error(`[Workflow][${params.run_id}] Step 2 FAILED:`, this.serializeError(error));
+          logger.error('Step 2 (check_duplicate) failed', {
+            ...logContext,
+            error: this.serializeError(error)
+          });
           throw error;
         }
       });
@@ -269,12 +272,16 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       // NOTE: Progress update skipped - non-critical step (see CRITICAL_PROGRESS_STEPS)
       const business = await step.do('setup_parallel', async () => {
         try {
-          console.log(`[Workflow][${params.run_id}] Steps 3-4: Running setup in parallel`);
+          logger.info('Running setup in parallel', logContext);
 
           const [_, businessProfile] = await Promise.all([
             // Task 1: Verify & deduct balance (MODULAR - routes to correct credit type)
             (async () => {
-              console.log(`[Workflow][${params.run_id}] [Parallel] Verifying balance (cost: ${creditsCost}, type: ${params.analysis_type})`);
+              logger.info('Verifying balance', {
+                ...logContext,
+                cost: creditsCost,
+                type: params.analysis_type
+              });
               const supabase = await SupabaseClientFactory.createAdminClient(this.env);
               const creditsRepo = new CreditsRepository(supabase);
 
@@ -286,7 +293,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
               );
 
               if (!hasBalance) {
-                console.error(`[Workflow][${params.run_id}] Insufficient ${params.analysis_type} analyses balance`);
+                logger.error('Insufficient balance for analysis', logContext);
                 throw new Error(`Insufficient ${params.analysis_type} analyses balance`);
               }
 
@@ -299,7 +306,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
                 `${params.analysis_type} analysis for @${params.username}`
               );
 
-              console.log(`[Workflow][${params.run_id}] [Parallel] Balance deducted successfully`);
+              logger.info('Balance deducted successfully', logContext);
             })(),
 
             // Task 2: Load business profile
