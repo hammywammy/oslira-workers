@@ -251,16 +251,25 @@ export async function internalBroadcast(c: Context<{ Bindings: Env }>) {
  * Global WebSocket connection for ALL analysis progress updates
  *
  * Frontend connects ONCE to this endpoint, receives updates for ALL analyses.
+ *
+ * NOTE: WebSocket connections can't send Authorization headers in browsers,
+ * so auth is handled via getAuthContext which checks cookies/headers.
  */
 export async function globalWebSocketUpgrade(c: Context<{ Bindings: Env }>) {
   try {
-    const auth = getAuthContext(c);
-
-    // Upgrade to WebSocket
+    // Upgrade to WebSocket (check before auth to fail fast)
     const upgradeHeader = c.req.header('Upgrade');
     if (upgradeHeader !== 'websocket') {
       return errorResponse(c, 'Expected WebSocket', 'INVALID_REQUEST', 400);
     }
+
+    // Get auth context (checks Authorization header or cookies)
+    const auth = getAuthContext(c);
+
+    logger.info('[GlobalWebSocket] Upgrade request', {
+      accountId: auth.accountId,
+      headers: Object.fromEntries(c.req.raw.headers.entries())
+    });
 
     // Get broadcaster DO for this account
     const broadcasterId = c.env.GLOBAL_BROADCASTER.idFromName(auth.accountId);
@@ -274,7 +283,10 @@ export async function globalWebSocketUpgrade(c: Context<{ Bindings: Env }>) {
       }
     );
   } catch (error) {
-    logger.error('[GlobalWebSocket] Upgrade failed', { error });
+    logger.error('[GlobalWebSocket] Upgrade failed', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    });
     return errorResponse(c, 'WebSocket upgrade failed', 'WEBSOCKET_ERROR', 500);
   }
 }
