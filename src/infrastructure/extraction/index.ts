@@ -109,3 +109,9 @@ export {
   type NicheDetectionError,
   type NicheDetectionOutput
 } from './niche-detection.service';
+
+// Utilities - Tier Classification
+export {
+  calculateLeadTier,
+  calculateAudienceScale
+} from './tier-classification.util';

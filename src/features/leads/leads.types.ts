@@ -111,6 +111,10 @@ export interface ExtractedDataResponse {
     engagement_health: number;
     profile_health_score: number;
     content_sophistication: number;
+
+    // Tier classifications
+    lead_tier: 'hot' | 'warm' | 'cool' | 'cold';
+    audience_scale: 'nano' | 'micro' | 'mid' | 'macro' | 'mega' | 'enterprise';
   } | null;
 }
 

@@ -24,6 +24,7 @@ import {
   calculatePartnerEngagementScore,
   calculateAuthorityScore
 } from './score-calculator.service';
+import { calculateAudienceScale } from './tier-classification.util';
 
 // ============================================================================
 // TRANSFORMER SERVICE
@@ -119,7 +120,11 @@ export function transformToExtractedData(extraction: ExtractionResult): Extracte
       // New scoring system (0-100 total)
       readinessScore,             // 0-25 points: Content quality, professionalism, sophistication
       partnerEngagementScore,     // 0-15 points: Active engaged audience
-      authorityScore              // 0-10 points: Account maturity and credibility
+      authorityScore,             // 0-10 points: Account maturity and credibility
+
+      // Tier classifications
+      leadTier: 'cold' as const,  // Placeholder - will be updated in workflow after AI analysis
+      audienceScale: calculateAudienceScale(profileMetrics.followersCount)
     }
   };
 

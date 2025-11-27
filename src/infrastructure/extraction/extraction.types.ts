@@ -542,6 +542,10 @@ export interface ExtractedData {
     readinessScore: number;      // 0-25 points: Content quality, professionalism, sophistication
     partnerEngagementScore: number;     // 0-15 points: Active engaged audience
     authorityScore: number;      // 0-10 points: Account maturity and credibility
+
+    // Tier classifications
+    leadTier: 'hot' | 'warm' | 'cool' | 'cold';  // Based on overall_score (set during workflow)
+    audienceScale: 'nano' | 'micro' | 'mid' | 'macro' | 'mega' | 'enterprise';  // Based on followers
   };
 }
 

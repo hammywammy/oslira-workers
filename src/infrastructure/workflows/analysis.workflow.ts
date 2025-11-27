@@ -34,6 +34,7 @@ import {
   analyzeLeadWithAI,
   fetchBusinessContext,
   detectNiche,
+  calculateLeadTier,
   type ExtractionOutput,
   type ExtractedData,
   type AIResponsePayload,
@@ -1021,6 +1022,20 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             console.log(`[Workflow][${params.run_id}] Including detected niche: ${detectedNiche}`);
           }
 
+          // Update extracted_data with leadTier based on overall_score
+          let finalExtractedData = extractedData;
+          if (extractedData) {
+            const leadTier = calculateLeadTier(aiResult.overall_score);
+            finalExtractedData = {
+              ...extractedData,
+              calculated: {
+                ...extractedData.calculated,
+                leadTier
+              }
+            };
+            console.log(`[Workflow][${params.run_id}] Lead tier calculated: ${leadTier} (score: ${aiResult.overall_score})`);
+          }
+
           // UPDATE existing analysis record (created in handler before workflow started)
           // Include extracted_data from Phase 2 extraction if available
           // Include niche in separate column for easy querying
@@ -1028,11 +1043,11 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           const analysis = await analysisRepo.updateAnalysis(params.run_id, {
             overall_score: aiResult.overall_score,
             ai_response: aiResponse,
-            extracted_data: extractedData || undefined,
+            extracted_data: finalExtractedData || undefined,
             niche: detectedNiche,
             status: 'complete',
             completed_at: new Date().toISOString(),
-            extraction_version: extractedData?.metadata?.version || '1.0',
+            extraction_version: finalExtractedData?.metadata?.version || '1.0',
             model_versions: {
               profile_assessment: aiResult.model_used,
               lead_qualification: phase2AIResponse?.model || aiResult.model_used
