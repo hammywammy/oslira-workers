@@ -941,12 +941,11 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           const analysisRepo = new AnalysisRepository(supabase);
 
           // Structure ai_response JSONB - merge old format with Phase 2 if available
-          // Old format: { score, summary } for backward compatibility
-          // Phase 2 format: Full AIResponsePayload with leadTier, partnershipAssessment, etc.
+          // Old format: { score } for backward compatibility (summary removed - bloat)
+          // Phase 2 format: Full AIResponsePayload with leadTier, strengths, opportunities, etc.
           const aiResponse: any = {
             // Always include basic fields (backward compat)
-            score: aiResult.overall_score,
-            summary: aiResult.summary_text
+            score: aiResult.overall_score
           };
 
           // Merge Phase 2 AI response if available

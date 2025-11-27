@@ -150,7 +150,6 @@ export class LeadsService {
         analysis_status: analysis?.status || null,
         analysis_completed_at: analysis?.completed_at || null,
         overall_score: analysis?.overall_score || null,
-        summary: analysis?.ai_response?.summary || null,
         // Include lean extracted data (actionable signals only)
         extracted_data: this.transformExtractedData(analysis?.extracted_data),
         // Include AI analysis (leadTier, strengths, etc.)
@@ -223,7 +222,6 @@ export class LeadsService {
       analysis_status: latestAnalysisData?.status || null,
       analysis_completed_at: latestAnalysisData?.completed_at || null,
       overall_score: latestAnalysisData?.overall_score || null,
-      summary: latestAnalysisData?.ai_response?.summary || null,
       // Include lean extracted data (actionable signals only)
       extracted_data: this.transformExtractedData(latestAnalysisData?.extracted_data),
       // Include AI analysis (leadTier, strengths, etc.)
@@ -262,7 +260,6 @@ export class LeadsService {
       run_id: analysis.run_id,
       analysis_type: analysis.analysis_type,
       overall_score: analysis.overall_score,
-      summary: analysis.ai_response?.summary || null,
       status: analysis.status,
       error_message: analysis.error_message,
       started_at: analysis.started_at,

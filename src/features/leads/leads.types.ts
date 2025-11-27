@@ -118,7 +118,6 @@ export interface LeadListItem {
   analysis_status: string | null;
   analysis_completed_at: string | null;
   overall_score: number | null;
-  summary: string | null;
 
   // ========== EXTRACTED DATA (from lead_analyses.extracted_data) ==========
   extracted_data: ExtractedDataResponse | null;
@@ -152,7 +151,6 @@ export interface LeadDetail {
   analysis_status: string | null;
   analysis_completed_at: string | null;
   overall_score: number | null;
-  summary: string | null;
 
   // ========== EXTRACTED DATA (from lead_analyses.extracted_data) ==========
   extracted_data: ExtractedDataResponse | null;
@@ -166,7 +164,6 @@ export interface LeadAnalysis {
   run_id: string;
   analysis_type: 'light' | 'deep' | 'private' | 'not_found';
   overall_score: number;
-  summary: string | null;
   status: string;
   error_message: string | null;
   started_at: string | null;
