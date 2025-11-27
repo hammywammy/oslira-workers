@@ -38,6 +38,32 @@ export class AnalysisProgressDO extends DurableObject {
         JSON.stringify({ type: 'pong', timestamp: Date.now() })
       )
     );
+
+    // HEARTBEAT INTERVAL: If implementing client-side heartbeats, the interval MUST be
+    // under 10 seconds to prevent Cloudflare from hibernating the DO and closing connections.
+    // Current recommendation: 5 seconds is acceptable and provides a safety margin.
+  }
+
+  /**
+   * Called when the Durable Object is about to hibernate
+   * Logs hibernation events to correlate with WebSocket closures (code 1005)
+   */
+  onHibernate(): void {
+    logger.warn('DO hibernating', {
+      connectedSockets: this.ctx.getWebSockets().length,
+      timestamp: Date.now()
+    });
+  }
+
+  /**
+   * Called when the Durable Object wakes up from hibernation
+   * Logs wake events to track hibernation/wake cycles in production
+   */
+  onWake(): void {
+    logger.info('DO woke up', {
+      connectedSockets: this.ctx.getWebSockets().length,
+      timestamp: Date.now()
+    });
   }
 
   /**
@@ -195,13 +221,15 @@ export class AnalysisProgressDO extends DurableObject {
   /**
    * Broadcast progress update to all connected WebSocket clients
    * Uses ctx.getWebSockets() which is hibernation-safe
+   *
+   * CRITICAL: Sends wake-up pings before broadcasting to prevent stale connections
+   * during hibernation. This ensures the DO is fully awake and connections are alive
+   * before sending the actual progress update.
    */
-  private broadcastProgress(
+  private async broadcastProgress(
     progress: AnalysisProgressState,
     eventType: 'ready' | 'progress' | 'complete' | 'failed' | 'cancelled' = 'progress'
-  ): void {
-    const message = JSON.stringify({ type: eventType, data: progress });
-
+  ): Promise<void> {
     // Get ALL connected WebSockets (hibernation-safe)
     const sockets = this.ctx.getWebSockets();
 
@@ -212,13 +240,43 @@ export class AnalysisProgressDO extends DurableObject {
 
     logger.info('Broadcasting progress update', { eventType, progress: progress.progress, clients: sockets.length });
 
+    // CRITICAL: Send wake-up pings first to prevent stale connections during hibernation
+    // Each ping is wrapped in try-catch to prevent one dead socket from blocking others
+    const pingMessage = JSON.stringify({ type: 'ping' });
+    let pingsSent = 0;
+    let pingsFailed = 0;
+
+    sockets.forEach(ws => {
+      try {
+        ws.send(pingMessage);
+        pingsSent++;
+      } catch (error: any) {
+        pingsFailed++;
+        logger.warn('Wake-up ping failed', { error: error.message });
+      }
+    });
+
+    logger.info('Wake-up pings sent', { sent: pingsSent, failed: pingsFailed, total: sockets.length });
+
+    // Wait 50ms for connections to wake up
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    // Now broadcast the actual progress update
+    const message = JSON.stringify({ type: eventType, data: progress });
+    let broadcastsSent = 0;
+    let broadcastsFailed = 0;
+
     sockets.forEach(ws => {
       try {
         ws.send(message);
+        broadcastsSent++;
       } catch (error: any) {
+        broadcastsFailed++;
         logger.error('WebSocket send failed', { error: error.message });
       }
     });
+
+    logger.info('Progress broadcasts sent', { sent: broadcastsSent, failed: broadcastsFailed, total: sockets.length });
   }
 
   // ===========================================================================
@@ -258,7 +316,7 @@ export class AnalysisProgressDO extends DurableObject {
     logger.info('Progress state saved', { runId: params.run_id });
 
     // Broadcast "ready" event to any WebSocket clients waiting
-    this.broadcastProgress(initialState, 'ready');
+    await this.broadcastProgress(initialState, 'ready');
     logger.info('Ready event broadcasted', { runId: params.run_id });
 
     // Set automatic cleanup alarm (24 hours)
@@ -308,7 +366,7 @@ export class AnalysisProgressDO extends DurableObject {
     logger.info('Progress updated successfully', { runId: current.run_id });
 
     // Broadcast to all WebSocket clients
-    this.broadcastProgress(updated);
+    await this.broadcastProgress(updated);
   }
 
   /**
@@ -338,7 +396,7 @@ export class AnalysisProgressDO extends DurableObject {
     await this.state.storage.put('progress', cancelled);
 
     // Broadcast cancellation to all WebSocket clients
-    this.broadcastProgress(cancelled, 'cancelled');
+    await this.broadcastProgress(cancelled, 'cancelled');
 
     // CRITICAL: Close all WebSocket connections after broadcasting cancellation
     const sockets = this.ctx.getWebSockets();
@@ -377,7 +435,7 @@ export class AnalysisProgressDO extends DurableObject {
     await this.state.storage.put('progress', completed);
 
     // Broadcast completion to all WebSocket clients
-    this.broadcastProgress(completed, 'complete');
+    await this.broadcastProgress(completed, 'complete');
 
     // CRITICAL: Close all WebSocket connections after broadcasting completion
     const sockets = this.ctx.getWebSockets();
@@ -412,7 +470,7 @@ export class AnalysisProgressDO extends DurableObject {
     await this.state.storage.put('progress', failed);
 
     // Broadcast failure to all WebSocket clients
-    this.broadcastProgress(failed, 'failed');
+    await this.broadcastProgress(failed, 'failed');
 
     // CRITICAL: Close all WebSocket connections after broadcasting failure
     const sockets = this.ctx.getWebSockets();
