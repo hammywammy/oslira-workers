@@ -573,6 +573,9 @@ export interface AILeadAnalysis {
   /** Lead qualification tier */
   leadTier: 'hot' | 'warm' | 'cold';
 
+  /** 1-2 word professional niche (e.g., "fitness coach", "copywriter") - null if not a business */
+  niche: string | null;
+
   /** Key strengths identified in the ICP */
   strengths: string[];
 

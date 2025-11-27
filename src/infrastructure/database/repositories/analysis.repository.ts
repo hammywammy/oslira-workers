@@ -22,6 +22,7 @@ export interface Analysis {
   overall_score: number;
   ai_response: any;
   extracted_data: any | null;
+  niche: string | null;
   status: 'pending' | 'processing' | 'complete' | 'failed' | 'cancelled';
   error_message: string | null;
   started_at: string | null;
@@ -51,6 +52,7 @@ export interface UpdateAnalysisData {
   overall_score?: number;
   ai_response?: any;
   extracted_data?: any;
+  niche?: string | null;
   analysis_type?: AnalysisTypeResult;
   status?: 'complete' | 'failed' | 'cancelled';
   error_message?: string;

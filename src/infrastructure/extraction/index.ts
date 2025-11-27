@@ -99,3 +99,13 @@ export {
   type FetchBusinessContextError,
   type FetchBusinessContextOutput
 } from './business-context.util';
+
+// Services - Niche Detection
+export {
+  detectNiche,
+  NICHE_DETECTION_MODEL,
+  type NicheDetectionInput,
+  type NicheDetectionResult,
+  type NicheDetectionError,
+  type NicheDetectionOutput
+} from './niche-detection.service';

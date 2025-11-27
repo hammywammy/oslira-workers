@@ -88,6 +88,7 @@ export class LeadsService {
     return {
       profile_assessment_score: overallScore,
       lead_tier: aiResponse.leadTier ?? null,
+      niche: aiResponse.niche ?? null,
       strengths: aiResponse.strengths ?? null,
       weaknesses: aiResponse.weaknesses ?? null,
       opportunities: aiResponse.opportunities ?? null,
