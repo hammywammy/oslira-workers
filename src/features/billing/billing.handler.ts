@@ -10,6 +10,7 @@ import { getSecret } from '@/infrastructure/config/secrets';
 import { getStripePriceId, getTierOrder, getStripeConfig, type TierName } from '@/config/stripe.config';
 import { z } from 'zod';
 import Stripe from 'stripe';
+import { logger } from '@/shared/utils/logger.util';
 
 // =============================================================================
 // SCHEMAS
@@ -74,8 +75,12 @@ export async function getSubscription(c: Context<{ Bindings: Env }>) {
       updatedAt: subscription.updated_at,
     });
 
-  } catch (error: any) {
-    console.error('[GetSubscription] Error:', error);
+  } catch (error) {
+    logger.error('Failed to get subscription', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      accountId: auth.accountId
+    });
     return errorResponse(c, 'Failed to get subscription', 'INTERNAL_ERROR', 500);
   }
 }
@@ -185,11 +190,11 @@ export async function createUpgradeCheckout(c: Context<{ Bindings: Env }>) {
       allow_promotion_codes: true,
     });
 
-    console.log('[Upgrade] Checkout session created', {
-      session_id: session.id,
-      account_id: accountId,
-      from_tier: subscription.plan_type,
-      to_tier: newTier,
+    logger.info('Checkout session created for upgrade', {
+      sessionId: session.id,
+      accountId,
+      fromTier: subscription.plan_type,
+      toTier: newTier
     });
 
     return successResponse(c, {
@@ -198,10 +203,14 @@ export async function createUpgradeCheckout(c: Context<{ Bindings: Env }>) {
       sessionId: session.id,
     });
 
-  } catch (error: any) {
-    console.error('[CreateUpgradeCheckout] Error:', error);
+  } catch (error) {
+    logger.error('Failed to create upgrade checkout session', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      accountId: auth.accountId
+    });
 
-    if (error.name === 'ZodError') {
+    if (error instanceof Error && error.name === 'ZodError') {
       return errorResponse(c, 'Invalid request', 'VALIDATION_ERROR', 400);
     }
 
@@ -219,7 +228,7 @@ export async function createUpgradeCheckout(c: Context<{ Bindings: Env }>) {
  * CRITICAL: Uses constructEventAsync() for Cloudflare Workers compatibility
  */
 export async function handleStripeWebhook(c: Context<{ Bindings: Env }>) {
-  console.log('[StripeWebhook] Webhook received');
+  logger.info('Stripe webhook received');
 
   try {
     // Fetch secrets
@@ -233,7 +242,7 @@ export async function handleStripeWebhook(c: Context<{ Bindings: Env }>) {
     // Get signature header
     const signature = c.req.header('stripe-signature');
     if (!signature) {
-      console.error('[StripeWebhook] Missing stripe-signature header');
+      logger.error('Stripe webhook missing signature header');
       return c.json({ error: 'Missing signature' }, 400);
     }
 
@@ -248,14 +257,16 @@ export async function handleStripeWebhook(c: Context<{ Bindings: Env }>) {
         signature,
         webhookSecret
       );
-    } catch (err: any) {
-      console.error('[StripeWebhook] Signature verification failed:', err.message);
+    } catch (err) {
+      logger.error('Stripe webhook signature verification failed', {
+        error: err instanceof Error ? err.message : String(err)
+      });
       return c.json({ error: 'Invalid signature' }, 400);
     }
 
-    console.log('[StripeWebhook] ✓ Event verified:', {
-      type: event.type,
-      id: event.id,
+    logger.info('Stripe webhook event verified', {
+      eventType: event.type,
+      eventId: event.id
     });
 
     // Extract metadata
@@ -263,10 +274,10 @@ export async function handleStripeWebhook(c: Context<{ Bindings: Env }>) {
     const accountId = eventObject.metadata?.account_id || null;
     const customerId = eventObject.customer || null;
 
-    console.log('[StripeWebhook] Event details:', {
-      event_type: event.type,
-      account_id: accountId,
-      customer_id: customerId,
+    logger.info('Stripe webhook event details', {
+      eventType: event.type,
+      accountId,
+      customerId,
       mode: eventObject.mode
     });
 
@@ -281,13 +292,17 @@ export async function handleStripeWebhook(c: Context<{ Bindings: Env }>) {
         received_at: new Date().toISOString(),
       });
 
-      console.log('[StripeWebhook] ✓ Event queued for processing:', {
-        event_id: event.id,
-        event_type: event.type,
-        account_id: accountId,
+      logger.info('Stripe webhook event queued for processing', {
+        eventId: event.id,
+        eventType: event.type,
+        accountId
       });
-    } catch (queueError: any) {
-      console.error('[StripeWebhook] ✗ Queue send failed:', queueError);
+    } catch (queueError) {
+      logger.error('Failed to queue Stripe webhook event', {
+        error: queueError instanceof Error ? queueError.message : String(queueError),
+        eventId: event.id,
+        eventType: event.type
+      });
       // Return 500 so Stripe retries
       return c.json({ error: 'Failed to queue webhook' }, 500);
     }
@@ -295,10 +310,10 @@ export async function handleStripeWebhook(c: Context<{ Bindings: Env }>) {
     // Return 200 immediately - processing happens async in queue consumer
     return c.json({ received: true, event_id: event.id });
 
-  } catch (error: any) {
-    console.error('[StripeWebhook] ✗ Unexpected error:', {
-      error: error.message,
-      stack: error.stack?.split('\n').slice(0, 3)
+  } catch (error) {
+    logger.error('Unexpected error in Stripe webhook handler', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
     });
     return c.json({ error: 'Webhook processing failed' }, 500);
   }
