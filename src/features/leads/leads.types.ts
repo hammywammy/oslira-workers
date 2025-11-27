@@ -59,27 +59,59 @@ export interface ExternalLinkInfo {
 }
 
 /**
- * Lean extracted data returned by API
- * Contains ONLY actionable signals for lead qualification
+ * Structured extracted data returned by API
+ * Organized into static, calculated, and metadata sections
  * All fields are nullable to handle cases where analysis hasn't been run
  */
 export interface ExtractedDataResponse {
-  // ========== ENGAGEMENT SIGNALS ==========
-  engagement_score: number | null;
-  engagement_consistency: number | null;
+  metadata: {
+    version: string;
+    sample_size: number;
+    extracted_at: string;
+  } | null;
 
-  // ========== RECENCY SIGNALS ==========
-  days_since_last_post: number | null;
+  static: {
+    // Content signals
+    top_hashtags: HashtagFrequency[];
+    top_mentions: MentionFrequency[];
 
-  // ========== CONTENT SIGNALS ==========
-  top_hashtags: HashtagFrequency[] | null;
-  top_mentions: MentionFrequency[] | null;
+    // Activity signals
+    days_since_last_post: number | null;
 
-  // ========== BUSINESS SIGNALS ==========
-  business_category_name: string | null;
+    // Profile attributes
+    business_category_name: string | null;
+    external_url: string | null;
+    followers_count: number;
+    posts_count: number;
+    is_business_account: boolean;
+    verified: boolean;
 
-  // ========== RISK SIGNALS ==========
-  fake_follower_warning: string | null;
+    // Content patterns
+    dominant_format: string | null;
+    format_diversity: number;
+    posting_consistency: number | null;
+
+    // Engagement averages
+    avg_likes_per_post: number | null;
+    avg_comments_per_post: number | null;
+    avg_video_views: number | null;
+  } | null;
+
+  calculated: {
+    // Core engagement metrics
+    engagement_score: number | null;
+    engagement_consistency: number | null;
+
+    // Risk assessment
+    fake_follower_warning: string | null;
+
+    // Profile quality scores
+    authority_ratio: number | null;
+    account_maturity: number;
+    engagement_health: number;
+    profile_health_score: number;
+    content_sophistication: number;
+  } | null;
 }
 
 /**

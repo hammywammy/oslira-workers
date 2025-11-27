@@ -633,10 +633,10 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           const data = transformToExtractedData(extractionResult.data);
 
           console.log(`[Workflow][${params.run_id}] Phase 2 extraction complete:`, {
-            sampleSize: data.sampleSize,
-            hasHashtags: data.topHashtags.length > 0,
-            hasMentions: data.topMentions.length > 0,
-            fakeFollowerWarning: data.fakeFollowerWarning
+            sampleSize: data.metadata.sampleSize,
+            hasHashtags: data.static.topHashtags.length > 0,
+            hasMentions: data.static.topMentions.length > 0,
+            fakeFollowerWarning: data.calculated.fakeFollowerWarning
           });
 
           return {
@@ -965,7 +965,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             extracted_data: extractedData || undefined,
             status: 'complete',
             completed_at: new Date().toISOString(),
-            extraction_version: extractedData?.version || '1.0',
+            extraction_version: extractedData?.metadata?.version || '1.0',
             model_versions: {
               profile_assessment: aiResult.model_used,
               lead_qualification: phase2AIResponse?.model || aiResult.model_used
@@ -1093,7 +1093,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             profile_metadata: {
               analysis_type: params.analysis_type,
               lead_tier: phase2AIResponse?.analysis?.leadTier ?? 'N/A',
-              fake_follower_warning: extractedData?.fakeFollowerWarning ?? 'N/A'
+              fake_follower_warning: extractedData?.calculated?.fakeFollowerWarning ?? 'N/A'
             },
 
             // Performance metrics for monitoring

@@ -477,47 +477,66 @@ export type ExtractionOutput =
 /**
  * Extracted data for database storage (extracted_data JSONB column)
  *
- * Contains ONLY actionable signals for lead qualification:
- * - Is this lead warm?
- * - Is this account real?
- * - Is this worth contacting?
- *
- * Everything redundant (stored elsewhere) or vanity (not actionable) is removed.
+ * Structured data for lead qualification organized into:
+ * - static: Raw profile data that doesn't change often
+ * - calculated: Computed scores and assessments
+ * - metadata: Extraction metadata
  */
 export interface ExtractedData {
-  /** Schema version for backwards compatibility */
-  version: '1.0';
-  /** ISO timestamp when extraction was performed */
-  extractedAt: string;
-  /** Number of posts analyzed */
-  sampleSize: number;
+  /** Metadata about the extraction */
+  metadata: {
+    /** Schema version for backwards compatibility */
+    version: '1.0';
+    /** Number of posts analyzed */
+    sampleSize: number;
+    /** ISO timestamp when extraction was performed */
+    extractedAt: string;
+  };
 
-  // ========== ENGAGEMENT SIGNALS ==========
-  /** Engagement rate (%) - key signal for account health */
-  engagementScore: number | null;
-  /** Engagement consistency (0-100) - indicates authentic engagement */
-  engagementConsistency: number | null;
+  /** Static profile data */
+  static: {
+    // Content signals
+    topHashtags: HashtagFrequency[];
+    topMentions: MentionFrequency[];
 
-  // ========== RECENCY SIGNALS ==========
-  /** Days since last post - indicates account activity */
-  daysSinceLastPost: number | null;
+    // Activity signals
+    daysSinceLastPost: number | null;
 
-  // ========== CONTENT SIGNALS ==========
-  /** Top hashtags with frequency counts (top 10) - indicates content themes */
-  topHashtags: HashtagFrequency[];
-  /** Top mentioned usernames with frequency counts (top 5) - indicates partnerships */
-  topMentions: MentionFrequency[];
+    // Profile attributes
+    businessCategoryName: string | null;
+    externalUrl: string | null;
+    followersCount: number;
+    postsCount: number;
+    isBusinessAccount: boolean;
+    verified: boolean;
 
-  // ========== BUSINESS SIGNALS ==========
-  /** Business category if account is a business account */
-  businessCategoryName: string | null;
+    // Content patterns
+    dominantFormat: 'reels' | 'video' | 'image' | 'carousel' | 'mixed' | null;
+    formatDiversity: number;
+    postingConsistency: number | null;
 
-  // ========== RISK SIGNALS ==========
-  /**
-   * Soft warning about potential fake followers (not a hard numeric score)
-   * Examples: "Some engagement patterns look inconsistent", "Account appears authentic", etc.
-   */
-  fakeFollowerWarning: string | null;
+    // Engagement averages
+    avgLikesPerPost: number | null;
+    avgCommentsPerPost: number | null;
+    avgVideoViews: number | null;
+  };
+
+  /** Calculated scores and assessments */
+  calculated: {
+    // Core engagement metrics
+    engagementScore: number | null;
+    engagementConsistency: number | null;
+
+    // Risk assessment
+    fakeFollowerWarning: string | null;
+
+    // Profile quality scores
+    authorityRatio: number | null;
+    accountMaturity: number;
+    engagementHealth: number;
+    profileHealthScore: number;
+    contentSophistication: number;
+  };
 }
 
 // ============================================================================

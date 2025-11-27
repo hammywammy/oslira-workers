@@ -3,13 +3,13 @@
 /**
  * OUTPUT TRANSFORMER SERVICE
  *
- * Transforms ExtractionResult into the lean ExtractedData format
+ * Transforms ExtractionResult into the structured ExtractedData format
  * for database storage in the extracted_data JSONB column.
  *
- * This service extracts ONLY actionable signals for lead qualification:
- * - Is this lead warm?
- * - Is this account real?
- * - Is this worth contacting?
+ * Organizes data into:
+ * - static: Raw profile data
+ * - calculated: Computed scores
+ * - metadata: Extraction metadata
  */
 
 import { logger } from '@/shared/utils/logger.util';
@@ -17,6 +17,7 @@ import type {
   ExtractionResult,
   ExtractedData
 } from './extraction.types';
+import { calculateScores } from './score-calculator.service';
 
 // ============================================================================
 // TRANSFORMER SERVICE
@@ -24,7 +25,6 @@ import type {
 
 /**
  * Transform ExtractionResult into ExtractedData for database storage
- * Only extracts essential, actionable signals - no vanity metrics
  */
 export function transformToExtractedData(extraction: ExtractionResult): ExtractedData {
   const startTime = Date.now();
@@ -37,9 +37,14 @@ export function transformToExtractedData(extraction: ExtractionResult): Extracte
     engagementMetrics,
     frequencyMetrics,
     profileMetrics,
+    formatMetrics,
     riskScores,
-    textDataForAI
+    textDataForAI,
+    metadata
   } = extraction;
+
+  // Calculate composite scores
+  const { scores } = calculateScores(extraction);
 
   // Generate soft warning from fake follower risk
   const fakeFollowerWarning = generateFakeFollowerWarning(
@@ -48,36 +53,63 @@ export function transformToExtractedData(extraction: ExtractionResult): Extracte
   );
 
   const extractedData: ExtractedData = {
-    version: '1.0',
-    extractedAt: new Date().toISOString(),
-    sampleSize: extraction.metadata.samplePostCount,
+    metadata: {
+      version: '1.0',
+      sampleSize: metadata.samplePostCount,
+      extractedAt: new Date().toISOString()
+    },
 
-    // Engagement signals
-    engagementScore: engagementMetrics.engagementRate,
-    engagementConsistency: engagementMetrics.engagementConsistency,
+    static: {
+      // Content signals
+      topHashtags: textDataForAI.hashtagFrequency.slice(0, 10),
+      topMentions: textDataForAI.topMentions.slice(0, 5),
 
-    // Recency signals
-    daysSinceLastPost: frequencyMetrics.daysSinceLastPost,
+      // Activity signals
+      daysSinceLastPost: frequencyMetrics.daysSinceLastPost,
 
-    // Content signals
-    topHashtags: textDataForAI.hashtagFrequency.slice(0, 10),
-    topMentions: textDataForAI.topMentions.slice(0, 5),
+      // Profile attributes
+      businessCategoryName: profileMetrics.businessCategoryName,
+      externalUrl: profileMetrics.externalUrl,
+      followersCount: profileMetrics.followersCount,
+      postsCount: profileMetrics.postsCount,
+      isBusinessAccount: profileMetrics.isBusinessAccount,
+      verified: profileMetrics.verified,
 
-    // Business signals
-    businessCategoryName: profileMetrics.businessCategoryName,
+      // Content patterns
+      dominantFormat: formatMetrics.dominantFormat,
+      formatDiversity: formatMetrics.formatDiversity,
+      postingConsistency: frequencyMetrics.postingConsistency,
 
-    // Risk signals
-    fakeFollowerWarning
+      // Engagement averages
+      avgLikesPerPost: engagementMetrics.avgLikesPerPost,
+      avgCommentsPerPost: engagementMetrics.avgCommentsPerPost,
+      avgVideoViews: extraction.videoMetrics.avgVideoViews
+    },
+
+    calculated: {
+      // Core engagement metrics
+      engagementScore: engagementMetrics.engagementRate,
+      engagementConsistency: engagementMetrics.engagementConsistency,
+
+      // Risk assessment
+      fakeFollowerWarning,
+
+      // Profile quality scores
+      authorityRatio: profileMetrics.authorityRatio,
+      accountMaturity: scores.accountMaturity,
+      engagementHealth: scores.engagementHealth,
+      profileHealthScore: scores.profileHealthScore,
+      contentSophistication: scores.contentSophistication
+    }
   };
 
   const processingTime = Date.now() - startTime;
 
   logger.info('[OutputTransformer] Transformation complete', {
     username: profileMetrics.username,
-    sampleSize: extractedData.sampleSize,
-    hasHashtags: extractedData.topHashtags.length > 0,
-    hasMentions: extractedData.topMentions.length > 0,
-    fakeFollowerWarning: extractedData.fakeFollowerWarning,
+    sampleSize: extractedData.metadata.sampleSize,
+    hasHashtags: extractedData.static.topHashtags.length > 0,
+    hasMentions: extractedData.static.topMentions.length > 0,
     processingTimeMs: processingTime
   });
 

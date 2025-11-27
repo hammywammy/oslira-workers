@@ -17,28 +17,60 @@ export class LeadsService {
 
   /**
    * Transform extracted_data JSONB from database to API response format
-   * Converts camelCase to snake_case for lean, actionable signals only
+   * Converts camelCase to snake_case for structured data sections
    */
   private transformExtractedData(data: ExtractedData | null): ExtractedDataResponse | null {
     if (!data) return null;
 
     return {
-      // Engagement signals
-      engagement_score: data.engagementScore ?? null,
-      engagement_consistency: data.engagementConsistency ?? null,
+      metadata: data.metadata ? {
+        version: data.metadata.version,
+        sample_size: data.metadata.sampleSize,
+        extracted_at: data.metadata.extractedAt
+      } : null,
 
-      // Recency signals
-      days_since_last_post: data.daysSinceLastPost ?? null,
+      static: data.static ? {
+        // Content signals
+        top_hashtags: data.static.topHashtags ?? [],
+        top_mentions: data.static.topMentions ?? [],
 
-      // Content signals
-      top_hashtags: data.topHashtags ?? null,
-      top_mentions: data.topMentions ?? null,
+        // Activity signals
+        days_since_last_post: data.static.daysSinceLastPost ?? null,
 
-      // Business signals
-      business_category_name: data.businessCategoryName ?? null,
+        // Profile attributes
+        business_category_name: data.static.businessCategoryName ?? null,
+        external_url: data.static.externalUrl ?? null,
+        followers_count: data.static.followersCount ?? 0,
+        posts_count: data.static.postsCount ?? 0,
+        is_business_account: data.static.isBusinessAccount ?? false,
+        verified: data.static.verified ?? false,
 
-      // Risk signals
-      fake_follower_warning: data.fakeFollowerWarning ?? null
+        // Content patterns
+        dominant_format: data.static.dominantFormat ?? null,
+        format_diversity: data.static.formatDiversity ?? 0,
+        posting_consistency: data.static.postingConsistency ?? null,
+
+        // Engagement averages
+        avg_likes_per_post: data.static.avgLikesPerPost ?? null,
+        avg_comments_per_post: data.static.avgCommentsPerPost ?? null,
+        avg_video_views: data.static.avgVideoViews ?? null
+      } : null,
+
+      calculated: data.calculated ? {
+        // Core engagement metrics
+        engagement_score: data.calculated.engagementScore ?? null,
+        engagement_consistency: data.calculated.engagementConsistency ?? null,
+
+        // Risk assessment
+        fake_follower_warning: data.calculated.fakeFollowerWarning ?? null,
+
+        // Profile quality scores
+        authority_ratio: data.calculated.authorityRatio ?? null,
+        account_maturity: data.calculated.accountMaturity ?? 0,
+        engagement_health: data.calculated.engagementHealth ?? 0,
+        profile_health_score: data.calculated.profileHealthScore ?? 0,
+        content_sophistication: data.calculated.contentSophistication ?? 0
+      } : null
     };
   }
 
