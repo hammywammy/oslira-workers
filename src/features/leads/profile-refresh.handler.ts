@@ -9,6 +9,7 @@ import { CacheStrategyService } from '@/infrastructure/cache/cache-strategy.serv
 import { ApifyAdapter } from '@/infrastructure/scraping/apify.adapter';
 import { getSecret } from '@/infrastructure/config/secrets';
 import { z } from 'zod';
+import { logger } from '@/shared/utils/logger.util';
 
 /**
  * PROFILE REFRESH HANDLER
@@ -125,8 +126,12 @@ export async function checkProfileRefresh(c: Context<{ Bindings: Env }>) {
         : 'Profile is up-to-date. No refresh needed.'
     });
 
-  } catch (error: any) {
-    console.error('[ProfileRefresh] Check error:', error);
+  } catch (error) {
+    logger.error('Failed to check profile refresh', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      leadId: c.req.param('leadId')
+    });
     return errorResponse(c, 'Failed to check profile refresh', 'REFRESH_CHECK_ERROR', 500);
   }
 }
@@ -171,8 +176,12 @@ export async function forceProfileRefresh(c: Context<{ Bindings: Env }>) {
       next_steps: 'Run a new analysis to get updated profile data.'
     });
 
-  } catch (error: any) {
-    console.error('[ProfileRefresh] Force refresh error:', error);
+  } catch (error) {
+    logger.error('Failed to force refresh profile', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      leadId: c.req.param('leadId')
+    });
     return errorResponse(c, 'Failed to force refresh', 'FORCE_REFRESH_ERROR', 500);
   }
 }
@@ -201,8 +210,11 @@ export async function getCacheStatistics(c: Context<{ Bindings: Env }>) {
       ]
     });
 
-  } catch (error: any) {
-    console.error('[Cache] Statistics error:', error);
+  } catch (error) {
+    logger.error('Failed to get cache statistics', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    });
     return errorResponse(c, 'Failed to get cache statistics', 'CACHE_STATS_ERROR', 500);
   }
 }
