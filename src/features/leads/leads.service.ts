@@ -69,7 +69,11 @@ export class LeadsService {
         account_maturity: data.calculated.accountMaturity ?? 0,
         engagement_health: data.calculated.engagementHealth ?? 0,
         profile_health_score: data.calculated.profileHealthScore ?? 0,
-        content_sophistication: data.calculated.contentSophistication ?? 0
+        content_sophistication: data.calculated.contentSophistication ?? 0,
+
+        // Tier classifications
+        lead_tier: data.calculated.leadTier ?? 'cold',
+        audience_scale: data.calculated.audienceScale ?? 'nano'
       } : null
     };
   }
@@ -88,6 +92,7 @@ export class LeadsService {
     return {
       profile_assessment_score: overallScore,
       lead_tier: aiResponse.leadTier ?? null,
+      niche: aiResponse.niche ?? null,
       strengths: aiResponse.strengths ?? null,
       weaknesses: aiResponse.weaknesses ?? null,
       opportunities: aiResponse.opportunities ?? null,

@@ -111,6 +111,10 @@ export interface ExtractedDataResponse {
     engagement_health: number;
     profile_health_score: number;
     content_sophistication: number;
+
+    // Tier classifications
+    lead_tier: 'hot' | 'warm' | 'cool' | 'cold';
+    audience_scale: 'nano' | 'micro' | 'mid' | 'macro' | 'mega' | 'enterprise';
   } | null;
 }
 
@@ -121,6 +125,7 @@ export interface ExtractedDataResponse {
 export interface AIAnalysisResponse {
   profile_assessment_score: number | null;
   lead_tier: 'hot' | 'warm' | 'cold' | null;
+  niche: string | null;
   strengths: string[] | null;
   weaknesses: string[] | null;
   opportunities: string[] | null;

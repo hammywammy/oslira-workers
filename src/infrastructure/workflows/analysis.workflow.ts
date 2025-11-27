@@ -33,11 +33,14 @@ import {
   transformToExtractedData,
   analyzeLeadWithAI,
   fetchBusinessContext,
+  detectNiche,
+  calculateLeadTier,
   type ExtractionOutput,
   type ExtractedData,
   type AIResponsePayload,
   type TextDataForAI,
-  type ApifyFullProfile
+  type ApifyFullProfile,
+  type NicheDetectionOutput
 } from '@/infrastructure/extraction';
 
 /**
@@ -654,6 +657,63 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       extractedData = phase2Result.extractedData;
       textDataForAI = phase2Result.textDataForAI;
 
+      // Step 6d: Detect niche using AI
+      let detectedNiche: string | null = null;
+      const nicheResult = await step.do('detect_niche', {
+        retries: { limit: 1, delay: '1 second' }
+      }, async (): Promise<string | null> => {
+        try {
+          console.log(`[Workflow][${params.run_id}] Step 6d: Detecting profile niche`);
+
+          // Only run niche detection if we have extracted data
+          if (!extractedData || !textDataForAI) {
+            console.log(`[Workflow][${params.run_id}] Skipping niche detection - no extracted data`);
+            return null;
+          }
+
+          // Prepare niche detection input
+          const nicheInput = {
+            username: params.username,
+            displayName: profile.displayName,
+            biography: textDataForAI.biography,
+            followersCount: profile.followersCount,
+            isBusinessAccount: profile.isBusinessAccount,
+            businessCategoryName: extractedData.static.businessCategoryName,
+            externalUrl: extractedData.static.externalUrl,
+            topHashtags: extractedData.static.topHashtags.map(h => h.hashtag).slice(0, 5),
+            recentCaptions: textDataForAI.recentCaptions
+          };
+
+          // Run niche detection
+          const result = await detectNiche(
+            nicheInput,
+            this.env,
+            secrets.openaiKey,
+            secrets.claudeKey,
+            secrets.aiGatewayToken
+          );
+
+          if (!result.success) {
+            console.warn(`[Workflow][${params.run_id}] Niche detection failed:`, result.error);
+            return null;
+          }
+
+          console.log(`[Workflow][${params.run_id}] Niche detected:`, {
+            niche: result.niche,
+            confidence: result.confidence,
+            reasoning: result.reasoning
+          });
+
+          return result.niche;
+
+        } catch (error: any) {
+          console.error(`[Workflow][${params.run_id}] Niche detection error (non-fatal):`, error.message);
+          return null;
+        }
+      });
+
+      detectedNiche = nicheResult;
+
       // Step 7: PARALLEL AI Analysis - Run both AI analyses simultaneously
       // OPTIMIZATION: Runs both AI calls in parallel (saves ~14s)
       // - Lead Qualification AI: GPT-5 comprehensive analysis (~50-60s) - leadTier, strengths, opportunities
@@ -956,16 +1016,38 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             });
           }
 
+          // Add niche to ai_response if detected
+          if (detectedNiche) {
+            aiResponse.niche = detectedNiche;
+            console.log(`[Workflow][${params.run_id}] Including detected niche: ${detectedNiche}`);
+          }
+
+          // Update extracted_data with leadTier based on overall_score
+          let finalExtractedData = extractedData;
+          if (extractedData) {
+            const leadTier = calculateLeadTier(aiResult.overall_score);
+            finalExtractedData = {
+              ...extractedData,
+              calculated: {
+                ...extractedData.calculated,
+                leadTier
+              }
+            };
+            console.log(`[Workflow][${params.run_id}] Lead tier calculated: ${leadTier} (score: ${aiResult.overall_score})`);
+          }
+
           // UPDATE existing analysis record (created in handler before workflow started)
           // Include extracted_data from Phase 2 extraction if available
+          // Include niche in separate column for easy querying
           // Include version tracking for A/B testing and debugging
           const analysis = await analysisRepo.updateAnalysis(params.run_id, {
             overall_score: aiResult.overall_score,
             ai_response: aiResponse,
-            extracted_data: extractedData || undefined,
+            extracted_data: finalExtractedData || undefined,
+            niche: detectedNiche,
             status: 'complete',
             completed_at: new Date().toISOString(),
-            extraction_version: extractedData?.metadata?.version || '1.0',
+            extraction_version: finalExtractedData?.metadata?.version || '1.0',
             model_versions: {
               profile_assessment: aiResult.model_used,
               lead_qualification: phase2AIResponse?.model || aiResult.model_used
