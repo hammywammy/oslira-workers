@@ -311,7 +311,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
             // Task 2: Load business profile
             (async () => {
-              console.log(`[Workflow][${params.run_id}] [Parallel] Loading business profile`);
+              logger.info('Loading business profile', logContext);
               const supabase = await SupabaseClientFactory.createAdminClient(this.env);
               const businessRepo = new BusinessRepository(supabase);
               const profile = await businessRepo.findById(params.business_profile_id);
@@ -321,14 +321,20 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
                 throw new Error('Business profile not found');
               }
 
-              logger.info('[Parallel] Business profile loaded:', { ...logContext, profile.business_name });
+              logger.info('Business profile loaded', {
+                ...logContext,
+                businessName: profile.business_name
+              });
               return profile;
             })()
           ]);
 
           return businessProfile;
         } catch (error: any) {
-          console.error(`[Workflow][${params.run_id}] Setup parallel FAILED:`, this.serializeError(error));
+          logger.error('Step 3-4 (setup_parallel) failed', {
+            ...logContext,
+            error: this.serializeError(error)
+          });
           throw error;
         }
       });
@@ -339,7 +345,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         retries: { limit: 2, delay: '500 milliseconds' }
       }, async () => {
         try {
-          console.log(`[Workflow][${params.run_id}] Step 5: Checking R2 cache for @${params.username}`);
+          logger.info('Checking R2 cache', logContext);
 
           const cacheStart = Date.now();
           const cacheService = new R2CacheService(this.env.R2_CACHE_BUCKET);
@@ -347,15 +353,18 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           timing.cache_check = Date.now() - cacheStart;
 
           if (cached) {
-            console.log(`[Workflow][${params.run_id}] Cache HIT for @${params.username}`);
+            logger.info('Cache HIT', logContext);
             timing.cache_hit = true;
           } else {
-            console.log(`[Workflow][${params.run_id}] Cache MISS for @${params.username}`);
+            logger.info('Cache MISS', logContext);
           }
 
           return cached;
         } catch (error: any) {
-          console.error(`[Workflow][${params.run_id}] Step 5 FAILED:`, this.serializeError(error));
+          logger.error('Step 5 (check_cache) failed', {
+            ...logContext,
+            error: this.serializeError(error)
+          });
           throw error;
         }
       });
@@ -367,7 +376,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           retries: { limit: 1, delay: '2 seconds' }
         }, async (): Promise<ScrapeResult> => {
           try {
-            console.log(`[Workflow][${params.run_id}] Step 6: Scraping Instagram profile @${params.username}`);
+            logger.info('Scraping Instagram profile', logContext);
             const stepInfo = getStepProgress(params.analysis_type, 'scrape_profile');
             await this.updateProgress(params.run_id, stepInfo.percentage, stepInfo.description);
 
@@ -376,15 +385,18 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             const apifyAdapter = new ApifyAdapter(apifyToken);
 
             const postsLimit = getPostsLimit(params.analysis_type);
-            console.log(`[Workflow][${params.run_id}] Scraping ${postsLimit} posts`);
+            logger.info('Scraping posts', {
+              ...logContext,
+              postsLimit
+            });
 
             // Use scrapeProfileWithMeta to get detailed error info instead of throwing
             const result = await apifyAdapter.scrapeProfileWithMeta(params.username, postsLimit);
             timing.scraping = Date.now() - scrapeStart;
 
             if (result.success && result.profile) {
-              console.log(`[Workflow][${params.run_id}] Scraped profile:`, {
-                username: result.profile.username,
+              logger.info('Profile scraped successfully', {
+                ...logContext,
                 followers: result.profile.followersCount,
                 posts: result.profile.latestPosts.length,
                 isPrivate: result.profile.isPrivate
@@ -393,14 +405,20 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
               // Store in cache only if successful
               const cacheService = new R2CacheService(this.env.R2_CACHE_BUCKET);
               await cacheService.set(params.username, result.profile, params.analysis_type);
-              console.log(`[Workflow][${params.run_id}] Profile cached`);
+              logger.info('Profile cached', logContext);
             } else {
-              logger.info('Scrape returned error:', { ...logContext, result.error });
+              logger.info('Scrape returned error', {
+                ...logContext,
+                error: result.error
+              });
             }
 
             return result;
           } catch (error: any) {
-            console.error(`[Workflow][${params.run_id}] Step 6 FAILED:`, this.serializeError(error));
+            logger.error('Step 6 (scrape_profile) failed', {
+              ...logContext,
+              error: this.serializeError(error)
+            });
             // Return as error result instead of throwing
             return {
               success: false,
