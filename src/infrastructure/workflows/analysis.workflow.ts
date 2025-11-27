@@ -129,6 +129,8 @@ function mapMediaTypeToApify(
 
 export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowParams> {
 
+  private accountId!: string; // Store account ID for broadcast calls
+
   /**
    * Serialize error for logging - prevents '#<Object>' in logs
    */
@@ -148,6 +150,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
   async run(event: WorkflowEvent<AnalysisWorkflowParams>, step: WorkflowStep) {
     const params = event.payload;
+    this.accountId = params.account_id; // Store for broadcast calls
     const creditsCost = getCreditCost(params.analysis_type);
     const workflowStartTime = Date.now();
 
@@ -176,39 +179,6 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       logger.info('Analysis workflow started', {
         ...logContext,
         credits: creditsCost
-      });
-
-      // Step 1: Connect to pre-initialized progress tracker
-      // NOTE: DO is now initialized in the API handler BEFORE workflow starts
-      // This ensures SSE connections can establish without race conditions
-      await step.do('connect_progress', async () => {
-        try {
-          logger.info('Connecting to progress tracker', logContext);
-
-          const id = this.env.ANALYSIS_PROGRESS.idFromName(params.run_id);
-          const progressDO = this.env.ANALYSIS_PROGRESS.get(id);
-
-          // Verify DO was initialized by checking for existing progress state
-          const progressResponse = await progressDO.fetch('http://do/progress');
-          const progress = await progressResponse.json();
-
-          if (!progress) {
-            logger.error('Progress tracker not initialized', logContext);
-            throw new Error('Progress tracker not initialized by API handler');
-          }
-
-          logger.info('Connected to progress tracker successfully', {
-            ...logContext,
-            status: progress.status,
-            progress: progress.progress
-          });
-        } catch (error: any) {
-          logger.error('Step 1 (connect_progress) failed', {
-            ...logContext,
-            error: this.serializeError(error)
-          });
-          throw error;
-        }
       });
 
       // Step 1b: Fetch secrets early (for Phase 2 AI analysis)
@@ -378,7 +348,13 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           try {
             logger.info('Scraping Instagram profile', logContext);
             const stepInfo = getStepProgress(params.analysis_type, 'scrape_profile');
-            await this.updateProgress(params.run_id, stepInfo.percentage, stepInfo.description);
+            await this.broadcastProgress(
+              params.run_id,
+              stepInfo.percentage,
+              { current: 1, total: 3 },
+              stepInfo.description,
+              'analyzing'
+            );
 
             const scrapeStart = Date.now();
             const apifyToken = await getSecret('APIFY_API_TOKEN', this.env, this.env.APP_ENV);
@@ -617,21 +593,13 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           try {
             logger.info('Marking bypassed analysis as complete', logContext);
 
-            const id = this.env.ANALYSIS_PROGRESS.idFromName(params.run_id);
-            const progressDO = this.env.ANALYSIS_PROGRESS.get(id);
-
-            await progressDO.fetch('http://do/complete', {
-              method: 'POST',
-              body: JSON.stringify({
-                result: {
-                  lead_id: bypassLeadId,
-                  overall_score: failedCheck.score ?? 0,
-                  summary_text: failedCheck.summary || `Unable to analyze: ${failedCheck.reason}`,
-                  bypassed: true,
-                  bypass_reason: failedCheck.resultType
-                }
-              })
-            });
+            await this.broadcastProgress(
+              params.run_id,
+              100,
+              { current: 3, total: 3 },
+              failedCheck.summary || `Unable to analyze: ${failedCheck.reason}`,
+              'complete'
+            );
 
             logger.info('Bypass progress marked as complete', logContext);
           } catch (error) {
@@ -804,7 +772,13 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         try {
           logger.info('Starting parallel AI analysis', logContext);
           const stepInfo = getStepProgress(params.analysis_type as AnalysisType, 'ai_analysis');
-          await this.updateProgress(params.run_id, stepInfo.percentage, stepInfo.description);
+          await this.broadcastProgress(
+            params.run_id,
+            stepInfo.percentage,
+            { current: 2, total: 3 },
+            stepInfo.description,
+            'analyzing'
+          );
 
           const aiStart = Date.now();
 
@@ -983,7 +957,13 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         try {
           logger.info('Upserting lead data', logContext);
           const stepInfo = getStepProgress(params.analysis_type, 'upsert_lead');
-          await this.updateProgress(params.run_id, stepInfo.percentage, stepInfo.description);
+          await this.broadcastProgress(
+            params.run_id,
+            stepInfo.percentage,
+            { current: 3, total: 3 },
+            stepInfo.description,
+            'analyzing'
+          );
 
           const upsertStart = Date.now();
           const supabase = await SupabaseClientFactory.createAdminClient(this.env);
@@ -1154,19 +1134,13 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         try {
           logger.info('Marking analysis as complete', logContext);
 
-          const id = this.env.ANALYSIS_PROGRESS.idFromName(params.run_id);
-          const progressDO = this.env.ANALYSIS_PROGRESS.get(id);
-
-          await progressDO.fetch('http://do/complete', {
-            method: 'POST',
-            body: JSON.stringify({
-              result: {
-                lead_id: leadId,
-                overall_score: aiResult.overall_score,
-                summary_text: aiResult.summary_text
-              }
-            })
-          });
+          await this.broadcastProgress(
+            params.run_id,
+            100,
+            { current: 3, total: 3 },
+            'Analysis complete',
+            'complete'
+          );
 
           logger.info('Progress marked as complete', logContext);
         } catch (error: any) {
@@ -1411,69 +1385,77 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
   }
 
   /**
-   * Update progress - gets fresh stub each time (no serialization)
+   * Broadcast progress update via Worker internal endpoint
+   * Replaces direct DO communication with HTTP broadcast call
    */
-  private async updateProgress(
+  private async broadcastProgress(
     runId: string,
     progress: number,
-    currentStep: string
+    step: { current: number; total: number },
+    currentStep: string,
+    status: 'analyzing' | 'complete' | 'failed'
   ): Promise<void> {
-    logger.debug('Updating progress', { runId, progress, currentStep, message: `${progress}% - ${currentStep}` });
+    try {
+      logger.debug('Broadcasting progress', { runId, progress, step, currentStep, status });
 
-    const id = this.env.ANALYSIS_PROGRESS.idFromName(runId);
-    const stub = this.env.ANALYSIS_PROGRESS.get(id);
+      // Determine message type based on status
+      const type = status === 'complete' ? 'analysis.complete' :
+                   status === 'failed' ? 'analysis.failed' : 'analysis.progress';
 
-    const response = await stub.fetch('http://do/update', {
-      method: 'POST',
-      body: JSON.stringify({
-        progress,
-        current_step: currentStep,
-        status: progress === 100 ? 'complete' : 'processing'
-      })
-    });
+      // Call internal broadcast endpoint
+      const apiUrl = this.env.APP_ENV === 'staging'
+        ? 'https://api-staging.oslira.com'
+        : 'https://api.oslira.com';
 
-    if (!response.ok) {
-      const error = await response.text();
-      logger.error('Failed to update progress', { runId, error });
-      throw new Error(`Failed to update progress: ${error}`);
+      const response = await fetch(`${apiUrl}/api/internal/broadcast`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accountId: this.accountId,
+          type,
+          runId,
+          data: {
+            progress,
+            step,
+            status,
+            currentStep
+          }
+        })
+      });
+
+      if (!response.ok) {
+        logger.warn('[Workflow] Broadcast failed (non-fatal)', {
+          runId,
+          status: response.status,
+          statusText: response.statusText
+        });
+      }
+    } catch (error) {
+      // Don't fail workflow if broadcast fails
+      logger.error('[Workflow] Broadcast error (non-fatal)', { error });
     }
   }
 
   /**
-   * Mark as failed - updates both DO and database with comprehensive error logging
-   * CRITICAL: This method logs BEFORE broadcasting failure to ensure error details are captured
+   * Mark as failed - updates database and broadcasts failure
    */
   private async markFailed(runId: string, errorMessage: string, errorDetails?: any): Promise<void> {
-    // ========================================================================
-    // COORDINATED ERROR LOGGING - Log comprehensive error details BEFORE
-    // broadcasting failure to Durable Object
-    // ========================================================================
     logger.error('Marking analysis as failed', {
       error_message: errorMessage,
       error_details: errorDetails || { message: errorMessage },
-      timestamp: new Date().toISOString(),
-      note: 'About to broadcast failure to Durable Object and update database'
+      timestamp: new Date().toISOString()
     });
 
-    // Update Durable Object - this broadcasts the failure to connected clients
-    const id = this.env.ANALYSIS_PROGRESS.idFromName(runId);
-    const stub = this.env.ANALYSIS_PROGRESS.get(id);
+    // Broadcast failure to frontend
+    await this.broadcastProgress(
+      runId,
+      0,
+      { current: 0, total: 3 },
+      `Analysis failed: ${errorMessage}`,
+      'failed'
+    );
 
-    logger.info('Broadcasting failure to Durable Object', { runId });
-
-    const response = await stub.fetch('http://do/fail', {
-      method: 'POST',
-      body: JSON.stringify({ message: errorMessage })
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      logger.error('Failed to mark DO as failed', { runId, error });
-    } else {
-      logger.info('Successfully broadcasted failure to DO', { runId });
-    }
-
-    // Update database record so getActiveAnalyses stops returning this job
+    // Update database record
     try {
       logger.info('Updating database analysis status to failed', { runId });
 
@@ -1493,10 +1475,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         database_error: dbErrorDetails,
         original_error: errorMessage
       });
-      // Don't throw - we still want the workflow to complete even if DB update fails
     }
-
-    logger.error('Failure handling complete', { runId, note: 'Error logged, broadcasted, and persisted' });
   }
 
 }
