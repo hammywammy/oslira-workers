@@ -75,27 +75,25 @@ export class LeadsService {
   }
 
   /**
-   * Transform ai_response.phase2 JSONB from database to API response format
-   * Extracts the Phase 2 AI analysis results
+   * Transform ai_response JSONB from database to API response format
+   * Reads flattened AI analysis fields from top level of ai_response
    */
   private transformAIAnalysis(aiResponse: any, overallScore: number | null): AIAnalysisResponse | null {
-    // Check if Phase 2 AI response exists
-    const phase2 = aiResponse?.phase2?.analysis as AILeadAnalysis | undefined;
-
-    if (!phase2) {
-      // No Phase 2 analysis available
+    // Check if AI analysis fields exist (leadTier is required field)
+    if (!aiResponse?.leadTier) {
+      // No AI analysis available
       return null;
     }
 
     return {
       profile_assessment_score: overallScore,
-      lead_tier: phase2.leadTier ?? null,
-      strengths: phase2.strengths ?? null,
-      weaknesses: phase2.weaknesses ?? null,
-      opportunities: phase2.opportunities ?? null,
-      recommended_actions: phase2.recommendedActions ?? null,
-      risk_factors: phase2.riskFactors ?? null,
-      fit_reasoning: phase2.fitReasoning ?? null
+      lead_tier: aiResponse.leadTier ?? null,
+      strengths: aiResponse.strengths ?? null,
+      weaknesses: aiResponse.weaknesses ?? null,
+      opportunities: aiResponse.opportunities ?? null,
+      recommended_actions: aiResponse.recommendedActions ?? null,
+      risk_factors: aiResponse.riskFactors ?? null,
+      fit_reasoning: aiResponse.fitReasoning ?? null
     };
   }
 
