@@ -87,17 +87,14 @@ export interface ExtractedDataResponse {
  * All fields are nullable to handle cases where analysis hasn't been run
  */
 export interface AIAnalysisResponse {
-  // ========== GROUP 8: AI Analysis Results (10 fields) ==========
   profile_assessment_score: number | null;
   lead_tier: 'hot' | 'warm' | 'cold' | null;
   strengths: string[] | null;
   weaknesses: string[] | null;
   opportunities: string[] | null;
-  outreach_hooks: string[] | null;
   recommended_actions: string[] | null;
   risk_factors: string[] | null;
   fit_reasoning: string | null;
-  partnership_assessment: string | null;
 }
 
 export interface LeadListItem {

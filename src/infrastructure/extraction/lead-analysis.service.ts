@@ -58,10 +58,6 @@ const LEAD_ANALYSIS_TOOL_SCHEMA = {
         enum: ['hot', 'warm', 'cold'],
         description: 'Lead qualification tier based on fit with business services'
       },
-      summary: {
-        type: 'string',
-        description: 'Brief 2-3 sentence summary of the ICP profile and their fit'
-      },
       strengths: {
         type: 'array',
         items: { type: 'string' },
@@ -77,11 +73,6 @@ const LEAD_ANALYSIS_TOOL_SCHEMA = {
         items: { type: 'string' },
         description: 'Specific opportunities to pitch business services (3-5 items)'
       },
-      outreachHooks: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'Personalized conversation starters based on ICP content (3-5 items)'
-      },
       recommendedActions: {
         type: 'array',
         items: { type: 'string' },
@@ -95,23 +86,16 @@ const LEAD_ANALYSIS_TOOL_SCHEMA = {
       fitReasoning: {
         type: 'string',
         description: 'Detailed explanation of why this ICP is/isn\'t a good fit (2-4 sentences)'
-      },
-      partnershipAssessment: {
-        type: 'string',
-        description: 'Quick, conversational partnership summary for salespeople (4-6 sentences). Use clear, direct business language WITHOUT excessive metrics or jargon. Cover: brief content/engagement observation, ICP fit analysis, alignment with value proposition, red flags or positive signals, and a clear pursue/don\'t pursue recommendation with rationale.'
       }
     },
     required: [
       'leadTier',
-      'summary',
       'strengths',
       'weaknesses',
       'opportunities',
-      'outreachHooks',
       'recommendedActions',
       'riskFactors',
-      'fitReasoning',
-      'partnershipAssessment'
+      'fitReasoning'
     ],
     additionalProperties: false
   }
@@ -198,16 +182,10 @@ export async function analyzeLeadWithAI(
       throw new Error('GPT-5 returned invalid analysis structure');
     }
 
-    // Build response payload
+    // Build response payload (analyzedAt and tokenUsage tracked separately in DB)
     const payload: AIResponsePayload = {
       version: '1.0',
-      analyzedAt: new Date().toISOString(),
       model: LEAD_ANALYSIS_MODEL,
-      tokenUsage: {
-        input: response.usage.input_tokens,
-        output: response.usage.output_tokens,
-        cost: response.usage.total_cost
-      },
       analysis
     };
 
@@ -390,15 +368,12 @@ function isValidAnalysis(analysis: any): analysis is AILeadAnalysis {
     analysis &&
     typeof analysis.leadTier === 'string' &&
     ['hot', 'warm', 'cold'].includes(analysis.leadTier) &&
-    typeof analysis.summary === 'string' &&
     Array.isArray(analysis.strengths) &&
     Array.isArray(analysis.weaknesses) &&
     Array.isArray(analysis.opportunities) &&
-    Array.isArray(analysis.outreachHooks) &&
     Array.isArray(analysis.recommendedActions) &&
     Array.isArray(analysis.riskFactors) &&
-    typeof analysis.fitReasoning === 'string' &&
-    typeof analysis.partnershipAssessment === 'string'
+    typeof analysis.fitReasoning === 'string'
   );
 }
 

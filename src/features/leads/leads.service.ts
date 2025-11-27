@@ -61,11 +61,9 @@ export class LeadsService {
       strengths: phase2.strengths ?? null,
       weaknesses: phase2.weaknesses ?? null,
       opportunities: phase2.opportunities ?? null,
-      outreach_hooks: phase2.outreachHooks ?? null,
       recommended_actions: phase2.recommendedActions ?? null,
       risk_factors: phase2.riskFactors ?? null,
-      fit_reasoning: phase2.fitReasoning ?? null,
-      partnership_assessment: phase2.partnershipAssessment ?? null
+      fit_reasoning: phase2.fitReasoning ?? null
     };
   }
 

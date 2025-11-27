@@ -548,9 +548,6 @@ export interface AILeadAnalysis {
   /** Lead qualification tier */
   leadTier: 'hot' | 'warm' | 'cold';
 
-  /** Brief summary of the ICP profile */
-  summary: string;
-
   /** Key strengths identified in the ICP */
   strengths: string[];
 
@@ -560,9 +557,6 @@ export interface AILeadAnalysis {
   /** Specific opportunities to pitch the business services */
   opportunities: string[];
 
-  /** Personalized outreach hooks based on ICP's content */
-  outreachHooks: string[];
-
   /** Recommended next actions for the business */
   recommendedActions: string[];
 
@@ -571,33 +565,17 @@ export interface AILeadAnalysis {
 
   /** Why this ICP is/isn't a good fit */
   fitReasoning: string;
-
-  /**
-   * Partnership Assessment Summary
-   * Quick, conversational summary for salespeople (4-6 sentences)
-   * Uses clear, direct language without excessive metrics
-   * Covers: content observation, ICP fit, alignment with value prop, signals, and recommendation
-   */
-  partnershipAssessment: string;
 }
 
 /**
  * Complete AI response for database storage (ai_response JSONB column)
+ * Note: analyzedAt, tokenUsage, and cost are tracked separately in the database
  */
 export interface AIResponsePayload {
   /** Schema version for backwards compatibility */
   version: '1.0';
-  /** ISO timestamp when analysis was performed */
-  analyzedAt: string;
   /** AI model used for analysis */
   model: string;
-  /** Token usage and cost for tracking */
-  tokenUsage: {
-    input: number;
-    output: number;
-    /** Cost in USD for this AI call */
-    cost: number;
-  };
   /** The actual analysis result */
   analysis: AILeadAnalysis;
 }
