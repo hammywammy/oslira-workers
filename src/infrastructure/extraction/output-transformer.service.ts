@@ -89,7 +89,9 @@ export function transformToExtractedData(extraction: ExtractionResult): Extracte
     calculated: {
       // Core engagement metrics
       engagementScore: engagementMetrics.engagementRate,
+      engagementRate: engagementMetrics.engagementRate,
       engagementConsistency: engagementMetrics.engagementConsistency,
+      postingFrequency: frequencyMetrics.postingFrequency,
 
       // Risk assessment
       fakeFollowerWarning,
