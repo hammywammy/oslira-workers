@@ -818,7 +818,25 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             deepAIResult: profileAssessResultWithDuration.data
           };
         } catch (error: any) {
-          console.error(`[Workflow][${params.run_id}] Step 7 FAILED:`, this.serializeError(error));
+          // CRITICAL ERROR LOGGING - Comprehensive error details before failure propagates
+          const errorDetails = this.serializeError(error);
+          console.error(`[Workflow][${params.run_id}] ❌ STEP 7 FAILED - AI ANALYSIS ERROR ❌`, {
+            step: 'parallel_ai_analysis',
+            progress: '95%',
+            username: params.username,
+            error: errorDetails,
+            context: {
+              has_profile: !!profile,
+              has_calculated_metrics: !!calculatedMetrics,
+              has_text_data: !!textDataForAI,
+              analysis_type: params.analysis_type,
+              timing_before_failure: {
+                cache_check: timing.cache_check,
+                scraping: timing.scraping,
+                pre_checks: timing.pre_checks
+              }
+            }
+          });
           throw error;
         }
       });
@@ -892,7 +910,20 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           timing.db_upsert = Date.now() - upsertStart;
           return lead.lead_id;
         } catch (error: any) {
-          console.error(`[Workflow][${params.run_id}] Step 8 FAILED:`, this.serializeError(error));
+          // CRITICAL ERROR LOGGING - Comprehensive error details before failure propagates
+          const errorDetails = this.serializeError(error);
+          console.error(`[Workflow][${params.run_id}] ❌ STEP 8 FAILED - LEAD UPSERT ERROR ❌`, {
+            step: 'upsert_lead',
+            progress: '97%',
+            username: params.username,
+            error: errorDetails,
+            context: {
+              account_id: params.account_id,
+              business_profile_id: params.business_profile_id,
+              has_profile: !!profile,
+              analysis_type: params.analysis_type
+            }
+          });
           throw error;
         }
       });
@@ -944,7 +975,20 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           console.log(`[Workflow][${params.run_id}] Analysis updated with results:`, analysis.id);
           return analysis.id;
         } catch (error: any) {
-          console.error(`[Workflow][${params.run_id}] Step 9 FAILED:`, this.serializeError(error));
+          // CRITICAL ERROR LOGGING - Comprehensive error details before failure propagates
+          const errorDetails = this.serializeError(error);
+          console.error(`[Workflow][${params.run_id}] ❌ STEP 9 FAILED - SAVE ANALYSIS ERROR ❌`, {
+            step: 'save_analysis',
+            progress: '98%',
+            username: params.username,
+            error: errorDetails,
+            context: {
+              run_id: params.run_id,
+              has_phase2_response: !!phase2AIResponse,
+              has_calculated_metrics: !!calculatedMetrics,
+              overall_score: aiResult?.overall_score
+            }
+          });
           throw error;
         }
       });
@@ -1162,10 +1206,44 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       };
 
     } catch (error: any) {
-      // Properly serialize error for logging
-      const errorDetails = this.serializeError(error);
+      // ========================================================================
+      // CRITICAL ERROR HANDLER - Comprehensive coordinated error logging
+      // ========================================================================
+      // This catch block handles ALL workflow failures and ensures proper logging
+      // BEFORE broadcasting the failure to the Durable Object
 
-      console.error(`[Workflow][${params.run_id}] FAILED`, errorDetails);
+      const errorDetails = this.serializeError(error);
+      const workflowDuration = Date.now() - workflowStartTime;
+
+      // COMPREHENSIVE ERROR LOG - This will show exactly what failed and why
+      console.error(`[Workflow][${params.run_id}] ❌❌❌ WORKFLOW FAILED ❌❌❌`, {
+        username: params.username,
+        analysis_type: params.analysis_type,
+        run_id: params.run_id,
+        duration_ms: workflowDuration,
+        error: {
+          message: errorDetails.message,
+          name: errorDetails.name,
+          code: errorDetails.code,
+          detail: errorDetails.detail,
+          hint: errorDetails.hint,
+          stack: errorDetails.stack
+        },
+        context: {
+          account_id: params.account_id,
+          business_profile_id: params.business_profile_id,
+          cache_hit: timing.cache_hit,
+          timing_so_far: {
+            cache_check: timing.cache_check,
+            scraping: timing.scraping,
+            pre_checks: timing.pre_checks,
+            ai_analysis: timing.ai_analysis,
+            db_upsert: timing.db_upsert
+          }
+        },
+        // Include error cause chain if present
+        cause: errorDetails.cause
+      });
 
       // Refund analyses balance on failure (with retry limit)
       // MODULAR: Refunds to correct credit type based on analysis type
@@ -1192,8 +1270,8 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         }
       });
 
-      // Mark as failed
-      await this.markFailed(params.run_id, errorDetails.message || 'Unknown error');
+      // Mark as failed - this will broadcast to DO and update database
+      await this.markFailed(params.run_id, errorDetails.message || 'Unknown error', errorDetails);
 
       throw error;
     }
@@ -1229,14 +1307,26 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
   }
 
   /**
-   * Mark as failed - updates both DO and database
+   * Mark as failed - updates both DO and database with comprehensive error logging
+   * CRITICAL: This method logs BEFORE broadcasting failure to ensure error details are captured
    */
-  private async markFailed(runId: string, errorMessage: string): Promise<void> {
-    console.log(`[Workflow][${runId}] Marking analysis as failed: ${errorMessage}`);
+  private async markFailed(runId: string, errorMessage: string, errorDetails?: any): Promise<void> {
+    // ========================================================================
+    // COORDINATED ERROR LOGGING - Log comprehensive error details BEFORE
+    // broadcasting failure to Durable Object
+    // ========================================================================
+    console.error(`[Workflow][${runId}] 🔴 MARKING ANALYSIS AS FAILED 🔴`, {
+      error_message: errorMessage,
+      error_details: errorDetails || { message: errorMessage },
+      timestamp: new Date().toISOString(),
+      note: 'About to broadcast failure to Durable Object and update database'
+    });
 
-    // Update Durable Object
+    // Update Durable Object - this broadcasts the failure to connected clients
     const id = this.env.ANALYSIS_PROGRESS.idFromName(runId);
     const stub = this.env.ANALYSIS_PROGRESS.get(id);
+
+    console.log(`[Workflow][${runId}] Broadcasting failure to Durable Object...`);
 
     const response = await stub.fetch('http://do/fail', {
       method: 'POST',
@@ -1245,13 +1335,15 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
     if (!response.ok) {
       const error = await response.text();
-      console.error(`[Workflow][${runId}] Failed to mark DO as failed:`, error);
+      console.error(`[Workflow][${runId}] ❌ Failed to mark DO as failed:`, error);
     } else {
-      console.log(`[Workflow][${runId}] Successfully marked DO as failed`);
+      console.log(`[Workflow][${runId}] ✓ Successfully broadcasted failure to DO`);
     }
 
     // Update database record so getActiveAnalyses stops returning this job
     try {
+      console.log(`[Workflow][${runId}] Updating database analysis status to failed...`);
+
       const supabase = await SupabaseClientFactory.createAdminClient(this.env);
       const analysisRepo = new AnalysisRepository(supabase);
 
@@ -1261,11 +1353,17 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         completed_at: new Date().toISOString()
       });
 
-      console.log(`[Workflow][${runId}] Successfully updated database analysis status to failed`);
+      console.log(`[Workflow][${runId}] ✓ Successfully updated database analysis status to failed`);
     } catch (dbError: any) {
-      console.error(`[Workflow][${runId}] Failed to update database:`, this.serializeError(dbError));
+      const dbErrorDetails = this.serializeError(dbError);
+      console.error(`[Workflow][${runId}] ❌ Failed to update database:`, {
+        database_error: dbErrorDetails,
+        original_error: errorMessage
+      });
       // Don't throw - we still want the workflow to complete even if DB update fails
     }
+
+    console.error(`[Workflow][${runId}] 🔴 FAILURE HANDLING COMPLETE 🔴 - Error has been logged, broadcasted, and persisted`);
   }
 
 }
