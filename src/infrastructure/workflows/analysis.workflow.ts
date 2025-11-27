@@ -26,6 +26,7 @@ import {
   type PreAnalysisChecksSummary,
   type AnalysisResultType
 } from '@/infrastructure/analysis-checks';
+import { logger } from '@/shared/utils/logger.util';
 
 // Phase 2: Profile Extraction & Data Transformation
 import {
@@ -150,6 +151,14 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
     const creditsCost = getCreditCost(params.analysis_type);
     const workflowStartTime = Date.now();
 
+    // Context for structured logging
+    const logContext = {
+      runId: params.run_id,
+      username: params.username,
+      accountId: params.account_id,
+      analysisType: params.analysis_type
+    };
+
     // Timing tracker
     const timing = {
       cache_check: 0,
@@ -164,9 +173,8 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
     let scrapeErrorInfo: ApifyErrorItem | null = null;
 
     try {
-      console.log(`[Workflow][${params.run_id}] START`, {
-        username: params.username,
-        type: params.analysis_type,
+      logger.info('Analysis workflow started', {
+        ...logContext,
         credits: creditsCost
       });
 
@@ -175,7 +183,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       // This ensures SSE connections can establish without race conditions
       await step.do('connect_progress', async () => {
         try {
-          console.log(`[Workflow][${params.run_id}] Connecting to progress tracker`);
+          logger.info('Connecting to progress tracker', logContext);
 
           const id = this.env.ANALYSIS_PROGRESS.idFromName(params.run_id);
           const progressDO = this.env.ANALYSIS_PROGRESS.get(id);
@@ -185,16 +193,20 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           const progress = await progressResponse.json();
 
           if (!progress) {
-            console.error(`[Workflow][${params.run_id}] Progress tracker not initialized!`);
+            logger.error('Progress tracker not initialized', logContext);
             throw new Error('Progress tracker not initialized by API handler');
           }
 
-          console.log(`[Workflow][${params.run_id}] Connected to progress tracker successfully`, {
+          logger.info('Connected to progress tracker successfully', {
+            ...logContext,
             status: progress.status,
             progress: progress.progress
           });
         } catch (error: any) {
-          console.error(`[Workflow][${params.run_id}] Step 1 FAILED:`, this.serializeError(error));
+          logger.error('Step 1 (connect_progress) failed', {
+            ...logContext,
+            error: this.serializeError(error)
+          });
           throw error;
         }
       });
@@ -202,7 +214,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       // Step 1b: Fetch secrets early (for Phase 2 AI analysis)
       const secrets = await step.do('fetch_secrets', async () => {
         try {
-          console.log(`[Workflow][${params.run_id}] Step 1b: Fetching API secrets`);
+          logger.info('Fetching API secrets', logContext);
 
           const [openaiKey, claudeKey, aiGatewayToken] = await Promise.all([
             getSecret('OPENAI_API_KEY', this.env, this.env.APP_ENV),
@@ -210,10 +222,13 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             getSecret('CLOUDFLARE_AI_GATEWAY_TOKEN', this.env, this.env.APP_ENV)
           ]);
 
-          console.log(`[Workflow][${params.run_id}] Secrets fetched successfully`);
+          logger.info('Secrets fetched successfully', logContext);
           return { openaiKey, claudeKey, aiGatewayToken };
         } catch (error: any) {
-          console.error(`[Workflow][${params.run_id}] Step 1b FAILED:`, this.serializeError(error));
+          logger.error('Step 1b (fetch_secrets) failed', {
+            ...logContext,
+            error: this.serializeError(error)
+          });
           throw error;
         }
       });
