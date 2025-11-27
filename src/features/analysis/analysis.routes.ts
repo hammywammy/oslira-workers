@@ -7,11 +7,9 @@ import { rateLimitMiddleware } from '@/shared/middleware/rate-limit.middleware';
 import { ANALYSIS_RATE_LIMITS, API_RATE_LIMITS } from '@/config/rate-limits.config';
 import {
   analyzeInstagramLead,
-  getAnalysisProgress,
-  streamAnalysisProgressWS,
-  cancelAnalysis,
-  getAnalysisResult,
-  getActiveAnalyses
+  getActiveAnalyses,
+  internalBroadcast,
+  globalWebSocketUpgrade
 } from './analysis.handler';
 
 /**
@@ -27,14 +25,19 @@ import {
 
 export function registerAnalysisRoutes(app: Hono<{ Bindings: Env }>) {
 
-  // WebSocket endpoint - MUST be registered BEFORE auth middleware
-  // (runId serves as implicit authentication)
-  app.get('/api/analysis/:runId/ws', streamAnalysisProgressWS);
+  // Internal broadcast endpoint - called by Workflows
+  // TODO: Add IP whitelist or internal auth token for production
+  app.post('/api/internal/broadcast', internalBroadcast);
+
+  // Global WebSocket endpoint - authenticated via auth middleware
+  // Frontend connects once to receive ALL analysis progress updates
+  app.use('/api/analysis/ws', authMiddleware);
+  app.get('/api/analysis/ws', globalWebSocketUpgrade);
 
   // All analysis routes require authentication
   app.use('/api/leads/analyze', authMiddleware);
   app.use('/api/analysis/*', authMiddleware);
-  
+
   // Strict rate limiting on analysis creation (prevent spam)
   app.use('/api/leads/analyze', rateLimitMiddleware(ANALYSIS_RATE_LIMITS.CREATE));
 
@@ -54,25 +57,4 @@ export function registerAnalysisRoutes(app: Hono<{ Bindings: Env }>) {
    * Returns aggregated progress for all pending/processing analyses
    */
   app.get('/api/analysis/active', getActiveAnalyses);
-
-  /**
-   * GET /api/analysis/:runId/progress
-   * Get current progress (0-100%)
-   * Poll this endpoint to track analysis progress
-   */
-  app.get('/api/analysis/:runId/progress', getAnalysisProgress);
-
-  /**
-   * POST /api/analysis/:runId/cancel
-   * Cancel running analysis
-   * Credits will be refunded if analysis hasn't completed
-   */
-  app.post('/api/analysis/:runId/cancel', cancelAnalysis);
-
-  /**
-   * GET /api/analysis/:runId/result
-   * Get final analysis result (once complete)
-   * Returns 425 Too Early if analysis still processing
-   */
-  app.get('/api/analysis/:runId/result', getAnalysisResult);
 }

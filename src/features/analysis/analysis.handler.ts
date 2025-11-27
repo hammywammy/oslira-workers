@@ -155,34 +155,7 @@ export async function analyzeInstagramLead(c: Context<{ Bindings: Env }>) {
       isNewLead: leadResult.is_new
     });
 
-    // Step 6a: Initialize progress DO IMMEDIATELY (before workflow)
-    // This ensures SSE connections can establish successfully with existing state
-    // CRITICAL: Prevents race condition where frontend SSE connects before DO is initialized
-    const progressId = c.env.ANALYSIS_PROGRESS.idFromName(runId);
-    const progressDO = c.env.ANALYSIS_PROGRESS.get(progressId);
-
-    try {
-      await progressDO.fetch('http://do/initialize', {
-        method: 'POST',
-        body: JSON.stringify({
-          run_id: runId,
-          account_id: auth.accountId,
-          username: input.username,
-          analysis_type: input.analysisType
-        })
-      });
-
-      logger.info('Progress tracker initialized', { requestId, runId });
-    } catch (error) {
-      logger.error('Failed to initialize progress tracker', {
-        requestId,
-        runId,
-        error: error instanceof Error ? error.message : String(error)
-      });
-      throw new Error('Failed to initialize progress tracker');
-    }
-
-    // Step 6b: NOW trigger workflow (workflow no longer needs to initialize DO)
+    // Step 6: Trigger workflow (using global broadcaster for progress updates)
     const workflowParams = {
       run_id: runId,
       account_id: auth.accountId,
@@ -230,193 +203,79 @@ export async function analyzeInstagramLead(c: Context<{ Bindings: Env }>) {
 }
 
 /**
- * GET /api/analysis/:runId/progress
- * Get current analysis progress
+ * NOTE: Old per-analysis progress endpoints removed.
+ * Progress is now tracked via global WebSocket broadcaster (/api/analysis/ws)
+ * and database queries (/api/analysis/active).
  */
-export async function getAnalysisProgress(c: Context<{ Bindings: Env }>) {
-  try {
-    const auth = getAuthContext(c);
-    const runId = c.req.param('runId');
-    validateBody(GetProgressParamsSchema, { runId });
-
-    const progressId = c.env.ANALYSIS_PROGRESS.idFromName(runId);
-    const progressDO = c.env.ANALYSIS_PROGRESS.get(progressId);
-
-    const response = await progressDO.fetch('http://do/progress');
-
-    // Check if response is valid before parsing
-    if (!response.ok || response.status === 404) {
-      return errorResponse(c, 'Analysis progress not available yet', 'NOT_FOUND', 404);
-    }
-
-    const progress = await response.json();
-
-    // Handle case where DO hasn't initialized yet (returns null)
-    if (!progress) {
-      return errorResponse(c, 'Analysis progress not available yet', 'NOT_FOUND', 404);
-    }
-
-    return successResponse(c, progress);
-
-  } catch (error) {
-    logger.error('Failed to get analysis progress', {
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-      runId: c.req.param('runId')
-    });
-
-    if (error instanceof Error && error.message.includes('not found')) {
-      return errorResponse(c, 'Analysis not found', 'NOT_FOUND', 404);
-    }
-
-    return errorResponse(c, 'Failed to get progress', 'PROGRESS_ERROR', 500);
-  }
-}
 
 /**
- * GET /api/analysis/:runId/ws
- * WebSocket proxy to Durable Object for real-time progress updates.
+ * POST /api/internal/broadcast
+ * Internal endpoint called by Workflows to broadcast progress updates
  *
- * Uses WebSocket Hibernation API for cost efficiency.
- * Forwards WebSocket upgrade request directly to DO.
+ * SECURITY: This is called by Workflows (internal), not by external clients.
+ * In production, add IP whitelist or internal auth token.
+ */
+export async function internalBroadcast(c: Context<{ Bindings: Env }>) {
+  try {
+    const { accountId, type, runId, data } = await c.req.json();
+
+    if (!accountId || !type || !runId || !data) {
+      return errorResponse(c, 'Missing required fields', 'INVALID_INPUT', 400);
+    }
+
+    // Get broadcaster DO for this account
+    const broadcasterId = c.env.GLOBAL_BROADCASTER.idFromName(accountId);
+    const broadcasterDO = c.env.GLOBAL_BROADCASTER.get(broadcasterId);
+
+    // Forward broadcast request to DO
+    await broadcasterDO.fetch('http://do/broadcast', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type,
+        runId,
+        data,
+        timestamp: Date.now()
+      })
+    });
+
+    return successResponse(c, { broadcasted: true });
+  } catch (error) {
+    logger.error('[InternalBroadcast] Failed', { error });
+    return errorResponse(c, 'Broadcast failed', 'BROADCAST_ERROR', 500);
+  }
+}
+
+/**
+ * GET /api/analysis/ws
+ * Global WebSocket connection for ALL analysis progress updates
  *
- * NOTE: No authentication required - the cryptographically random runId
- * serves as implicit authentication (only the user who initiated the request knows it).
+ * Frontend connects ONCE to this endpoint, receives updates for ALL analyses.
  */
-export async function streamAnalysisProgressWS(c: Context<{ Bindings: Env }>) {
-  try {
-    const runId = c.req.param('runId');
-
-    // Validate WebSocket upgrade
-    if (c.req.header('Upgrade') !== 'websocket') {
-      return errorResponse(c, 'Expected WebSocket upgrade', 'BAD_REQUEST', 400);
-    }
-
-    // Validate runId format
-    validateBody(GetProgressParamsSchema, { runId });
-
-    logger.info('Proxying WebSocket to AnalysisProgressDO', { runId });
-
-    // Get DO stub
-    const progressId = c.env.ANALYSIS_PROGRESS.idFromName(runId);
-    const progressDO = c.env.ANALYSIS_PROGRESS.get(progressId);
-
-    // Build DO URL with runId parameter
-    const url = new URL(c.req.url);
-    url.pathname = '/ws';
-    url.searchParams.set('runId', runId);
-
-    // Forward upgrade request to DO
-    return await progressDO.fetch(url.toString(), {
-      headers: c.req.raw.headers
-    });
-
-  } catch (error) {
-    logger.error('WebSocket proxy error for analysis', {
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-      runId: c.req.param('runId')
-    });
-
-    if (error instanceof Error && error.name === 'ZodError') {
-      return errorResponse(c, 'Invalid run ID', 'VALIDATION_ERROR', 400);
-    }
-
-    return errorResponse(c, 'WebSocket connection failed', 'WEBSOCKET_ERROR', 500);
-  }
-}
-
-
-/**
- * POST /api/analysis/:runId/cancel
- * Cancel running analysis
- */
-export async function cancelAnalysis(c: Context<{ Bindings: Env }>) {
+export async function globalWebSocketUpgrade(c: Context<{ Bindings: Env }>) {
   try {
     const auth = getAuthContext(c);
-    const runId = c.req.param('runId');
-    validateBody(GetProgressParamsSchema, { runId });
 
-    const progressId = c.env.ANALYSIS_PROGRESS.idFromName(runId);
-    const progressDO = c.env.ANALYSIS_PROGRESS.get(progressId);
-    
-    const response = await progressDO.fetch('http://do/cancel', {
-      method: 'POST'
-    });
-
-    const result = await response.json();
-
-    if (!result.success) {
-      return errorResponse(c, 'Failed to cancel analysis', 'CANCEL_ERROR', 500);
+    // Upgrade to WebSocket
+    const upgradeHeader = c.req.header('Upgrade');
+    if (upgradeHeader !== 'websocket') {
+      return errorResponse(c, 'Expected WebSocket', 'INVALID_REQUEST', 400);
     }
 
-    logger.info('Analysis cancelled successfully', { runId });
+    // Get broadcaster DO for this account
+    const broadcasterId = c.env.GLOBAL_BROADCASTER.idFromName(auth.accountId);
+    const broadcasterDO = c.env.GLOBAL_BROADCASTER.get(broadcasterId);
 
-    return successResponse(c, {
-      run_id: runId,
-      status: 'cancelled',
-      message: 'Analysis cancelled successfully'
-    });
-
+    // Proxy WebSocket upgrade to DO
+    return broadcasterDO.fetch(
+      `http://do/websocket?accountId=${auth.accountId}`,
+      {
+        headers: c.req.raw.headers
+      }
+    );
   } catch (error) {
-    logger.error('Failed to cancel analysis', {
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-      runId: c.req.param('runId')
-    });
-
-    if (error instanceof Error && error.message.includes('not found')) {
-      return errorResponse(c, 'Analysis not found', 'NOT_FOUND', 404);
-    }
-
-    return errorResponse(c, 'Failed to cancel analysis', 'CANCEL_ERROR', 500);
-  }
-}
-
-/**
- * GET /api/analysis/:runId/result
- * Get final analysis result (once complete)
- */
-export async function getAnalysisResult(c: Context<{ Bindings: Env }>) {
-  try {
-    const auth = getAuthContext(c);
-    const runId = c.req.param('runId');
-    validateBody(GetProgressParamsSchema, { runId });
-
-    const progressId = c.env.ANALYSIS_PROGRESS.idFromName(runId);
-    const progressDO = c.env.ANALYSIS_PROGRESS.get(progressId);
-
-    const progressResponse = await progressDO.fetch('http://do/progress');
-    const progress = await progressResponse.json();
-
-    if (!progress || progress.status !== 'complete') {
-      return c.json({
-        success: false,
-        error: 'Analysis still processing',
-        code: 'TOO_EARLY',
-        status: progress?.status,
-        progress: progress?.progress
-      }, 425);
-    }
-
-    return successResponse(c, {
-      run_id: runId,
-      status: 'complete',
-      result: progress.result || {}
-    });
-
-  } catch (error) {
-    logger.error('Failed to get analysis result', {
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-      runId: c.req.param('runId')
-    });
-
-    if (error instanceof Error && error.message.includes('not found')) {
-      return errorResponse(c, 'Analysis not found', 'NOT_FOUND', 404);
-    }
-
-    return errorResponse(c, 'Failed to get result', 'RESULT_ERROR', 500);
+    logger.error('[GlobalWebSocket] Upgrade failed', { error });
+    return errorResponse(c, 'WebSocket upgrade failed', 'WEBSOCKET_ERROR', 500);
   }
 }
 
@@ -424,6 +283,9 @@ export async function getAnalysisResult(c: Context<{ Bindings: Env }>) {
  * GET /api/analysis/active
  * Get all active analyses for the authenticated user
  * Returns aggregated progress for all pending/processing analyses
+ *
+ * NOTE: Real-time progress updates are delivered via global WebSocket (/api/analysis/ws).
+ * This endpoint provides initial state for reconnection scenarios.
  */
 export async function getActiveAnalyses(c: Context<{ Bindings: Env }>) {
   const requestId = generateId('req');
@@ -451,65 +313,20 @@ export async function getActiveAnalyses(c: Context<{ Bindings: Env }>) {
       });
     }
 
-    // Helper to parse step from current_step string (e.g., "Step 2/4: Checking cache" -> {current: 2, total: 4})
-    const parseStep = (currentStep: string): { current: number; total: number } => {
-      const match = currentStep?.match(/Step (\d+)\/(\d+)/);
-      if (match) {
-        return {
-          current: parseInt(match[1], 10),
-          total: parseInt(match[2], 10)
-        };
-      }
-      // Default to step 0 of 4 if parsing fails
-      return { current: 0, total: 4 };
-    };
+    // Transform database records to frontend format
+    // Progress updates will be delivered via WebSocket in real-time
+    const analysesWithProgress = activeAnalyses.map((analysis) => ({
+      runId: analysis.run_id,
+      username: null, // Will be populated via WebSocket
+      analysisType: analysis.analysis_type,
+      status: analysis.status === 'processing' ? 'analyzing' : analysis.status,
+      progress: 0, // Will be updated via WebSocket
+      step: { current: 0, total: 3 }, // Will be updated via WebSocket
+      startedAt: analysis.started_at,
+      updatedAt: analysis.updated_at
+    }));
 
-    // Fetch progress from each DO in parallel
-    const progressPromises = activeAnalyses.map(async (analysis) => {
-      try {
-        const progressId = c.env.ANALYSIS_PROGRESS.idFromName(analysis.run_id);
-        const progressDO = c.env.ANALYSIS_PROGRESS.get(progressId);
-
-        const response = await progressDO.fetch('http://do/progress');
-        const progress = await response.json();
-
-        // Transform to match frontend's expected AnalysisJob interface
-        return {
-          runId: analysis.run_id,
-          username: progress?.username || null,
-          analysisType: analysis.analysis_type,
-          // Map 'processing' status to 'analyzing' for frontend
-          status: (progress?.status || analysis.status) === 'processing' ? 'analyzing' : (progress?.status || analysis.status),
-          progress: progress?.progress || 0,
-          // Parse current_step string into step object with current and total
-          step: parseStep(progress?.current_step || 'Step 0/4: Initializing'),
-          startedAt: analysis.started_at,
-          updatedAt: progress?.updated_at || analysis.updated_at
-        };
-      } catch (error) {
-        logger.error('Failed to fetch progress for active analysis', {
-          requestId,
-          runId: analysis.run_id,
-          error: error instanceof Error ? error.message : String(error)
-        });
-
-        // Return basic info from database if DO fetch fails
-        return {
-          runId: analysis.run_id,
-          username: null,
-          analysisType: analysis.analysis_type,
-          status: analysis.status === 'processing' ? 'analyzing' : analysis.status,
-          progress: 0,
-          step: { current: 0, total: 4 },
-          startedAt: analysis.started_at,
-          updatedAt: analysis.updated_at
-        };
-      }
-    });
-
-    const analysesWithProgress = await Promise.all(progressPromises);
-
-    logger.info('Returning active analyses with progress', {
+    logger.info('Returning active analyses', {
       requestId,
       count: analysesWithProgress.length
     });

@@ -17,7 +17,7 @@ import { handleStripeWebhookQueue } from './infrastructure/queues/stripe-webhook
 import { handleBusinessContextQueue } from './infrastructure/queues/business-context.consumer';
 import AnalysisWorkflow from './infrastructure/workflows/analysis.workflow';
 import BusinessContextWorkflow from './infrastructure/workflows/business-context.workflow';
-import { AnalysisProgressDO } from './infrastructure/durable-objects/analysis-progress.do';
+import { GlobalBroadcasterDO } from './infrastructure/durable-objects/global-broadcaster.do';
 import { BusinessContextProgressDO } from './infrastructure/durable-objects/business-context-progress.do';
 import { executeCronJob } from './infrastructure/cron/cron-jobs.handler';
 import { getSentryService } from './infrastructure/monitoring/sentry.service';
@@ -73,7 +73,7 @@ app.get('/', (c) => {
     phase: 'Phase 3 Complete - Business Context Generation',
     features: {
       workflows: !!c.env.ANALYSIS_WORKFLOW && !!c.env.BUSINESS_CONTEXT_WORKFLOW,
-      durable_objects: !!c.env.ANALYSIS_PROGRESS && !!c.env.BUSINESS_CONTEXT_PROGRESS,
+      durable_objects: !!c.env.GLOBAL_BROADCASTER && !!c.env.BUSINESS_CONTEXT_PROGRESS,
       queues: !!c.env.BUSINESS_CONTEXT_QUEUE,
       r2_cache: !!c.env.R2_CACHE_BUCKET,
       analytics: !!c.env.ANALYTICS_ENGINE,
@@ -102,7 +102,7 @@ app.get('/health', async (c) => {
         business_context: !!c.env.BUSINESS_CONTEXT_WORKFLOW
       },
       durable_objects: {
-        analysis_progress: !!c.env.ANALYSIS_PROGRESS,
+        global_broadcaster: !!c.env.GLOBAL_BROADCASTER,
         business_context_progress: !!c.env.BUSINESS_CONTEXT_PROGRESS
       },
       queues: {
@@ -235,5 +235,5 @@ export { BusinessContextWorkflow };
 // EXPORT DURABLE OBJECTS
 // ===============================================================================
 
-export { AnalysisProgressDO };
+export { GlobalBroadcasterDO };
 export { BusinessContextProgressDO };

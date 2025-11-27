@@ -53,8 +53,8 @@ class_name = "BusinessContextWorkflow"
 # DURABLE OBJECTS
 # ===========================
 [[durable_objects.bindings]]
-name = "ANALYSIS_PROGRESS"
-class_name = "AnalysisProgressDO"
+name = "GLOBAL_BROADCASTER"
+class_name = "GlobalBroadcasterDO"
 script_name = "oslira-workers"
 
 [[durable_objects.bindings]]
@@ -67,7 +67,8 @@ script_name = "oslira-workers"
 # ===========================
 [[migrations]]
 tag = "v1"
-new_classes = ["AnalysisProgressDO"]
+new_classes = ["GlobalBroadcasterDO"]
+deleted_classes = ["AnalysisProgressDO"]
 
 [[migrations]]
 tag = "v2"
@@ -176,8 +177,8 @@ class_name = "BusinessContextWorkflow"
 # STAGING: DURABLE OBJECTS
 # ===========================
 [[env.staging.durable_objects.bindings]]
-name = "ANALYSIS_PROGRESS"
-class_name = "AnalysisProgressDO"
+name = "GLOBAL_BROADCASTER"
+class_name = "GlobalBroadcasterDO"
 script_name = "oslira-workers-staging"
 
 [[env.staging.durable_objects.bindings]]

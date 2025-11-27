@@ -42,9 +42,9 @@ export interface Env {
   // Workflows (async orchestration)
   ANALYSIS_WORKFLOW: Workflow;
   BUSINESS_CONTEXT_WORKFLOW: Workflow;
-  
-  // Durable Objects (progress tracking)
-  ANALYSIS_PROGRESS: DurableObjectNamespace;
+
+  // Durable Objects (progress tracking & broadcasting)
+  GLOBAL_BROADCASTER: DurableObjectNamespace;
   BUSINESS_CONTEXT_PROGRESS: DurableObjectNamespace;
   
   // Queues (async message processing)
