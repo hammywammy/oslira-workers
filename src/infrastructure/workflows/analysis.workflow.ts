@@ -633,10 +633,10 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           const data = transformToExtractedData(extractionResult.data);
 
           console.log(`[Workflow][${params.run_id}] Phase 2 extraction complete:`, {
-            sampleSize: data.sampleSize,
-            hasHashtags: data.topHashtags.length > 0,
-            hasMentions: data.topMentions.length > 0,
-            fakeFollowerWarning: data.fakeFollowerWarning
+            sampleSize: data.metadata.sampleSize,
+            hasHashtags: data.static.topHashtags.length > 0,
+            hasMentions: data.static.topMentions.length > 0,
+            fakeFollowerWarning: data.calculated.fakeFollowerWarning
           });
 
           return {
@@ -941,12 +941,11 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           const analysisRepo = new AnalysisRepository(supabase);
 
           // Structure ai_response JSONB - merge old format with Phase 2 if available
-          // Old format: { score, summary } for backward compatibility
-          // Phase 2 format: Full AIResponsePayload with leadTier, partnershipAssessment, etc.
+          // Old format: { score } for backward compatibility (summary removed - bloat)
+          // Phase 2 format: Full AIResponsePayload with leadTier, strengths, opportunities, etc.
           const aiResponse: any = {
             // Always include basic fields (backward compat)
-            score: aiResult.overall_score,
-            summary: aiResult.summary_text
+            score: aiResult.overall_score
           };
 
           // Merge Phase 2 AI response if available
@@ -966,7 +965,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             extracted_data: extractedData || undefined,
             status: 'complete',
             completed_at: new Date().toISOString(),
-            extraction_version: extractedData?.version || '1.0',
+            extraction_version: extractedData?.metadata?.version || '1.0',
             model_versions: {
               profile_assessment: aiResult.model_used,
               lead_qualification: phase2AIResponse?.model || aiResult.model_used
@@ -1094,7 +1093,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             profile_metadata: {
               analysis_type: params.analysis_type,
               lead_tier: phase2AIResponse?.analysis?.leadTier ?? 'N/A',
-              fake_follower_warning: extractedData?.fakeFollowerWarning ?? 'N/A'
+              fake_follower_warning: extractedData?.calculated?.fakeFollowerWarning ?? 'N/A'
             },
 
             // Performance metrics for monitoring
