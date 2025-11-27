@@ -64,7 +64,7 @@ export class AnalysisProgressDO extends DurableObject {
           server.serializeAttachment({ runId, connectedAt: Date.now() });
         }
 
-        logger.info('WebSocket connected', { runId: runId);
+        logger.info('WebSocket connected', { runId: runId });
 
         // Send initial progress immediately
         const progress = await this.getProgress();
@@ -127,7 +127,7 @@ export class AnalysisProgressDO extends DurableObject {
         return Response.json({ success: true });
       }
 
-      logger.warn('Unknown route', { method: method, url.pathname);
+      logger.warn('Unknown route', { method, url: url.pathname });
       return Response.json({ error: 'Not found' }, { status: 404 });
 
     } catch (error: any) {
@@ -160,7 +160,7 @@ export class AnalysisProgressDO extends DurableObject {
         ws.send(JSON.stringify({ type: 'progress', data: progress }));
       }
     } catch (error: any) {
-      logger.error('WebSocket message error', { error: error.message);
+      logger.error('WebSocket message error', { error: error.message });
       ws.send(JSON.stringify({ type: 'error', message: 'Invalid message' }));
     }
   }
@@ -216,7 +216,7 @@ export class AnalysisProgressDO extends DurableObject {
       try {
         ws.send(message);
       } catch (error: any) {
-        logger.error('WebSocket send failed', { error: error.message);
+        logger.error('WebSocket send failed', { error: error.message });
       }
     });
   }
@@ -284,7 +284,7 @@ export class AnalysisProgressDO extends DurableObject {
     const current = await this.getProgress();
 
     if (!current) {
-      logger.error('Update called but progress not initialized', { update: update);
+      logger.error('Update called but progress not initialized', { update });
       throw new Error('Progress not initialized');
     }
 
@@ -346,7 +346,7 @@ export class AnalysisProgressDO extends DurableObject {
       try {
         ws.close(1000, 'Analysis cancelled');
       } catch (error: any) {
-        logger.error('Error closing WebSocket', { error: error.message);
+        logger.error('Error closing WebSocket', { error: error.message });
       }
     });
   }
@@ -385,7 +385,7 @@ export class AnalysisProgressDO extends DurableObject {
       try {
         ws.close(1000, 'Analysis complete');
       } catch (error: any) {
-        logger.error('Error closing WebSocket', { error: error.message);
+        logger.error('Error closing WebSocket', { error: error.message });
       }
     });
   }
@@ -420,7 +420,7 @@ export class AnalysisProgressDO extends DurableObject {
       try {
         ws.close(1000, 'Analysis failed');
       } catch (error: any) {
-        logger.error('Error closing WebSocket', { error: error.message);
+        logger.error('Error closing WebSocket', { error: error.message });
       }
     });
   }
@@ -437,7 +437,7 @@ export class AnalysisProgressDO extends DurableObject {
       try {
         ws.close(1000, 'DO cleanup - session expired');
       } catch (error: any) {
-        logger.error('Error closing WebSocket', { error: error.message);
+        logger.error('Error closing WebSocket', { error: error.message });
       }
     });
 

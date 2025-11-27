@@ -697,7 +697,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           const extractionResult: ExtractionOutput = extractor.extract(apifyProfile);
 
           if (!extractionResult.success) {
-            logger.warn('Phase 2 extraction failed', { ...logContext, error: extractionResult.error);
+            logger.warn('Phase 2 extraction failed', { ...logContext, error: extractionResult.error });
             return { extractedData: null, textDataForAI: null };
           }
 
@@ -717,7 +717,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           };
 
         } catch (error: any) {
-          logger.error('Phase 2 extraction error (non-fatal)', { ...logContext, error: this.serializeError(error));
+          logger.error('Phase 2 extraction error (non-fatal)', { ...logContext, error: this.serializeError(error) });
           // Return null on error
           return { extractedData: null, textDataForAI: null };
         }
@@ -763,7 +763,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           );
 
           if (!result.success) {
-            logger.warn('Niche detection failed', { ...logContext, error: result.error);
+            logger.warn('Niche detection failed', { ...logContext, error: result.error });
             return null;
           }
 
@@ -828,7 +828,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
               const businessContextResult = await fetchBusinessContext(supabase, params.business_profile_id);
 
               if (!businessContextResult.success) {
-                logger.warn('[Parallel] Lead Qualification AI - Failed to fetch business context', { ...logContext, error: businessContextResult.error);
+                logger.warn('[Parallel] Lead Qualification AI - Failed to fetch business context', { ...logContext, error: businessContextResult.error });
                 return null;
               }
 
@@ -853,7 +853,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
               const totalDuration = Date.now() - leadQualStart;
 
               if (!aiResult.success) {
-                logger.warn('[Parallel] Lead Qualification AI failed', { ...logContext, error: aiResult.error);
+                logger.warn('[Parallel] Lead Qualification AI failed', { ...logContext, error: aiResult.error });
                 return null;
               }
 
@@ -1170,7 +1170,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
           logger.info('Progress marked as complete', logContext);
         } catch (error: any) {
-          logger.error('Complete progress failed (Step 10)', { ...logContext, error: this.serializeError(error));
+          logger.error('Complete progress failed (Step 10)', { ...logContext, error: this.serializeError(error) });
           throw error;
         }
       });
@@ -1264,27 +1264,12 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           const COST_CRITICAL_THRESHOLD = 0.10; // $0.10 per analysis
 
           if (totalCostUsd >= COST_CRITICAL_THRESHOLD) {
-            logger.error('CRITICAL: Analysis cost exceeds threshold', { ...logContext, alert: 'cost_critical', $${totalCostUsd.toFixed(4)} exceeds critical threshold $${COST_CRITICAL_THRESHOLD}`, {
-              username: params.username,
-              analysisType: params.analysis_type,
-              totalCost: totalCostUsd,
-              threshold: COST_CRITICAL_THRESHOLD,
-              breakdown: {
-                profileAssessmentAI: aiResult.total_cost,
-                leadQualificationAI: phase2AICost,
-                scraping: apifyCost
-              }
-            });
+            logger.error('CRITICAL: Analysis cost exceeds threshold', { ...logContext, alert: 'cost_critical', message: `Cost $${totalCostUsd.toFixed(4)} exceeds critical threshold $${COST_CRITICAL_THRESHOLD}`, username: params.username, analysisType: params.analysis_type, totalCost: totalCostUsd, threshold: COST_CRITICAL_THRESHOLD, breakdown: { profileAssessmentAI: aiResult.total_cost, leadQualificationAI: phase2AICost, scraping: apifyCost } });
           } else if (totalCostUsd >= COST_WARN_THRESHOLD) {
-            logger.warn('WARNING: Analysis cost exceeds threshold', { ...logContext, alert: 'cost_warning', $${totalCostUsd.toFixed(4)} exceeds warning threshold $${COST_WARN_THRESHOLD}`, {
-              username: params.username,
-              analysisType: params.analysis_type,
-              totalCost: totalCostUsd,
-              threshold: COST_WARN_THRESHOLD
-            });
+            logger.warn('WARNING: Analysis cost exceeds threshold', { ...logContext, alert: 'cost_warning', message: `Cost $${totalCostUsd.toFixed(4)} exceeds warning threshold $${COST_WARN_THRESHOLD}`, username: params.username, analysisType: params.analysis_type, totalCost: totalCostUsd, threshold: COST_WARN_THRESHOLD });
           }
         } catch (error: any) {
-          logger.error('Operations ledger logging failed (non-fatal)', { ...logContext, error: this.serializeError(error));
+          logger.error('Operations ledger logging failed (non-fatal)', { ...logContext, error: this.serializeError(error) });
           // Don't throw - logging failures shouldn't break the workflow
         }
       });
@@ -1329,17 +1314,13 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       };
 
       if (slaStatus === 'severe') {
-        logger.error('SLA SEVERE: Analysis duration severely exceeded target', { ...logContext, sla: 'severe', Analysis took ${slaLog.durationSec}s, severely exceeding target (>${SLA_CRITICAL_MS / 1000}s)`, slaLog);
+        logger.error('SLA SEVERE: Analysis duration severely exceeded target', { ...logContext, sla: 'severe', message: `Analysis took ${slaLog.durationSec}s, severely exceeding target (>${SLA_CRITICAL_MS / 1000}s)`, ...slaLog });
       } else if (slaStatus === 'critical') {
-        logger.error('SLA CRITICAL: Analysis duration exceeded critical threshold', { ...logContext, sla: 'critical', Analysis took ${slaLog.durationSec}s, exceeding critical threshold`, slaLog);
+        logger.error('SLA CRITICAL: Analysis duration exceeded critical threshold', { ...logContext, sla: 'critical', message: `Analysis took ${slaLog.durationSec}s, exceeding critical threshold`, ...slaLog });
       } else if (slaStatus === 'warning') {
-        logger.warn('SLA WARNING: Analysis duration exceeded target', { ...logContext, sla: 'warning', Analysis took ${slaLog.durationSec}s, exceeding target`, slaLog);
+        logger.warn('SLA WARNING: Analysis duration exceeded target', { ...logContext, sla: 'warning', message: `Analysis took ${slaLog.durationSec}s, exceeding target`, ...slaLog });
       } else {
-        logger.info('SLA MET: Analysis completed within target', { ...logContext, sla: 'met', Analysis completed in ${slaLog.durationSec}s`, {
-          slaStatus,
-          durationMs: totalDurationMs,
-          targetMs: SLA_TARGET_MS
-        });
+        logger.info('SLA MET: Analysis completed within target', { ...logContext, sla: 'met', message: `Analysis completed in ${slaLog.durationSec}s`, slaStatus, durationMs: totalDurationMs, targetMs: SLA_TARGET_MS });
       }
 
       logger.info('Workflow completed successfully', {
@@ -1417,7 +1398,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
           logger.info('Credits refunded', { ...logContext, credits: creditsCost });
         } catch (refundError: any) {
-          logger.error('Refund failed', { ...logContext, error: this.serializeError(refundError));
+          logger.error('Refund failed', { ...logContext, error: this.serializeError(refundError) });
           // Don't throw - we still want to mark the analysis as failed even if refund fails
         }
       });
@@ -1437,7 +1418,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
     progress: number,
     currentStep: string
   ): Promise<void> {
-    logger.debug('Updating progress', { runId, progress, ${progress}% - ${currentStep}`);
+    logger.debug('Updating progress', { runId, progress, currentStep, message: `${progress}% - ${currentStep}` });
 
     const id = this.env.ANALYSIS_PROGRESS.idFromName(runId);
     const stub = this.env.ANALYSIS_PROGRESS.get(id);
@@ -1453,7 +1434,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
     if (!response.ok) {
       const error = await response.text();
-      logger.error('Failed to update progress', { runId, error: error);
+      logger.error('Failed to update progress', { runId, error });
       throw new Error(`Failed to update progress: ${error}`);
     }
   }
@@ -1487,7 +1468,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
     if (!response.ok) {
       const error = await response.text();
-      logger.error('Failed to mark DO as failed', { runId, error: error);
+      logger.error('Failed to mark DO as failed', { runId, error });
     } else {
       logger.info('Successfully broadcasted failure to DO', { runId });
     }

@@ -40,9 +40,9 @@ export async function handleBusinessContextQueue(
       
     } catch (error: any) {
       logger.error('Message processing failed');
-      logger.error('Error details', { errorName: error.name);
-      logger.error('Error message', { errorMessage: error.message);
-      logger.error('Error stack', { errorStack: error.stack);
+      logger.error('Error details', { errorName: error.name });
+      logger.error('Error message', { errorMessage: error.message });
+      logger.error('Error stack', { errorStack: error.stack });
 
       // Retry logic
       if (message.attempts < 3) {
@@ -89,12 +89,12 @@ async function processBusinessContextMessage(
   // Check if workflow binding exists
   if (!env.BUSINESS_CONTEXT_WORKFLOW) {
     logger.error('CRITICAL: BUSINESS_CONTEXT_WORKFLOW binding is undefined');
-    logger.error('Available env bindings', { bindings: Object.keys(env));
+    logger.error('Available env bindings', { bindings: Object.keys(env) });
     throw new Error('BUSINESS_CONTEXT_WORKFLOW binding not found');
   }
 
   logger.info('BUSINESS_CONTEXT_WORKFLOW binding exists');
-  logger.info('Workflow binding type', { type: typeof env.BUSINESS_CONTEXT_WORKFLOW);
+  logger.info('Workflow binding type', { type: typeof env.BUSINESS_CONTEXT_WORKFLOW });
 
   // Trigger workflow
   logger.info('Creating workflow instance');
@@ -123,9 +123,9 @@ async function processBusinessContextMessage(
     
   } catch (error: any) {
     logger.error('Failed to create workflow');
-    logger.error('Error details', { errorName: error.name);
-    logger.error('Error message', { errorMessage: error.message);
-    logger.error('Error stack', { errorStack: error.stack);
+    logger.error('Error details', { errorName: error.name });
+    logger.error('Error message', { errorMessage: error.message });
+    logger.error('Error stack', { errorStack: error.stack });
     throw error;
   }
 }
@@ -148,7 +148,7 @@ async function markGenerationFailed(
     }
 
     const progressId = env.BUSINESS_CONTEXT_PROGRESS.idFromName(data.run_id);
-    logger.info('Progress DO ID', { progressId: progressId);
+    logger.info('Progress DO ID', { progressId });
     
     const progressDO = env.BUSINESS_CONTEXT_PROGRESS.get(progressId);
     logger.info('Progress DO stub created');
@@ -158,18 +158,18 @@ async function markGenerationFailed(
       body: JSON.stringify({ message: errorMessage })
     });
 
-    logger.info('DO fail response status', { status: response.status);
+    logger.info('DO fail response status', { status: response.status });
     
     if (!response.ok) {
       const errorText = await response.text();
-      logger.error('DO fail request failed', { error: errorText);
+      logger.error('DO fail request failed', { error: errorText });
     } else {
       logger.info('Successfully marked as failed', { runId: data.run_id });
     }
   } catch (error: any) {
     logger.error('Failed to mark as failed in DO');
-    logger.error('Error details', { errorName: error.name);
-    logger.error('Error message', { errorMessage: error.message);
-    logger.error('Error stack', { errorStack: error.stack);
+    logger.error('Error details', { errorName: error.name });
+    logger.error('Error message', { errorMessage: error.message });
+    logger.error('Error stack', { errorStack: error.stack });
   }
 }

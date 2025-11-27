@@ -200,7 +200,7 @@ async function handleCheckoutCompleted(data: StripeWebhookMessage, env: Env): Pr
       .eq('account_id', accountId);
 
     if (updateError) {
-      logger.error('Failed to update subscriptions table', { error: updateError);
+      logger.error('Failed to update subscriptions table', { error: updateError });
       throw updateError;
     }
 
@@ -214,7 +214,7 @@ async function handleCheckoutCompleted(data: StripeWebhookMessage, env: Env): Pr
       .single();
 
     if (planError || !plan) {
-      logger.error('Failed to fetch plan details', { error: planError);
+      logger.error('Failed to fetch plan details', { error: planError });
       throw new Error(`Plan not found: ${newTier}`);
     }
 
@@ -232,7 +232,7 @@ async function handleCheckoutCompleted(data: StripeWebhookMessage, env: Env): Pr
       .eq('account_id', accountId);
 
     if (balanceError) {
-      logger.error('Failed to update balances table', { error: balanceError);
+      logger.error('Failed to update balances table', { error: balanceError });
       throw balanceError;
     }
 
@@ -293,7 +293,7 @@ async function handleInvoicePaymentSucceeded(data: StripeWebhookMessage, env: En
       .single();
 
     if (error || !subscription) {
-      logger.error('Subscription not found', { error: error);
+      logger.error('Subscription not found', { error });
       return;
     }
 
