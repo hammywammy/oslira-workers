@@ -155,6 +155,7 @@ export interface LeadListItem {
   analysis_status: string | null;
   analysis_completed_at: string | null;
   overall_score: number | null;
+  niche: string | null;
 
   // ========== EXTRACTED DATA (from lead_analyses.extracted_data) ==========
   extracted_data: ExtractedDataResponse | null;
@@ -188,6 +189,7 @@ export interface LeadDetail {
   analysis_status: string | null;
   analysis_completed_at: string | null;
   overall_score: number | null;
+  niche: string | null;
 
   // ========== EXTRACTED DATA (from lead_analyses.extracted_data) ==========
   extracted_data: ExtractedDataResponse | null;
@@ -206,6 +208,7 @@ export interface LeadAnalysis {
   started_at: string | null;
   completed_at: string | null;
   created_at: string;
+  niche: string | null;
 
   // ========== EXTRACTED DATA (from lead_analyses.extracted_data) ==========
   extracted_data: ExtractedDataResponse | null;

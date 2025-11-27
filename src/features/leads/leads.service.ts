@@ -144,7 +144,7 @@ export class LeadsService {
       // Include extracted_data and full ai_response for actionable insights
       const { data: analysesData } = await this.supabase
         .from('lead_analyses')
-        .select('lead_id, analysis_type, status, completed_at, overall_score, ai_response, extracted_data')
+        .select('lead_id, analysis_type, status, completed_at, overall_score, ai_response, extracted_data, niche')
         .in('lead_id', leadIds)
         .eq('account_id', accountId)
         .eq('status', 'complete')
@@ -185,6 +185,7 @@ export class LeadsService {
         analysis_status: analysis?.status || null,
         analysis_completed_at: analysis?.completed_at || null,
         overall_score: analysis?.overall_score || null,
+        niche: analysis?.niche || null,
         // Include lean extracted data (actionable signals only)
         extracted_data: this.transformExtractedData(analysis?.extracted_data),
         // Include AI analysis (leadTier, strengths, etc.)
@@ -224,7 +225,7 @@ export class LeadsService {
     // Get latest analysis with full data
     const { data: latestAnalysisData } = await this.supabase
       .from('lead_analyses')
-      .select('analysis_type, status, completed_at, overall_score, ai_response, extracted_data')
+      .select('analysis_type, status, completed_at, overall_score, ai_response, extracted_data, niche')
       .eq('lead_id', leadId)
       .eq('account_id', accountId)
       .eq('status', 'complete')
@@ -257,6 +258,7 @@ export class LeadsService {
       analysis_status: latestAnalysisData?.status || null,
       analysis_completed_at: latestAnalysisData?.completed_at || null,
       overall_score: latestAnalysisData?.overall_score || null,
+      niche: latestAnalysisData?.niche || null,
       // Include lean extracted data (actionable signals only)
       extracted_data: this.transformExtractedData(latestAnalysisData?.extracted_data),
       // Include AI analysis (leadTier, strengths, etc.)
@@ -300,6 +302,7 @@ export class LeadsService {
       started_at: analysis.started_at,
       completed_at: analysis.completed_at,
       created_at: analysis.created_at,
+      niche: analysis.niche || null,
       // Include lean extracted data (actionable signals only)
       extracted_data: this.transformExtractedData(analysis.extracted_data),
       // Include AI analysis (leadTier, strengths, etc.)
