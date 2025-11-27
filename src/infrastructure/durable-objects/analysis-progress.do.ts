@@ -2,6 +2,7 @@
 
 import { DurableObject } from 'cloudflare:workers';
 import type { AnalysisProgressState } from '@/shared/types/env.types';
+import { logger } from '@/shared/utils/logger.util';
 
 /**
  * ANALYSIS PROGRESS DURABLE OBJECT
@@ -63,7 +64,7 @@ export class AnalysisProgressDO extends DurableObject {
           server.serializeAttachment({ runId, connectedAt: Date.now() });
         }
 
-        console.log('[AnalysisProgressDO] WebSocket connected:', runId);
+        logger.info('WebSocket connected', { runId: runId);
 
         // Send initial progress immediately
         const progress = await this.getProgress();
@@ -86,9 +87,9 @@ export class AnalysisProgressDO extends DurableObject {
 
       // POST /initialize - Initialize progress state (CRITICAL FIX: Added this route)
       if (method === 'POST' && url.pathname === '/initialize') {
-        console.log('[AnalysisProgressDO] Initializing progress tracker');
+        logger.info('Initializing progress tracker');
         const params = await request.json();
-        console.log('[AnalysisProgressDO] Initialize params:', params);
+        logger.info('Initialize params', params);
         await this.initialize(params);
         return Response.json({ success: true });
       }
@@ -126,11 +127,11 @@ export class AnalysisProgressDO extends DurableObject {
         return Response.json({ success: true });
       }
 
-      console.warn('[AnalysisProgressDO] Unknown route:', method, url.pathname);
+      logger.warn('Unknown route', { method: method, url.pathname);
       return Response.json({ error: 'Not found' }, { status: 404 });
 
     } catch (error: any) {
-      console.error('[AnalysisProgressDO] Error:', {
+      logger.error('Durable object error', {
         method,
         path: url.pathname,
         error: error.message,
@@ -159,7 +160,7 @@ export class AnalysisProgressDO extends DurableObject {
         ws.send(JSON.stringify({ type: 'progress', data: progress }));
       }
     } catch (error: any) {
-      console.error('[AnalysisProgressDO] WebSocket message error:', error.message);
+      logger.error('WebSocket message error', { error: error.message);
       ws.send(JSON.stringify({ type: 'error', message: 'Invalid message' }));
     }
   }
@@ -169,7 +170,7 @@ export class AnalysisProgressDO extends DurableObject {
    */
   async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean): Promise<void> {
     const attachment = ws.deserializeAttachment() as { runId?: string } | null;
-    console.log('[AnalysisProgressDO] WebSocket closed', {
+    logger.info('WebSocket closed', {
       runId: attachment?.runId,
       code,
       wasClean
@@ -181,7 +182,7 @@ export class AnalysisProgressDO extends DurableObject {
    */
   async webSocketError(ws: WebSocket, error: unknown): Promise<void> {
     const attachment = ws.deserializeAttachment() as { runId?: string } | null;
-    console.error('[AnalysisProgressDO] WebSocket error:', {
+    logger.error('WebSocket error', {
       runId: attachment?.runId,
       error
     });
@@ -205,17 +206,17 @@ export class AnalysisProgressDO extends DurableObject {
     const sockets = this.ctx.getWebSockets();
 
     if (sockets.length === 0) {
-      console.log(`[AnalysisProgressDO] No WebSocket clients connected (event: ${eventType}, progress: ${progress.progress}%)`);
+      logger.info('No WebSocket clients connected', { eventType, progress: progress.progress });
       return;
     }
 
-    console.log(`[AnalysisProgressDO] Broadcasting ${eventType} (${progress.progress}%) to ${sockets.length} client(s)`);
+    logger.info('Broadcasting progress update', { eventType, progress: progress.progress, clients: sockets.length });
 
     sockets.forEach(ws => {
       try {
         ws.send(message);
       } catch (error: any) {
-        console.error('[AnalysisProgressDO] Send failed:', error.message);
+        logger.error('WebSocket send failed', { error: error.message);
       }
     });
   }
@@ -233,7 +234,7 @@ export class AnalysisProgressDO extends DurableObject {
     username: string;
     analysis_type: string;
   }): Promise<void> {
-    console.log(`[AnalysisProgressDO][${params.run_id}] Initializing with params:`, {
+    logger.info('Initializing progress state', {
       run_id: params.run_id,
       account_id: params.account_id,
       username: params.username,
@@ -254,15 +255,15 @@ export class AnalysisProgressDO extends DurableObject {
     };
 
     await this.state.storage.put('progress', initialState);
-    console.log(`[AnalysisProgressDO][${params.run_id}] State saved to storage successfully`);
+    logger.info('Progress state saved', { runId: params.run_id });
 
     // Broadcast "ready" event to any WebSocket clients waiting
     this.broadcastProgress(initialState, 'ready');
-    console.log(`[AnalysisProgressDO][${params.run_id}] Broadcasted ready event`);
+    logger.info('Ready event broadcasted', { runId: params.run_id });
 
     // Set automatic cleanup alarm (24 hours)
     await this.state.storage.setAlarm(Date.now() + 24 * 60 * 60 * 1000);
-    console.log(`[AnalysisProgressDO][${params.run_id}] Cleanup alarm set for 24 hours`);
+    logger.info('Cleanup alarm set for 24 hours', { runId: params.run_id });
   }
 
   /**
@@ -283,15 +284,15 @@ export class AnalysisProgressDO extends DurableObject {
     const current = await this.getProgress();
 
     if (!current) {
-      console.error('[AnalysisProgressDO] Update called but progress not initialized!', update);
+      logger.error('Update called but progress not initialized', { update: update);
       throw new Error('Progress not initialized');
     }
 
-    console.log(`[AnalysisProgressDO][${current.run_id}] Updating progress: ${update.progress}% - ${update.current_step}`);
+    logger.info('Updating progress', { runId: current.run_id, progress: update.progress, step: update.current_step });
 
     // Check if cancelled
     if (current.status === 'cancelled') {
-      console.warn(`[AnalysisProgressDO][${current.run_id}] Analysis already cancelled`);
+      logger.warn('Analysis already cancelled', { runId: current.run_id });
       throw new Error('Analysis cancelled by user');
     }
 
@@ -304,7 +305,7 @@ export class AnalysisProgressDO extends DurableObject {
     };
 
     await this.state.storage.put('progress', updated);
-    console.log(`[AnalysisProgressDO][${current.run_id}] Progress updated successfully`);
+    logger.info('Progress updated successfully', { runId: current.run_id });
 
     // Broadcast to all WebSocket clients
     this.broadcastProgress(updated);
@@ -345,7 +346,7 @@ export class AnalysisProgressDO extends DurableObject {
       try {
         ws.close(1000, 'Analysis cancelled');
       } catch (error: any) {
-        console.error('[AnalysisProgressDO] Error closing WebSocket:', error.message);
+        logger.error('Error closing WebSocket', { error: error.message);
       }
     });
   }
@@ -384,7 +385,7 @@ export class AnalysisProgressDO extends DurableObject {
       try {
         ws.close(1000, 'Analysis complete');
       } catch (error: any) {
-        console.error('[AnalysisProgressDO] Error closing WebSocket:', error.message);
+        logger.error('Error closing WebSocket', { error: error.message);
       }
     });
   }
@@ -419,7 +420,7 @@ export class AnalysisProgressDO extends DurableObject {
       try {
         ws.close(1000, 'Analysis failed');
       } catch (error: any) {
-        console.error('[AnalysisProgressDO] Error closing WebSocket:', error.message);
+        logger.error('Error closing WebSocket', { error: error.message);
       }
     });
   }
@@ -428,7 +429,7 @@ export class AnalysisProgressDO extends DurableObject {
    * Alarm handler - cleanup after 24 hours
    */
   async alarm(): Promise<void> {
-    console.log('[AnalysisProgressDO] Cleaning up old progress state');
+    logger.info('Cleaning up old progress state');
 
     // Close all active WebSocket connections before cleanup
     const sockets = this.ctx.getWebSockets();
@@ -436,7 +437,7 @@ export class AnalysisProgressDO extends DurableObject {
       try {
         ws.close(1000, 'DO cleanup - session expired');
       } catch (error: any) {
-        console.error('[AnalysisProgressDO] Error closing WebSocket:', error.message);
+        logger.error('Error closing WebSocket', { error: error.message);
       }
     });
 

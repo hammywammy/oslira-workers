@@ -170,7 +170,7 @@ export async function deleteLead(c: Context<{ Bindings: Env }>) {
 
     // Soft delete lead from database
     await service.deleteLead(accountId, leadId);
-    console.log(`[DeleteLead] Lead ${leadId} soft deleted`);
+    logger.info('Lead soft deleted', { leadId, accountId });
 
     return noContentResponse(c);
 

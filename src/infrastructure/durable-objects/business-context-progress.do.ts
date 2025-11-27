@@ -3,6 +3,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { BusinessContextProgressState } from '@/shared/types/business-context.types';
 import type { Env } from '@/shared/types/env.types';
+import { logger } from '@/shared/utils/logger.util';
 
 /**
  * BUSINESS CONTEXT PROGRESS DURABLE OBJECT
@@ -71,7 +72,7 @@ export class BusinessContextProgressDO extends DurableObject {
           server.serializeAttachment({ runId, connectedAt: Date.now() });
         }
 
-        console.log('[BusinessContextProgressDO] WebSocket connected:', runId);
+        logger.info('WebSocket connected', { runId: runId);
 
         // Send initial progress immediately
         const progress = await this.getProgress();
@@ -100,7 +101,7 @@ export class BusinessContextProgressDO extends DurableObject {
           : 'null';
 
         if (this.lastLoggedState !== currentStateKey) {
-          console.log(`[BusinessContextProgressDO] STATE CHANGE: ${currentStateKey}`);
+          logger.info('State changed', { state: currentStateKey });
           this.lastLoggedState = currentStateKey;
         }
 
@@ -111,57 +112,57 @@ export class BusinessContextProgressDO extends DurableObject {
       // ALL OTHER OPERATIONS - FULL LOGGING
       // =========================================================================
 
-      console.log('[BusinessContextProgressDO] Request:', method, url.pathname);
+      logger.info('Request received', { method: method, url.pathname);
 
       // POST /initialize - Initialize progress state
       if (method === 'POST' && url.pathname === '/initialize') {
         const params = await request.json();
-        console.log('[BusinessContextProgressDO] Initializing:', params.run_id);
+        logger.info('Initializing', { runId: params.run_id);
 
         await this.initialize(params);
 
-        console.log('[BusinessContextProgressDO] Initialize complete');
+        logger.info('Initialize complete');
         return Response.json({ success: true });
       }
 
       // POST /update - Update progress
       if (method === 'POST' && url.pathname === '/update') {
         const update = await request.json();
-        console.log('[BusinessContextProgressDO] Updating:', {
+        logger.info('Updating progress', {
           progress: update.progress,
           step: update.current_step
         });
 
         await this.updateProgress(update);
 
-        console.log('[BusinessContextProgressDO] Update complete');
+        logger.info('Update complete');
         return Response.json({ success: true });
       }
 
       // POST /complete - Mark as complete
       if (method === 'POST' && url.pathname === '/complete') {
-        console.log('[BusinessContextProgressDO] ========== COMPLETE ENDPOINT START ==========');
+        logger.info('Complete endpoint started');
 
         try {
           const body = await request.json();
-          console.log('[BusinessContextProgressDO] Complete request body:', {
+          logger.info('Complete request body', {
             has_result: !!body?.result,
             result_keys: body?.result ? Object.keys(body.result) : []
           });
 
           // Get current progress from storage
-          console.log('[BusinessContextProgressDO] Fetching current progress from storage...');
+          logger.info('Fetching current progress from storage');
           const current = await this.state.storage.get<BusinessContextProgressState>('progress');
 
           if (!current) {
-            console.error('[BusinessContextProgressDO] COMPLETE FAILED: Progress not initialized');
+            logger.error('Complete failed - progress not initialized');
             return Response.json({
               success: false,
               error: 'Progress not initialized'
             }, { status: 400 });
           }
 
-          console.log('[BusinessContextProgressDO] Current progress state:', {
+          logger.info('Current progress state', {
             run_id: current.run_id,
             status: current.status,
             progress: current.progress,
@@ -179,7 +180,7 @@ export class BusinessContextProgressDO extends DurableObject {
             result: body?.result || current.result
           };
 
-          console.log('[BusinessContextProgressDO] Completed state to save:', {
+          logger.info('Completed state to save', {
             run_id: completed.run_id,
             status: completed.status,
             progress: completed.progress,
@@ -188,21 +189,21 @@ export class BusinessContextProgressDO extends DurableObject {
           });
 
           // Save to storage
-          console.log('[BusinessContextProgressDO] Saving completed state to storage...');
+          logger.info('Saving completed state to storage');
           await this.state.storage.put('progress', completed);
-          console.log('[BusinessContextProgressDO] Storage write successful');
+          logger.info('Storage write successful');
 
           // Verify write
-          console.log('[BusinessContextProgressDO] Verifying saved state...');
+          logger.info('Verifying saved state');
           const verified = await this.state.storage.get<BusinessContextProgressState>('progress');
-          console.log('[BusinessContextProgressDO] Verified state from storage:', {
+          logger.info('Verified state from storage', {
             status: verified?.status,
             progress: verified?.progress,
             matches_expected: verified?.status === 'complete' && verified?.progress === 100
           });
 
           if (verified?.status !== 'complete') {
-            console.error('[BusinessContextProgressDO] VERIFICATION FAILED: Status not set to complete!');
+            logger.error('Verification failed - status not set to complete');
             return Response.json({
               success: false,
               error: 'Verification failed - status not persisted'
@@ -218,11 +219,11 @@ export class BusinessContextProgressDO extends DurableObject {
             try {
               ws.close(1000, 'Generation complete');
             } catch (error: any) {
-              console.error('[BusinessContextProgressDO] Error closing WebSocket:', error.message);
+              logger.error('Error closing WebSocket', { error: error.message);
             }
           });
 
-          console.log('[BusinessContextProgressDO] ========== COMPLETE ENDPOINT SUCCESS ==========');
+          logger.info('Complete endpoint succeeded');
           return Response.json({
             success: true,
             status: verified.status,
@@ -230,8 +231,8 @@ export class BusinessContextProgressDO extends DurableObject {
           });
 
         } catch (error: any) {
-          console.error('[BusinessContextProgressDO] ========== COMPLETE ENDPOINT FAILED ==========');
-          console.error('[BusinessContextProgressDO] Complete error:', {
+          logger.error('Complete endpoint failed');
+          logger.error('Complete error', {
             error_name: error.name,
             error_message: error.message,
             error_stack: error.stack?.split('\n').slice(0, 5).join('\n')
@@ -248,11 +249,11 @@ export class BusinessContextProgressDO extends DurableObject {
       // POST /fail - Mark as failed
       if (method === 'POST' && url.pathname === '/fail') {
         const error = await request.json();
-        console.log('[BusinessContextProgressDO] Marking failed:', error.error_message);
+        logger.info('Marking failed', { error: error.error_message);
 
         await this.failGeneration(error.error_message);
 
-        console.log('[BusinessContextProgressDO] Marked failed');
+        logger.info('Marked failed');
         return Response.json({ success: true });
       }
 
@@ -261,10 +262,10 @@ export class BusinessContextProgressDO extends DurableObject {
         const secrets = await this.state.storage.get<CachedSecrets>('cached_secrets');
 
         if (secrets) {
-          console.log('[BusinessContextProgressDO] Returning cached secrets');
+          logger.info('Returning cached secrets');
           return Response.json(secrets);
         } else {
-          console.log('[BusinessContextProgressDO] No cached secrets found');
+          logger.info('No cached secrets found');
           return Response.json(null, { status: 404 });
         }
       }
@@ -272,19 +273,19 @@ export class BusinessContextProgressDO extends DurableObject {
       // POST /cache-secrets - Cache secrets
       if (method === 'POST' && url.pathname === '/cache-secrets') {
         const secrets = await request.json();
-        console.log('[BusinessContextProgressDO] Caching secrets (24hr TTL)');
+        logger.info('Caching secrets (24hr TTL)');
 
         await this.state.storage.put('cached_secrets', secrets);
 
-        console.log('[BusinessContextProgressDO] Secrets cached');
+        logger.info('Secrets cached');
         return Response.json({ success: true });
       }
 
-      console.log('[BusinessContextProgressDO] Route not found:', url.pathname);
+      logger.warn('Route not found', { path: url.pathname);
       return Response.json({ error: 'Not found' }, { status: 404 });
 
     } catch (error: any) {
-      console.error('[BusinessContextProgressDO] REQUEST FAILED', {
+      logger.error('Request failed', {
         method,
         pathname: url.pathname,
         error_name: error.name,
@@ -315,7 +316,7 @@ export class BusinessContextProgressDO extends DurableObject {
         ws.send(JSON.stringify({ type: 'progress', data: progress }));
       }
     } catch (error: any) {
-      console.error('[BusinessContextProgressDO] WebSocket message error:', error.message);
+      logger.error('WebSocket message error', { error: error.message);
       ws.send(JSON.stringify({ type: 'error', message: 'Invalid message' }));
     }
   }
@@ -325,7 +326,7 @@ export class BusinessContextProgressDO extends DurableObject {
    */
   async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean): Promise<void> {
     const attachment = ws.deserializeAttachment() as { runId?: string } | null;
-    console.log('[BusinessContextProgressDO] WebSocket closed', {
+    logger.info('WebSocket closed', {
       runId: attachment?.runId,
       code,
       wasClean
@@ -337,7 +338,7 @@ export class BusinessContextProgressDO extends DurableObject {
    */
   async webSocketError(ws: WebSocket, error: unknown): Promise<void> {
     const attachment = ws.deserializeAttachment() as { runId?: string } | null;
-    console.error('[BusinessContextProgressDO] WebSocket error:', {
+    logger.error('WebSocket error', {
       runId: attachment?.runId,
       error
     });
@@ -364,13 +365,13 @@ export class BusinessContextProgressDO extends DurableObject {
       return;
     }
 
-    console.log(`[BusinessContextProgressDO] Broadcasting ${eventType} (${progress.progress}%) to ${sockets.length} client(s)`);
+    logger.info('Broadcasting progress update', { eventType, progress: progress.progress, clients: sockets.length });
 
     sockets.forEach(ws => {
       try {
         ws.send(message);
       } catch (error: any) {
-        console.error('[BusinessContextProgressDO] Send failed:', error.message);
+        logger.error('Broadcast send failed', { error: error.message);
       }
     });
   }
@@ -407,7 +408,7 @@ export class BusinessContextProgressDO extends DurableObject {
       await this.state.storage.setAlarm(Date.now() + 24 * 60 * 60 * 1000);
 
     } catch (error: any) {
-      console.error('[BusinessContextProgressDO] Initialize failed:', error.message);
+      logger.error('Initialize failed', { error: error.message);
       throw error;
     }
   }
@@ -421,7 +422,7 @@ export class BusinessContextProgressDO extends DurableObject {
       const progress = await this.state.storage.get<BusinessContextProgressState>('progress');
       return progress || null;
     } catch (error: any) {
-      console.error('[BusinessContextProgressDO] Get progress failed:', error.message);
+      logger.error('Get progress failed', { error: error.message);
       throw error;
     }
   }
@@ -454,7 +455,7 @@ export class BusinessContextProgressDO extends DurableObject {
       // Broadcast to all WebSocket clients
       this.broadcastProgress(updated);
     } catch (error: any) {
-      console.error('[BusinessContextProgressDO] Update failed:', error.message);
+      logger.error('Update failed', { error: error.message);
       throw error;
     }
   }
@@ -491,11 +492,11 @@ export class BusinessContextProgressDO extends DurableObject {
         try {
           ws.close(1000, 'Generation complete');
         } catch (error: any) {
-          console.error('[BusinessContextProgressDO] Error closing WebSocket:', error.message);
+          logger.error('Error closing WebSocket', { error: error.message);
         }
       });
     } catch (error: any) {
-      console.error('[BusinessContextProgressDO] Complete failed:', error.message);
+      logger.error('Complete failed', { error: error.message);
       throw error;
     }
   }
@@ -531,11 +532,11 @@ export class BusinessContextProgressDO extends DurableObject {
         try {
           ws.close(1000, 'Generation failed');
         } catch (error: any) {
-          console.error('[BusinessContextProgressDO] Error closing WebSocket:', error.message);
+          logger.error('Error closing WebSocket', { error: error.message);
         }
       });
     } catch (error: any) {
-      console.error('[BusinessContextProgressDO] Mark failed failed:', error.message);
+      logger.error('Mark failed operation failed', { error: error.message);
       throw error;
     }
   }
@@ -544,7 +545,7 @@ export class BusinessContextProgressDO extends DurableObject {
    * Alarm handler - cleanup after 24 hours
    */
   async alarm(): Promise<void> {
-    console.log('[BusinessContextProgressDO] Alarm triggered - cleanup starting');
+    logger.info('Alarm triggered - cleanup starting');
 
     try {
       // Close all active WebSocket connections before cleanup
@@ -553,14 +554,14 @@ export class BusinessContextProgressDO extends DurableObject {
         try {
           ws.close(1000, 'DO cleanup - session expired');
         } catch (error: any) {
-          console.error('[BusinessContextProgressDO] Error closing WebSocket:', error.message);
+          logger.error('Error closing WebSocket', { error: error.message);
         }
       });
 
       await this.state.storage.deleteAll();
-      console.log('[BusinessContextProgressDO] Cleanup complete');
+      logger.info('Cleanup complete');
     } catch (error: any) {
-      console.error('[BusinessContextProgressDO] Cleanup failed:', error.message);
+      logger.error('Cleanup failed', { error: error.message);
     }
   }
 }

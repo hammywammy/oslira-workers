@@ -8,6 +8,7 @@ import { BusinessRepository } from '@/infrastructure/database/repositories/busin
 import { OnboardingService } from '@/features/onboarding/onboarding.service';
 import { StripeService } from '@/infrastructure/billing/stripe.service';
 import { getSecret } from '@/infrastructure/config/secrets';
+import { logger } from '@/shared/utils/logger.util';
 
 export class BusinessContextWorkflow extends WorkflowEntrypoint<Env, BusinessContextWorkflowParams> {
   
@@ -16,7 +17,13 @@ export class BusinessContextWorkflow extends WorkflowEntrypoint<Env, BusinessCon
     const progressId = this.env.BUSINESS_CONTEXT_PROGRESS.idFromName(params.run_id);
     const progressDO = this.env.BUSINESS_CONTEXT_PROGRESS.get(progressId);
 
-    console.log('[Workflow] Starting for:', params.run_id);
+    // Context for structured logging
+    const logContext = {
+      runId: params.run_id,
+      accountId: params.account_id
+    };
+
+    logger.info('Business context workflow started', logContext);
 
     try {
       // =========================================================================
@@ -45,21 +52,21 @@ export class BusinessContextWorkflow extends WorkflowEntrypoint<Env, BusinessCon
 
         // UPDATE 2: AI complete, saving to database
         await this.updateProgress(progressDO, 70, 'Saving to database...');
-        console.log('[Workflow] AI complete');
+        logger.info('AI generation complete', logContext);
       });
 
       // =========================================================================
       // STEP 3: Save to Database (no progress update - 70% already set)
       // =========================================================================
       const businessProfileId = await step.do('save_to_database', async () => {
-        console.log('[Step3] ENTRY - Saving business profile to database');
+        logger.info('Saving business profile to database', logContext);
         const saveStartTime = Date.now();
 
         try {
           const supabase = await SupabaseClientFactory.createAdminClient(this.env);
           const businessRepo = new BusinessRepository(supabase);
 
-          console.log('[Step3] Calling createBusinessProfile with data:', {
+          logger.info('Creating business profile', {
             account_id: params.account_id,
             full_name: params.user_inputs.full_name,
             signature_name: params.user_inputs.signature_name,
@@ -88,7 +95,7 @@ export class BusinessContextWorkflow extends WorkflowEntrypoint<Env, BusinessCon
           });
 
           const saveDuration = Date.now() - saveStartTime;
-          console.log('[Step3] ✓ Database save SUCCESS', {
+          logger.info('Business profile saved successfully', {
             duration_ms: saveDuration,
             profile_id: result.business_profile_id,
             was_created: result.was_created
@@ -97,7 +104,7 @@ export class BusinessContextWorkflow extends WorkflowEntrypoint<Env, BusinessCon
           return result.business_profile_id;
 
         } catch (error: any) {
-          console.error('[Step3] ✗ Database save FAILED', {
+          logger.error('Business profile save failed', { ...logContext, error: {
             error_name: error.name,
             error_message: error.message,
             error_stack: error.stack?.split('\n').slice(0, 3).join('\n')
@@ -110,7 +117,7 @@ export class BusinessContextWorkflow extends WorkflowEntrypoint<Env, BusinessCon
 // STEP 4: Mark Business Profile as Onboarded (no progress update)
 // =========================================================================
 await step.do('mark_business_onboarded', async () => {
-  console.log('[Step4] Marking business profile as onboarded');
+  logger.info('Marking business profile as onboarded', logContext);
 
   const supabase = await SupabaseClientFactory.createAdminClient(this.env);
 
@@ -123,7 +130,7 @@ await step.do('mark_business_onboarded', async () => {
     .eq('id', businessProfileId);
 
   if (dbUpdateError) {
-    console.error('[Step4] ✗ Failed to mark business onboarded', {
+    logger.error('Failed to mark business onboarded', { ...logContext, error: {
       error: dbUpdateError.message,
       error_code: dbUpdateError.code,
       business_profile_id: businessProfileId
@@ -131,7 +138,7 @@ await step.do('mark_business_onboarded', async () => {
     throw new Error(`Failed to mark business onboarded: ${dbUpdateError.message}`);
   }
 
-  console.log('[Step4] ✓ Business marked as onboarded', {
+  logger.info('Business marked as onboarded', {
     business_profile_id: businessProfileId
   });
 });
@@ -140,7 +147,7 @@ await step.do('mark_business_onboarded', async () => {
 // STEP 5: Link Stripe Customer to Subscription (no progress update)
 // =========================================================================
 await step.do('link_stripe_to_subscription', async () => {
-  console.log('[Step5] Linking Stripe customer to subscription');
+  logger.info('Linking Stripe customer to subscription', logContext);
 
   try {
     const supabase = await SupabaseClientFactory.createAdminClient(this.env);
@@ -159,7 +166,7 @@ await step.do('link_stripe_to_subscription', async () => {
       : account?.stripe_customer_id_test;
 
     if (accountError || !stripeCustomerId) {
-      console.warn('[Step5] ⚠ No stripe_customer_id found - skipping subscription link', {
+      logger.warn('No stripe_customer_id found - skipping subscription link', { ...logContext, {
         account_id: params.account_id,
         has_account: !!account,
         error: accountError?.message
@@ -174,14 +181,14 @@ await step.do('link_stripe_to_subscription', async () => {
       .eq('account_id', params.account_id);
 
     if (updateError) {
-      console.error('[Step5] ⚠ Failed to update subscription with stripe_customer_id', {
+      logger.error('Failed to update subscription with stripe_customer_id', { ...logContext, {
         error_code: updateError.code,
         error_message: updateError.message,
         account_id: params.account_id,
         stripe_customer_id: stripeCustomerId
       });
     } else {
-      console.log('[Step5] ✓ Subscription linked to Stripe customer', {
+      logger.info('Subscription linked to Stripe customer', {
         account_id: params.account_id,
         stripe_customer_id: stripeCustomerId
       });
@@ -202,11 +209,11 @@ await step.do('link_stripe_to_subscription', async () => {
       }
     });
 
-    console.log('[Step5] ✓ Stripe customer metadata updated');
+    logger.info('Stripe customer metadata updated', logContext);
 
   } catch (error: any) {
     // Non-fatal - log and continue
-    console.error('[Step5] ⚠ Subscription/Stripe update failed (NON-FATAL)', {
+    logger.error('Subscription/Stripe update failed (non-fatal)', { ...logContext, {
       error_message: error.message,
       account_id: params.account_id
     });
@@ -217,7 +224,7 @@ await step.do('link_stripe_to_subscription', async () => {
 // STEP 6: Mark Complete (UPDATE 3: 100% via /complete endpoint)
 // =========================================================================
 await step.do('mark_complete', async () => {
-  console.log('[Workflow] Calling /complete endpoint...');
+  logger.info('Calling complete endpoint', logContext);
 
   const completeResponse = await progressDO.fetch('http://do/complete', {
     method: 'POST',
@@ -232,16 +239,16 @@ await step.do('mark_complete', async () => {
 
   if (!completeResponse.ok) {
     const error = await completeResponse.text();
-    console.error('[Workflow] /complete endpoint failed:', error);
+    logger.error('Complete endpoint failed', { ...logContext, error: error);
     throw new Error(`Failed to mark complete: ${error}`);
   }
 
   const completeData = await completeResponse.json();
-  console.log('[Workflow] ✓ Complete endpoint response:', completeData);
-  console.log('[Workflow] ========== WORKFLOW COMPLETE ==========');
+  logger.info('Complete endpoint response', completeData);
+  logger.info('Business context workflow complete', logContext);
 });
 
-      console.log('[Workflow] ========== SUCCESS ==========', {
+      logger.info('Workflow completed successfully', {
         run_id: params.run_id,
         account_id: params.account_id,
         business_profile_id: businessProfileId
@@ -250,7 +257,7 @@ await step.do('mark_complete', async () => {
       return { success: true, business_profile_id: businessProfileId };
 
     } catch (error: any) {
-      console.error('[Workflow] ========== FAILED ==========', {
+      logger.error('Workflow failed', {
         run_id: params.run_id,
         account_id: params.account_id,
         error_name: error.name,
@@ -274,7 +281,7 @@ await step.do('mark_complete', async () => {
         body: JSON.stringify({ progress, current_step: step, status: 'processing' })
       });
     } catch (error: any) {
-      console.error('[Workflow] Progress update failed:', error.message);
+      logger.error('Progress update failed', { runId, error: error.message);
     }
   }
 
