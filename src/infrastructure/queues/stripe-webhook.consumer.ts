@@ -6,6 +6,7 @@ import { SupabaseClientFactory } from '@/infrastructure/database/supabase.client
 import { CreditsRepository } from '@/infrastructure/database/repositories/credits.repository';
 import Stripe from 'stripe';
 import { getSecret } from '@/infrastructure/config/secrets';
+import { logger } from '@/shared/utils/logger.util';
 
 /**
  * STRIPE WEBHOOK CONSUMER
@@ -36,20 +37,20 @@ export async function handleStripeWebhookQueue(
   batch: MessageBatch<StripeWebhookMessage>,
   env: Env
 ): Promise<void> {
-  console.log(`[StripeWebhookQueue] Processing batch of ${batch.messages.length} messages`);
+  logger.info('Processing Stripe webhook batch', { batchSize: batch.messages.length });
 
   for (const message of batch.messages) {
     try {
       await processWebhookMessage(message, env);
       message.ack(); // Success - remove from queue
     } catch (error: any) {
-      console.error(`[StripeWebhookQueue] Error processing message:`, error);
+      logger.error('Stripe webhook message processing failed', { error: error instanceof Error ? error.message : String(error) });
       
       // Retry logic
       if (message.attempts < 3) {
         message.retry(); // Retry with exponential backoff
       } else {
-        console.error(`[StripeWebhookQueue] Max retries exceeded, moving to DLQ`);
+        logger.error('Max retries exceeded for Stripe webhook message');
         message.ack(); // Remove from queue (would send to Dead Letter Queue in production)
       }
     }
@@ -65,7 +66,7 @@ async function processWebhookMessage(
 ): Promise<void> {
   const data = message.body;
 
-  console.log(`[StripeWebhook] Processing: ${data.event_type} (${data.event_id})`);
+  logger.info('Processing Stripe webhook event', { eventType: data.event_type, eventId: data.event_id });
 
   // Check idempotency - has this event been processed?
   const supabase = await SupabaseClientFactory.createAdminClient(env);
@@ -77,7 +78,7 @@ async function processWebhookMessage(
     .single();
 
   if (existing) {
-    console.log(`[StripeWebhook] Event ${data.event_id} already processed, skipping`);
+    logger.info('Event already processed, skipping', { eventId: data.event_id });
     return;
   }
 
@@ -108,7 +109,7 @@ async function processWebhookMessage(
       break;
 
     default:
-      console.log(`[StripeWebhook] Unhandled event type: ${data.event_type}`);
+      logger.warn('Unhandled Stripe event type', { eventType: data.event_type });
   }
 
   // Mark as processed
@@ -126,14 +127,14 @@ async function handleCheckoutCompleted(data: StripeWebhookMessage, env: Env): Pr
   const session = data.payload;
   const accountId = session.metadata?.account_id || data.account_id;
 
-  console.log('[StripeWebhook] checkout.session.completed', {
+  logger.info('Checkout session completed', {
     session_id: session.id,
     account_id: accountId,
     mode: session.mode,
   });
 
   if (!accountId) {
-    console.error('[StripeWebhook] No account_id in session metadata');
+    logger.error('No account_id in session metadata');
     return;
   }
 
@@ -147,7 +148,7 @@ async function handleCheckoutCompleted(data: StripeWebhookMessage, env: Env): Pr
     const stripeSubscriptionId = session.subscription as string;
 
     if (!newTier) {
-      console.error('[StripeWebhook] No new_tier in session metadata');
+      logger.error('No new_tier in session metadata');
       return;
     }
 
@@ -164,7 +165,7 @@ async function handleCheckoutCompleted(data: StripeWebhookMessage, env: Env): Pr
     const periodStart = new Date(stripeSubscription.current_period_start * 1000).toISOString();
     const periodEnd = new Date(stripeSubscription.current_period_end * 1000).toISOString();
 
-    console.log('[StripeWebhook] Subscription details from Stripe:', {
+    logger.info('Subscription details from Stripe', {
       subscription_id: stripeSubscriptionId,
       price_id: priceId,
       price_cents: priceCents,
@@ -199,11 +200,11 @@ async function handleCheckoutCompleted(data: StripeWebhookMessage, env: Env): Pr
       .eq('account_id', accountId);
 
     if (updateError) {
-      console.error('[StripeWebhook] Failed to update subscriptions table:', updateError);
+      logger.error('Failed to update subscriptions table', { error: updateError);
       throw updateError;
     }
 
-    console.log('[StripeWebhook] subscriptions table updated');
+    logger.info('Subscriptions table updated');
 
     // UPDATE 2: balances table (get quotas from plans table)
     const { data: plan, error: planError } = await supabase
@@ -213,7 +214,7 @@ async function handleCheckoutCompleted(data: StripeWebhookMessage, env: Env): Pr
       .single();
 
     if (planError || !plan) {
-      console.error('[StripeWebhook] Failed to fetch plan details:', planError);
+      logger.error('Failed to fetch plan details', { error: planError);
       throw new Error(`Plan not found: ${newTier}`);
     }
 
@@ -231,16 +232,16 @@ async function handleCheckoutCompleted(data: StripeWebhookMessage, env: Env): Pr
       .eq('account_id', accountId);
 
     if (balanceError) {
-      console.error('[StripeWebhook] Failed to update balances table:', balanceError);
+      logger.error('Failed to update balances table', { error: balanceError);
       throw balanceError;
     }
 
-    console.log('[StripeWebhook] balances table updated:', {
+    logger.info('Balances table updated', {
       credit_balance: creditsQuota,
       light_analyses_balance: lightQuota,
     });
 
-    console.log(`[StripeWebhook] ✅ Successfully upgraded account ${accountId} to ${newTier}`);
+    logger.info('Account upgraded successfully', { accountId, newTier });
   }
 
   // ===============================================================================
@@ -255,7 +256,7 @@ async function handleCheckoutCompleted(data: StripeWebhookMessage, env: Env): Pr
       'purchase',
       `Credit purchase via Stripe: ${session.id}`
     );
-    console.log(`[StripeWebhook] Granted ${creditsAmount} credits to account ${accountId}`);
+    logger.info('Credits granted', { accountId, credits: creditsAmount });
   }
 }
 
@@ -292,7 +293,7 @@ async function handleInvoicePaymentSucceeded(data: StripeWebhookMessage, env: En
       .single();
 
     if (error || !subscription) {
-      console.error('[StripeWebhook] Subscription not found:', error);
+      logger.error('Subscription not found', { error: error);
       return;
     }
 
@@ -321,7 +322,7 @@ async function handleInvoicePaymentSucceeded(data: StripeWebhookMessage, env: En
       })
       .eq(subscriptionIdColumn, subscriptionId);
 
-    console.log(
+    logger.info(
       `[StripeWebhook] Reset balances for ${accountId} (${subscription.plan_type}): ` +
       `${creditsQuota} credits + ${lightQuota} light analyses`
     );
@@ -366,7 +367,7 @@ async function handleSubscriptionUpdated(data: StripeWebhookMessage, env: Env): 
     .eq(subscriptionIdColumn, subscription.id)
     .eq('account_id', accountId);
 
-  console.log(`[StripeWebhook] Updated subscription ${subscription.id} status to ${subscription.status}`);
+  logger.info(`[StripeWebhook] Updated subscription ${subscription.id} status to ${subscription.status}`);
 }
 
 /**
@@ -392,7 +393,7 @@ async function handleSubscriptionDeleted(data: StripeWebhookMessage, env: Env): 
     .eq(subscriptionIdColumn, subscription.id)
     .eq('account_id', accountId);
 
-  console.log(`[StripeWebhook] Cancelled subscription ${subscription.id}`);
+  logger.info(`[StripeWebhook] Cancelled subscription ${subscription.id}`);
 }
 
 /**
