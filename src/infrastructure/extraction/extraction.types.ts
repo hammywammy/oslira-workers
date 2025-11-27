@@ -524,10 +524,9 @@ export interface ExtractedData {
   /** Calculated scores and assessments */
   calculated: {
     // Core engagement metrics
-    engagementScore: number | null;
-    engagementRate: number | null;
+    engagementScore: number | null;      // 0-100 normalized quality scale
+    engagementRate: number | null;       // Decimal (e.g., 0.044 = 4.4%)
     engagementConsistency: number | null;
-    postingFrequency: number | null;
 
     // Risk assessment
     fakeFollowerWarning: string | null;

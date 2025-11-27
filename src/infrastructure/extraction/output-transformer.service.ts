@@ -19,6 +19,7 @@ import type {
 } from './extraction.types';
 import {
   calculateScores,
+  calculateEngagementScore,
   calculateReadinessScore,
   calculatePartnerEngagementScore,
   calculateAuthorityScore
@@ -50,6 +51,9 @@ export function transformToExtractedData(extraction: ExtractionResult): Extracte
 
   // Calculate composite scores
   const { scores } = calculateScores(extraction);
+
+  // Calculate engagement score (0-100 normalized quality scale)
+  const engagementScore = calculateEngagementScore(engagementMetrics.engagementRate);
 
   // Calculate new scoring system components
   const readinessScore = calculateReadinessScore(extraction);
@@ -98,10 +102,9 @@ export function transformToExtractedData(extraction: ExtractionResult): Extracte
 
     calculated: {
       // Core engagement metrics
-      engagementScore: engagementMetrics.engagementRate,
-      engagementRate: engagementMetrics.engagementRate,
+      engagementScore,                               // 0-100 normalized quality scale
+      engagementRate: engagementMetrics.engagementRate,  // Decimal (e.g., 0.044 = 4.4%)
       engagementConsistency: engagementMetrics.engagementConsistency,
-      postingFrequency: frequencyMetrics.postingFrequency,
 
       // Risk assessment
       fakeFollowerWarning,
@@ -127,6 +130,11 @@ export function transformToExtractedData(extraction: ExtractionResult): Extracte
     sampleSize: extractedData.metadata.sampleSize,
     hasHashtags: extractedData.static.topHashtags.length > 0,
     hasMentions: extractedData.static.topMentions.length > 0,
+    engagement: {
+      rate: extractedData.calculated.engagementRate,
+      ratePercent: extractedData.calculated.engagementRate ? (extractedData.calculated.engagementRate * 100).toFixed(2) + '%' : null,
+      score: extractedData.calculated.engagementScore
+    },
     newScores: {
       readinessScore: extractedData.calculated.readinessScore,
       partnerEngagementScore: extractedData.calculated.partnerEngagementScore,

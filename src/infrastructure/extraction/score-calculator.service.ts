@@ -347,6 +347,73 @@ function detectGaps(extraction: ExtractionResult): GapDetection {
 }
 
 // ============================================================================
+// ENGAGEMENT SCORE (0-100 NORMALIZED QUALITY SCALE)
+// ============================================================================
+
+/**
+ * Calculate Engagement Score (0-100 normalized quality scale)
+ *
+ * Converts raw engagement rate (decimal) into a human-readable quality score.
+ * Based on Instagram industry benchmarks:
+ *
+ * Scale:
+ * - 0-20: Extremely low (<0.5% ER)
+ * - 20-40: Weak (0.5-1.5% ER)
+ * - 40-60: Average (1.5-3% ER)
+ * - 60-80: Strong (3-6% ER)
+ * - 80-100: Exceptional (>6% ER)
+ *
+ * @param engagementRate - Decimal engagement rate (e.g., 0.044 for 4.4%)
+ */
+export function calculateEngagementScore(engagementRate: number | null): number | null {
+  if (engagementRate === null) {
+    return null;
+  }
+
+  // Convert decimal to percentage for calculation
+  const erPercent = engagementRate * 100;
+
+  let score: number;
+
+  if (erPercent < 0.5) {
+    // Extremely low: 0-20 points
+    // Linear scale from 0% = 0 points to 0.5% = 20 points
+    score = (erPercent / 0.5) * 20;
+  } else if (erPercent < 1.5) {
+    // Weak: 20-40 points
+    // Linear scale from 0.5% = 20 points to 1.5% = 40 points
+    score = 20 + ((erPercent - 0.5) / 1.0) * 20;
+  } else if (erPercent < 3.0) {
+    // Average: 40-60 points
+    // Linear scale from 1.5% = 40 points to 3% = 60 points
+    score = 40 + ((erPercent - 1.5) / 1.5) * 20;
+  } else if (erPercent < 6.0) {
+    // Strong: 60-80 points
+    // Linear scale from 3% = 60 points to 6% = 80 points
+    score = 60 + ((erPercent - 3.0) / 3.0) * 20;
+  } else {
+    // Exceptional: 80-100 points
+    // Linear scale from 6% = 80 points to 10%+ = 100 points (capped)
+    score = 80 + Math.min(((erPercent - 6.0) / 4.0) * 20, 20);
+  }
+
+  const clamped = clamp(0, 100, score);
+
+  logger.debug('[ScoreCalculator] Engagement score calculated', {
+    engagementRate,
+    engagementRatePercent: (erPercent).toFixed(2) + '%',
+    rawScore: score,
+    finalScore: clamped,
+    tier: clamped < 20 ? 'extremely_low' :
+          clamped < 40 ? 'weak' :
+          clamped < 60 ? 'average' :
+          clamped < 80 ? 'strong' : 'exceptional'
+  });
+
+  return round(clamped);
+}
+
+// ============================================================================
 // NEW SCORING SYSTEM (0-100 TOTAL)
 // ============================================================================
 

@@ -537,17 +537,19 @@ export class ProfileExtractionService {
     const avgCommentsPerPost = this.round(totalComments / postCount, 2);
     const avgEngagementPerPost = this.round(totalEngagement / postCount, 2);
 
-    // Engagement rate (INDUSTRY STANDARD: per-post average / followers)
+    // Engagement rate (DECIMAL: raw ratio, not percentage)
+    // Example: 288,227 / 6,552,484 = 0.044 (represents 4.4%)
     let engagementRate: number | null = null;
     if (profile.followersCount > 0) {
-      engagementRate = this.round((avgEngagementPerPost / profile.followersCount) * 100, 4);
+      engagementRate = this.round(avgEngagementPerPost / profile.followersCount, 4);
     }
 
     logger.debug('Engagement rate calculated', {
       ...logContext,
       avgEngagementPerPost,
       followersCount: profile.followersCount,
-      engagementRate
+      engagementRate,
+      engagementRatePercent: engagementRate ? (engagementRate * 100).toFixed(2) + '%' : null
     });
 
     // Comment to like ratio (standardized to 3 decimal places for consistency)
