@@ -346,4 +346,92 @@ function detectGaps(extraction: ExtractionResult): GapDetection {
   return gaps;
 }
 
+// ============================================================================
+// NEW SCORING SYSTEM (0-100 TOTAL)
+// ============================================================================
+
+/**
+ * Calculate Readiness Score (0-25 points, 25% of total)
+ *
+ * Measures content quality, professionalism, and sophistication.
+ * Based on contentSophistication score (0-100) scaled to 0-25.
+ *
+ * Components from contentSophistication:
+ * - Hashtag usage and strategy
+ * - Caption quality and length
+ * - Location tagging
+ * - Format diversity
+ */
+export function calculateReadinessScore(extraction: ExtractionResult): number {
+  const contentSophistication = calculateContentSophistication(extraction);
+
+  // Scale 0-100 score to 0-25
+  const readinessScore = (contentSophistication / 100) * 25;
+
+  logger.debug('[ScoreCalculator] Readiness score calculated', {
+    contentSophistication,
+    readinessScore: round(readinessScore)
+  });
+
+  return round(readinessScore);
+}
+
+/**
+ * Calculate Partner Engagement Score (0-15 points, 15% of total)
+ *
+ * Measures active engaged audience quality.
+ * Based on engagementHealth score (0-100) scaled to 0-15.
+ *
+ * Components from engagementHealth:
+ * - Engagement rate
+ * - Engagement consistency
+ * - Comment to like ratio
+ */
+export function calculatePartnerEngagementScore(extraction: ExtractionResult): number {
+  const engagementHealth = calculateEngagementHealth(extraction);
+
+  // Scale 0-100 score to 0-15
+  const partnerEngagementScore = (engagementHealth / 100) * 15;
+
+  logger.debug('[ScoreCalculator] Partner engagement score calculated', {
+    engagementHealth,
+    partnerEngagementScore: round(partnerEngagementScore)
+  });
+
+  return round(partnerEngagementScore);
+}
+
+/**
+ * Calculate Authority Score (0-10 points, 10% of total)
+ *
+ * Measures account maturity and credibility.
+ * Combines accountMaturity (70%) and authorityRatio (30%) scaled to 0-10.
+ *
+ * Components:
+ * - Account maturity: posting consistency, profile completeness
+ * - Authority ratio: followers vs following ratio
+ */
+export function calculateAuthorityScore(extraction: ExtractionResult): number {
+  const accountMaturity = calculateAccountMaturity(extraction);
+  const { profileMetrics } = extraction;
+
+  // Get authority ratio (0-100 scale) or 0 if null
+  const authorityRatio = profileMetrics.authorityRatio ?? 0;
+
+  // Weighted combination: 70% maturity, 30% authority ratio
+  const combinedScore = (accountMaturity * 0.7) + (authorityRatio * 0.3);
+
+  // Scale to 0-10
+  const authorityScore = (combinedScore / 100) * 10;
+
+  logger.debug('[ScoreCalculator] Authority score calculated', {
+    accountMaturity,
+    authorityRatio,
+    combinedScore,
+    authorityScore: round(authorityScore)
+  });
+
+  return round(authorityScore);
+}
+
 // Export is already done via the function declaration above

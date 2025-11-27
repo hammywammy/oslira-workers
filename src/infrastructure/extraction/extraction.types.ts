@@ -538,6 +538,11 @@ export interface ExtractedData {
     engagementHealth: number;
     profileHealthScore: number;
     contentSophistication: number;
+
+    // New scoring system (0-100 total)
+    readinessScore: number;      // 0-25 points: Content quality, professionalism, sophistication
+    partnerEngagementScore: number;     // 0-15 points: Active engaged audience
+    authorityScore: number;      // 0-10 points: Account maturity and credibility
   };
 }
 
@@ -586,6 +591,20 @@ export interface AILeadAnalysis {
 
   /** Why this ICP is/isn't a good fit */
   fitReasoning: string;
+
+  /** Scoring system (0-100 total) */
+  scoring: {
+    /** How well the profile matches the business ICP (0-50 points, 50%) - AI calculated */
+    profileFitScore: number;
+    /** Content quality, professionalism, sophistication (0-25 points, 25%) - Pre-calculated */
+    readinessScore: number;
+    /** Active engaged audience (0-15 points, 15%) - Pre-calculated */
+    partnerEngagementScore: number;
+    /** Account maturity and credibility (0-10 points, 10%) - Pre-calculated */
+    authorityScore: number;
+    /** Sum of all 4 scores (0-100) */
+    overallScore: number;
+  };
 }
 
 /**
