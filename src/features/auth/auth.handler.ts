@@ -499,7 +499,7 @@ export async function handleBootstrap(c: Context<{ Bindings: Env }>) {
     const auth = getAuthContext(c);
     const supabase = await SupabaseClientFactory.createAdminClient(c.env);
 
-    // Single JOIN query to fetch all initialization data
+    // Single JOIN query to fetch all initialization data including balances
     // Use explicit FK syntax (fk_accounts_owner) to avoid PGRST201 ambiguity error
     // (accounts table has two FKs to users: owner_id and suspended_by)
     const { data, error } = await supabase
@@ -511,9 +511,15 @@ export async function handleBootstrap(c: Context<{ Bindings: Env }>) {
         avatar_url,
         accounts!fk_accounts_owner (
           id,
-          name
-        ),
-        account:accounts!fk_accounts_owner (
+          name,
+          balances (
+            account_id,
+            credit_balance,
+            light_analyses_balance,
+            last_transaction_at,
+            created_at,
+            updated_at
+          ),
           subscriptions (
             id,
             plan_type,
@@ -538,20 +544,8 @@ export async function handleBootstrap(c: Context<{ Bindings: Env }>) {
     // Extract nested data
     const user = data;
     const account = Array.isArray(data.accounts) ? data.accounts[0] : data.accounts;
-    const accountData = Array.isArray(data.account) ? data.account[0] : data.account;
-    const subscription = accountData?.subscriptions?.[0] || null;
-
-    // Fetch balances directly - nested joins through reverse FKs can be unreliable
-    const { data: balance, error: balanceError } = await supabase
-      .from('balances')
-      .select('account_id, credit_balance, light_analyses_balance, last_transaction_at, created_at, updated_at')
-      .eq('account_id', account.id)
-      .single();
-
-    if (balanceError && balanceError.code !== 'PGRST116') {
-      // PGRST116 = "not found" which is acceptable (we have defaults)
-      console.error('[Bootstrap] Balance query error:', balanceError);
-    }
+    const subscription = account?.subscriptions?.[0] || null;
+    const balance = account?.balances?.[0] || null;
 
     // Determine environment-specific Stripe IDs
     const isProduction = c.env.APP_ENV === 'production';
