@@ -18,9 +18,13 @@ import { getStepProgress } from './workflow-progress.config';
 import {
   getCreditCost,
   getPostsLimit,
-  buildOperationsMetrics,
-  type AnalysisType
+  buildOperationsMetrics
 } from '@/config/operations-pricing.config';
+import {
+  type AnalysisType,
+  isFeatureEnabled,
+  getAnalysisConfig
+} from '@/config/analysis-types.config';
 import {
   PreAnalysisChecksService,
   type PreAnalysisChecksSummary,
@@ -694,68 +698,84 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       extractedData = phase2Result.extractedData;
       textDataForAI = phase2Result.textDataForAI;
 
-      // Step 6d: Detect niche using AI
+      // Step 6d: Detect niche using AI (DEEP only)
+      // MODULAR: Skip niche detection for Light analysis
       let detectedNiche: string | null = null;
-      const nicheResult = await step.do('detect_niche', {
-        retries: { limit: 1, delay: '1 second' }
-      }, async (): Promise<string | null> => {
-        try {
-          logger.info('Detecting profile niche', logContext);
+      const shouldRunNicheDetection = isFeatureEnabled(params.analysis_type as AnalysisType, 'runNicheDetection');
 
-          // Only run niche detection if we have extracted data
-          if (!extractedData || !textDataForAI) {
-            logger.info('Skipping niche detection - no extracted data', logContext);
+      if (shouldRunNicheDetection) {
+        const nicheResult = await step.do('detect_niche', {
+          retries: { limit: 1, delay: '1 second' }
+        }, async (): Promise<string | null> => {
+          try {
+            logger.info('Detecting profile niche', logContext);
+
+            // Only run niche detection if we have extracted data
+            if (!extractedData || !textDataForAI) {
+              logger.info('Skipping niche detection - no extracted data', logContext);
+              return null;
+            }
+
+            // Prepare niche detection input
+            const nicheInput = {
+              username: params.username,
+              displayName: profile.displayName,
+              biography: textDataForAI.biography,
+              followersCount: profile.followersCount,
+              isBusinessAccount: profile.isBusinessAccount,
+              businessCategoryName: extractedData.static.businessCategoryName,
+              externalUrl: extractedData.static.externalUrl,
+              topHashtags: extractedData.static.topHashtags.map(h => h.hashtag).slice(0, 5),
+              recentCaptions: textDataForAI.recentCaptions
+            };
+
+            // Run niche detection
+            const result = await detectNiche(
+              nicheInput,
+              this.env,
+              secrets.openaiKey,
+              secrets.claudeKey,
+              secrets.aiGatewayToken
+            );
+
+            if (!result.success) {
+              logger.warn('Niche detection failed', { ...logContext, error: result.error });
+              return null;
+            }
+
+            logger.info('Niche detected', {
+              niche: result.niche,
+              confidence: result.confidence,
+              reasoning: result.reasoning
+            });
+
+            return result.niche;
+
+          } catch (error: any) {
+            logger.error('Niche detection error (non-fatal)', { ...logContext, error: error instanceof Error ? error.message : String(error) });
             return null;
           }
+        });
 
-          // Prepare niche detection input
-          const nicheInput = {
-            username: params.username,
-            displayName: profile.displayName,
-            biography: textDataForAI.biography,
-            followersCount: profile.followersCount,
-            isBusinessAccount: profile.isBusinessAccount,
-            businessCategoryName: extractedData.static.businessCategoryName,
-            externalUrl: extractedData.static.externalUrl,
-            topHashtags: extractedData.static.topHashtags.map(h => h.hashtag).slice(0, 5),
-            recentCaptions: textDataForAI.recentCaptions
-          };
+        detectedNiche = nicheResult;
+      } else {
+        logger.info('Skipping niche detection for light analysis', logContext);
+      }
 
-          // Run niche detection
-          const result = await detectNiche(
-            nicheInput,
-            this.env,
-            secrets.openaiKey,
-            secrets.claudeKey,
-            secrets.aiGatewayToken
-          );
-
-          if (!result.success) {
-            logger.warn('Niche detection failed', { ...logContext, error: result.error });
-            return null;
-          }
-
-          logger.info('Niche detected', {
-            niche: result.niche,
-            confidence: result.confidence,
-            reasoning: result.reasoning
-          });
-
-          return result.niche;
-
-        } catch (error: any) {
-          logger.error('Niche detection error (non-fatal)', { ...logContext, error: error instanceof Error ? error.message : String(error) });
-          return null;
-        }
-      });
-
-      detectedNiche = nicheResult;
-
-      // Step 7: PARALLEL AI Analysis - Run both AI analyses simultaneously
-      // OPTIMIZATION: Runs both AI calls in parallel (saves ~14s)
-      // - Lead Qualification AI: GPT-5 comprehensive analysis (~50-60s) - leadTier, strengths, opportunities
+      // Step 7: AI Analysis
+      // MODULAR: Light analysis runs ONLY Profile Assessment AI (fast, ~15s)
+      //          Deep analysis runs BOTH in parallel (Lead Qualification + Profile Assessment)
+      //
+      // Light Analysis (~15s):
+      // - Profile Assessment AI only: score + 2-3 sentence summary
+      // - NO Lead Qualification AI (no leadTier, strengths, opportunities)
+      //
+      // Deep Analysis (~45s parallel):
+      // - Lead Qualification AI: GPT-5 comprehensive (~50-60s) - leadTier, strengths, opportunities
       // - Profile Assessment AI: Quick scoring (~14s) - overall_score, summary_text
-      // Total time: max(60, 14) = ~60s instead of 60+14 = ~74s sequential
+      // - Total time: max(60, 14) = ~60s instead of 60+14 = ~74s sequential
+      const shouldRunLeadQualification = isFeatureEnabled(params.analysis_type as AnalysisType, 'runLeadQualificationAI');
+
       const parallelAIResult = await step.do('parallel_ai_analysis', {
         retries: { limit: 1, delay: '2 seconds' }
       }, async (): Promise<{
@@ -770,7 +790,9 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         };
       }> => {
         try {
-          logger.info('Starting parallel AI analysis', logContext);
+          const analysisMode = shouldRunLeadQualification ? 'deep (parallel)' : 'light (profile only)';
+          logger.info(`Starting AI analysis [${analysisMode}]`, logContext);
+
           const stepInfo = getStepProgress(params.analysis_type as AnalysisType, 'ai_analysis');
           await this.broadcastProgress(
             params.run_id,
@@ -782,12 +804,17 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
           const aiStart = Date.now();
 
-          // PARALLEL AI EXECUTION
-          // Both tasks are IIFEs that start executing immediately
-          // Promise.all waits for the slower one (usually Lead Qualification at ~50-60s)
-          // Total time should be max(leadQual, profileAssess) not leadQual + profileAssess
+          // MODULAR AI EXECUTION
+          // Light: Only Profile Assessment (no Lead Qualification)
+          // Deep: Both in parallel for efficiency
 
           const leadQualificationTask = (async (): Promise<AIResponsePayload | null> => {
+            // MODULAR: Skip Lead Qualification for Light analysis
+            if (!shouldRunLeadQualification) {
+              logger.info('[AI] Lead Qualification AI skipped - light analysis mode', logContext);
+              return null;
+            }
+
             if (!extractedData || !textDataForAI) {
               logger.info('[Parallel] Lead Qualification AI skipped - no extracted data', logContext);
               return null;
@@ -873,7 +900,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             return { data: result, durationMs: assessDuration };
           })();
 
-          // Run BOTH in parallel - total time = max(leadQual, profileAssess)
+          // Run AI tasks - for Light only Profile Assessment runs, for Deep both run in parallel
           const [leadQualResult, profileAssessResultWithDuration] = await Promise.all([leadQualificationTask, profileAssessmentTask]);
 
           timing.ai_analysis = Date.now() - aiStart;
@@ -883,39 +910,55 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           const profileAssessDurationMs = profileAssessResultWithDuration.durationMs;
 
           // Store AI breakdown for SLA logging
+          // Light analysis has different SLA targets (~15-20s vs ~60-70s for deep)
+          const lightSlaThreshold = 25000;  // 25s target for light
+          const deepSlaThreshold = 70000;   // 70s target for deep
+          const slaThreshold = shouldRunLeadQualification ? deepSlaThreshold : lightSlaThreshold;
+
           (timing as any).ai_breakdown = {
+            mode: shouldRunLeadQualification ? 'deep_parallel' : 'light_single',
             leadQualificationMs: leadQualDurationMs,
             profileAssessmentMs: profileAssessDurationMs,
-            parallelStatus: timing.ai_analysis <= 70000 ? 'optimal' : timing.ai_analysis <= 90000 ? 'good' : 'degraded'
+            parallelStatus: timing.ai_analysis <= slaThreshold ? 'optimal' : timing.ai_analysis <= slaThreshold * 1.3 ? 'good' : 'degraded'
           };
 
-          // Log parallel execution results with verification
-          // If truly parallel, totalDurationMs should be close to the max of the two, not the sum
-          // Calculate parallel efficiency: ratio of actual time to expected sequential time
-          const expectedSequentialMs = 60000 + 14000; // ~74s if run sequentially
-          const parallelSavingsMs = expectedSequentialMs - timing.ai_analysis;
           const parallelStatus = (timing as any).ai_breakdown.parallelStatus;
 
-          logger.info('Parallel AI Analysis complete', {
-            totalDurationMs: timing.ai_analysis,
-            leadQualSuccess: !!leadQualResult,
-            leadTier: leadQualResult?.data?.analysis?.leadTier || 'N/A',
-            profileScore: profileAssessResultWithDuration.data.overall_score,
-            profileModel: profileAssessResultWithDuration.data.model_used,
-            parallelExecution: {
+          if (shouldRunLeadQualification) {
+            // Deep analysis: Log parallel execution metrics
+            const expectedSequentialMs = 60000 + 14000; // ~74s if run sequentially
+            const parallelSavingsMs = expectedSequentialMs - timing.ai_analysis;
+
+            logger.info('Deep AI Analysis complete (parallel)', {
+              totalDurationMs: timing.ai_analysis,
+              leadQualSuccess: !!leadQualResult,
+              leadTier: leadQualResult?.data?.analysis?.leadTier || 'N/A',
+              profileScore: profileAssessResultWithDuration.data.overall_score,
+              profileModel: profileAssessResultWithDuration.data.model_used,
+              parallelExecution: {
+                status: parallelStatus,
+                totalMs: timing.ai_analysis,
+                leadQualificationMs: leadQualDurationMs,
+                profileAssessmentMs: profileAssessDurationMs,
+                expectedSequentialMs,
+                savedMs: parallelSavingsMs > 0 ? parallelSavingsMs : 0,
+                note: parallelStatus === 'optimal'
+                  ? '✓ Perfect parallelization - total time equals slowest component'
+                  : parallelStatus === 'good'
+                    ? '✓ Good parallelization - minor overhead detected'
+                    : '⚠ Degraded parallelization - investigate bottleneck'
+              }
+            });
+          } else {
+            // Light analysis: Simple logging (no parallel execution)
+            logger.info('Light AI Analysis complete', {
+              totalDurationMs: timing.ai_analysis,
+              profileScore: profileAssessResultWithDuration.data.overall_score,
+              profileModel: profileAssessResultWithDuration.data.model_used,
               status: parallelStatus,
-              totalMs: timing.ai_analysis,
-              leadQualificationMs: leadQualDurationMs,
-              profileAssessmentMs: profileAssessDurationMs,
-              expectedSequentialMs,
-              savedMs: parallelSavingsMs > 0 ? parallelSavingsMs : 0,
-              note: parallelStatus === 'optimal'
-                ? '✓ Perfect parallelization - total time equals slowest component'
-                : parallelStatus === 'good'
-                  ? '✓ Good parallelization - minor overhead detected'
-                  : '⚠ Degraded parallelization - investigate bottleneck'
-            }
-          });
+              note: 'Light analysis - Profile Assessment AI only'
+            });
+          }
 
           return {
             phase2Response: leadQualResult?.data ?? null,
