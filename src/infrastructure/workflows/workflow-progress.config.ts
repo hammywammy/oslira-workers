@@ -3,25 +3,28 @@
 /**
  * WORKFLOW PROGRESS CONFIGURATION
  *
- * Configuration for workflow step progress percentages ONLY.
+ * Configuration for workflow step progress percentages.
  * Percentages are time-weighted based on actual step execution times.
  *
+ * MODULAR: Uses centralized analysis-types.config for all type-specific settings.
+ *
  * NOTE: Pricing/costs/limits are in centralized config:
+ * - Analysis types: @/config/analysis-types.config → getAnalysisConfig()
  * - Credit costs: @/config/operations-pricing.config → getCreditCost()
  * - Posts limits: @/config/operations-pricing.config → getPostsLimit()
  * - Scraping costs: @/config/operations-pricing.config → getScrapingCost()
  */
 
-import { ANALYSIS_CONFIG, type AnalysisType } from '@/config/operations-pricing.config';
+import {
+  ANALYSIS_TYPES,
+  getStepProgressCacheAware,
+  type AnalysisType,
+  type ProgressStep
+} from '@/config/analysis-types.config';
 
-// Re-export AnalysisType for convenience
-export type { AnalysisType };
-
-export interface StepProgress {
-  step: string;
-  percentage: number;
-  description: string;
-}
+// Re-export types for convenience
+export type { AnalysisType, ProgressStep };
+export type StepProgress = ProgressStep;
 
 interface TimingProfile {
   setup: number;
@@ -82,17 +85,18 @@ function calculateProgressPercentages(timing: TimingProfile): StepProgress[] {
  */
 export const WORKFLOW_PROGRESS: Record<AnalysisType, Map<string, StepProgress>> = {
   light: new Map(
-    calculateProgressPercentages(ANALYSIS_CONFIG.light.timing)
+    calculateProgressPercentages(ANALYSIS_TYPES.light.timing)
       .map(step => [step.step, step])
   ),
   deep: new Map(
-    calculateProgressPercentages(ANALYSIS_CONFIG.deep.timing)
+    calculateProgressPercentages(ANALYSIS_TYPES.deep.timing)
       .map(step => [step.step, step])
   )
 };
 
 /**
  * Get progress info for a specific step and analysis type
+ * @deprecated Use getStepProgressCacheAware for cache-aware calculations
  */
 export function getStepProgress(
   analysisType: AnalysisType,
@@ -106,6 +110,18 @@ export function getStepProgress(
   }
 
   return step;
+}
+
+/**
+ * Get progress info for a specific step (cache-aware)
+ * When cache hits, scraping time = 0, so percentages shift to reflect actual timing
+ */
+export function getStepProgressWithCache(
+  analysisType: AnalysisType,
+  stepName: string,
+  cacheHit: boolean
+): StepProgress {
+  return getStepProgressCacheAware(analysisType, stepName, cacheHit);
 }
 
 // NOTE: Cost/duration functions moved to centralized config

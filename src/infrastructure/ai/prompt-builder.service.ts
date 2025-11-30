@@ -4,9 +4,10 @@ import type { BusinessProfile } from '@/infrastructure/database/repositories/bus
 import type { AIProfileData, AIPostData } from '@/shared/types/profile.types';
 import {
   type AnalysisType,
-  getPromptConfig,
-  getPostsLimit
-} from '@/config/operations-pricing.config';
+  ANALYSIS_TYPES,
+  getAnalysisPromptConfig,
+  getAnalysisPostsLimit
+} from '@/config/analysis-types.config';
 
 /**
  * PROMPT BUILDER SERVICE
@@ -17,8 +18,12 @@ import {
  *
  * MODULAR DESIGN:
  * - buildAnalysisPrompt() routes to correct prompt based on analysis type
- * - Each analysis type has configurable summary length and caption truncation
- * - Deep analysis = 2x summary sentences vs light
+ * - Light analysis: Simplified prompt for quick score + brief summary
+ * - Deep analysis: Comprehensive prompt for detailed analysis
+ *
+ * Key Differences:
+ * - LIGHT: Score + 2-3 sentence summary, NO detailed recommendations
+ * - DEEP: Score + 4-6 sentence detailed analysis with specific observations
  *
  * Cache savings: 90% on business context (30-40% total cost reduction)
  *
@@ -174,45 +179,59 @@ ${caption}
   // ===============================================================================
 
   /**
-   * LIGHT ANALYSIS PROMPT (STRIPPED DOWN)
-   * Model: gpt-5-nano (fast, cheap, 6s avg)
-   * Focus: Quick fit assessment - overall_score + summary only
+   * LIGHT ANALYSIS PROMPT (MINIMAL)
+   * Model: gpt-5-nano (fast, cheap, ~15s avg)
+   *
+   * Focus: Quick fit assessment ONLY
+   * Output: overall_score (0-100) + summary_text (2-3 sentences)
+   *
+   * NO detailed recommendations, strengths, weaknesses, or lead qualification.
+   * This is purely a quick screening to determine if deeper analysis is warranted.
    */
   buildLightAnalysisPrompt(business: BusinessProfile, profile: AIProfileData): {
     system: string;
     user: string;
   } {
-    const config = getPromptConfig('light');
-    const postsLimit = getPostsLimit('light');
+    const config = getAnalysisPromptConfig('light');
+    const postsLimit = getAnalysisPostsLimit('light');
 
     const businessContext = this.buildBusinessContext(business);
-    const recentPosts = this.buildRecentPosts(profile, postsLimit, config.caption_truncate_length);
+    const recentPosts = this.buildRecentPosts(profile, postsLimit, config.captionTruncateLength);
 
     return {
-      system: `You are an expert Instagram prospecting analyst. Assess if an Instagram profile is a good fit for a business's partnership outreach.
+      system: `You are an Instagram partnership analyst. Quickly assess if a profile is worth pursuing for business outreach.
 
-Respond in JSON format with these exact fields:
+Your task is simple: Score the profile (0-100) and provide a brief ${config.summarySentences} sentence explanation.
+
+Respond in JSON format:
 {
   "overall_score": 0-100,
-  "summary_text": "${config.summary_sentences} sentences explaining the score"
+  "summary_text": "Brief ${config.summarySentences} sentence explanation"
 }`,
       user: `${businessContext}
 
-# PROFILE TO ANALYZE
+# INSTAGRAM PROFILE
 **Username:** @${profile.username}
-**Follower Count:** ${profile.follower_count.toLocaleString()}
+**Followers:** ${profile.follower_count.toLocaleString()}
+**Following:** ${profile.following_count.toLocaleString()}
+**Posts:** ${profile.post_count.toLocaleString()}
 **Bio:** ${profile.bio || 'No bio'}
+**External Link:** ${profile.external_url || 'None'}
+**Business Account:** ${profile.is_business_account ? 'Yes' : 'No'}
 
 ${recentPosts}
 
-# YOUR TASK
-Score this profile 0-100 for partnership potential with ${business.business_name}.
-Provide a ${config.summary_sentences} sentence summary explaining the score.
+# SCORING TASK
+Score this profile 0-100 for partnership potential with ${business.business_name || business.full_name}.
 
-Return JSON:
+In your ${config.summarySentences} sentence summary:
+- State if they're a good/moderate/poor fit
+- Mention 1-2 key factors that influenced the score
+
+Return JSON only:
 {
-  "overall_score": 0-100,
-  "summary_text": "${config.summary_sentences} sentences"
+  "overall_score": <number 0-100>,
+  "summary_text": "<${config.summarySentences} sentences>"
 }`
     };
   }
@@ -222,25 +241,29 @@ Return JSON:
   // ===============================================================================
 
   /**
-   * DEEP ANALYSIS PROMPT (EXTENDED)
-   * Model: gpt-5-nano (same model, more tokens)
-   * Focus: In-depth fit assessment - 2x longer summary than light
+   * DEEP ANALYSIS PROMPT (COMPREHENSIVE)
+   * Model: gpt-5 (more powerful)
+   * Focus: In-depth fit assessment with detailed reasoning
    *
    * Key differences from light:
    * - 4-6 sentence summary (vs 2-3)
    * - 400 char caption truncation (vs 200)
-   * - More detailed reasoning in summary
+   * - Includes full profile summary section
+   * - More detailed reasoning with specific observations
+   *
+   * Phase 2 AI (run separately) adds:
+   * - leadTier, strengths, opportunities, recommendedActions
    */
   buildDeepAnalysisPrompt(business: BusinessProfile, profile: AIProfileData): {
     system: string;
     user: string;
   } {
-    const config = getPromptConfig('deep');
-    const postsLimit = getPostsLimit('deep');
+    const config = getAnalysisPromptConfig('deep');
+    const postsLimit = getAnalysisPostsLimit('deep');
 
     const businessContext = this.buildBusinessContext(business);
     const profileSummary = this.buildProfileSummary(profile);
-    const recentPosts = this.buildRecentPosts(profile, postsLimit, config.caption_truncate_length);
+    const recentPosts = this.buildRecentPosts(profile, postsLimit, config.captionTruncateLength);
 
     return {
       system: `You are an expert Instagram prospecting analyst. Provide an in-depth assessment of whether an Instagram profile is a good fit for a business's partnership outreach.
@@ -254,7 +277,7 @@ Your analysis should be thorough and cover:
 Respond in JSON format with these exact fields:
 {
   "overall_score": 0-100,
-  "summary_text": "${config.summary_sentences} sentences with detailed analysis"
+  "summary_text": "${config.summarySentences} sentences with detailed analysis"
 }`,
       user: `${businessContext}
 
@@ -263,10 +286,10 @@ ${profileSummary}
 ${recentPosts}
 
 # YOUR TASK
-Provide an in-depth analysis of this profile's partnership potential with ${business.business_name}.
+Provide an in-depth analysis of this profile's partnership potential with ${business.business_name || business.full_name}.
 
-Your summary should:
-- Explain the score with specific reasoning (${config.summary_sentences} sentences)
+Your ${config.summarySentences} sentence summary should:
+- Explain the score with specific reasoning
 - Reference specific content or engagement patterns you observed
 - Highlight any red flags or especially strong alignment signals
 - Be actionable for the business deciding whether to reach out
@@ -274,7 +297,7 @@ Your summary should:
 Return JSON:
 {
   "overall_score": 0-100,
-  "summary_text": "${config.summary_sentences} sentences with detailed analysis"
+  "summary_text": "${config.summarySentences} sentences with detailed analysis"
 }`
     };
   }

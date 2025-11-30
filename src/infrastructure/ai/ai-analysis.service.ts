@@ -8,21 +8,27 @@ import { AIGatewayClient } from './ai-gateway.client';
 import { getSecret } from '@/infrastructure/config/secrets';
 import {
   type AnalysisType,
-  getAIModel,
-  getAIMaxTokens
-} from '@/config/operations-pricing.config';
+  getAnalysisConfig,
+  ANALYSIS_TYPES
+} from '@/config/analysis-types.config';
 
 /**
  * AI ANALYSIS SERVICE
  *
  * MODULAR DESIGN:
  * - executeAnalysis() routes to correct execution based on analysis type
- * - Each type uses configuration from operations-pricing.config
- * - Deep analysis = same model, more tokens for longer output
+ * - Each type uses configuration from analysis-types.config
+ * - Light analysis = quick score + brief summary (NO detailed recommendations)
+ * - Deep analysis = comprehensive analysis with detailed insights
  *
  * Analysis Types:
- * - LIGHT: Quick fit assessment (6s avg, 2-3 sentence summary)
- * - DEEP: In-depth assessment (12s avg, 4-6 sentence summary)
+ * - LIGHT: Quick fit assessment (~15s avg, score + 2-3 sentence summary)
+ *   - Returns: overall_score, summary_text
+ *   - NO: leadTier, strengths, weaknesses, recommendations
+ *
+ * - DEEP: In-depth assessment (~45s avg, 4-6 sentence summary)
+ *   - Returns: overall_score, summary_text (detailed)
+ *   - Phase 2 AI adds: leadTier, strengths, opportunities, recommendedActions
  *
  * Features:
  * - Prompt caching on business context (30-40% cost savings)
@@ -36,9 +42,10 @@ import {
 // ===============================================================================
 
 /**
- * Unified analysis result type - works for all analysis types
+ * Light analysis result - MINIMAL output
+ * Only score and brief summary, no detailed recommendations
  */
-export interface AnalysisResult {
+export interface LightAnalysisResult {
   overall_score: number;
   summary_text: string;
 
@@ -49,8 +56,26 @@ export interface AnalysisResult {
   output_tokens: number;
 }
 
-// Backward compatibility alias
-export type LightAnalysisResult = AnalysisResult;
+/**
+ * Deep analysis result - COMPREHENSIVE output
+ * Score, detailed summary (Phase 2 AI adds leadTier, strengths, etc.)
+ */
+export interface DeepAnalysisResult {
+  overall_score: number;
+  summary_text: string;
+
+  // Metadata
+  model_used: string;
+  total_cost: number;
+  input_tokens: number;
+  output_tokens: number;
+}
+
+/**
+ * Unified analysis result type - works for all analysis types
+ * Use discriminated union for type safety
+ */
+export type AnalysisResult = LightAnalysisResult | DeepAnalysisResult;
 
 // ===============================================================================
 // SERVICE
@@ -103,34 +128,46 @@ export class AIAnalysisService {
   // LIGHT ANALYSIS
   // ===============================================================================
 
+  /**
+   * LIGHT ANALYSIS
+   * Quick fit assessment with minimal output:
+   * - overall_score (0-100)
+   * - summary_text (2-3 sentences)
+   *
+   * NO detailed recommendations, strengths, or lead qualification.
+   * Uses gpt-5-nano for speed and cost efficiency.
+   */
   async executeLightAnalysis(
     business: BusinessProfile,
     profile: AIProfileData,
     attempt: number = 1
   ): Promise<LightAnalysisResult> {
+    const config = ANALYSIS_TYPES.light;
     const prompts = this.promptBuilder.buildLightAnalysisPrompt(business, profile);
 
     // =========================================================================
     // PROFILE ASSESSMENT AI (Light) - INPUT LOGGING
     // =========================================================================
-    console.log('[ProfileAssessmentAI] Starting analysis', {
+    console.log('[ProfileAssessmentAI] Starting light analysis', {
       analysisType: 'light',
       username: profile.username,
       businessName: business.business_name,
       followerCount: profile.follower_count,
-      postsCount: profile.posts.length
+      postsCount: profile.posts.length,
+      model: config.ai.model,
+      maxTokens: config.ai.maxTokens
     });
 
     // Increase tokens on retry
-    const maxTokens = attempt === 1 ? 800 : 1200;
+    const maxTokens = attempt === 1 ? config.ai.maxTokens : config.ai.retryMaxTokens;
 
     try {
       const response = await this.aiClient.call({
-        model: 'gpt-5-nano',
+        model: config.ai.model,
         system_prompt: prompts.system,
         user_prompt: prompts.user,
         max_tokens: maxTokens,
-        reasoning_effort: 'low',
+        reasoning_effort: config.ai.reasoningEffort,
         json_schema: this.getLightAnalysisSchema()
       });
 
@@ -139,8 +176,9 @@ export class AIAnalysisService {
         ? JSON.parse(response.content)
         : response.content;
 
-      const result = {
-        ...parsed,
+      const result: LightAnalysisResult = {
+        overall_score: parsed.overall_score,
+        summary_text: parsed.summary_text,
         model_used: response.model_used,
         total_cost: response.usage.total_cost,
         input_tokens: response.usage.input_tokens,
@@ -148,7 +186,7 @@ export class AIAnalysisService {
       };
 
       // Log AI response
-      console.log('[ProfileAssessmentAI] Analysis complete', {
+      console.log('[ProfileAssessmentAI] Light analysis complete', {
         overall_score: result.overall_score,
         summary_length: result.summary_text.length,
         model_used: result.model_used,
@@ -162,7 +200,7 @@ export class AIAnalysisService {
     } catch (error: any) {
       // Retry on parse error (likely truncation)
       if (error.name === 'SyntaxError' && attempt < 3) {
-        console.warn(`[AIAnalysis] Parse failed on attempt ${attempt}, retrying with more tokens`);
+        console.warn(`[AIAnalysis] Light parse failed on attempt ${attempt}, retrying with more tokens`);
         return this.executeLightAnalysis(business, profile, attempt + 1);
       }
 
@@ -176,39 +214,45 @@ export class AIAnalysisService {
 
   /**
    * DEEP ANALYSIS
-   * Same model as light, but with 2x output tokens for longer summary
-   * Uses deep prompt configuration for extended analysis
+   * Comprehensive fit assessment with detailed output:
+   * - overall_score (0-100)
+   * - summary_text (4-6 sentences with detailed reasoning)
+   *
+   * Phase 2 AI (run separately in workflow) adds:
+   * - leadTier, strengths, opportunities, recommendedActions
+   *
+   * Uses more powerful model and tokens for extended analysis.
    */
   async executeDeepAnalysis(
     business: BusinessProfile,
     profile: AIProfileData,
     attempt: number = 1
-  ): Promise<AnalysisResult> {
+  ): Promise<DeepAnalysisResult> {
+    const config = ANALYSIS_TYPES.deep;
     const prompts = this.promptBuilder.buildDeepAnalysisPrompt(business, profile);
-    const model = getAIModel('deep');
-    const baseMaxTokens = getAIMaxTokens('deep');
 
     // Profile Assessment AI (Deep) - Structured logging
     console.log('[ProfileAssessmentAI] Starting deep analysis', {
+      analysisType: 'deep',
       username: profile.username,
       businessName: business.business_name,
       followerCount: profile.follower_count,
       postsCount: profile.posts.length,
-      model,
-      maxTokens: baseMaxTokens,
+      model: config.ai.model,
+      maxTokens: config.ai.maxTokens,
       promptLength: prompts.user.length
     });
 
     // Increase tokens on retry
-    const maxTokens = attempt === 1 ? baseMaxTokens : baseMaxTokens * 1.5;
+    const maxTokens = attempt === 1 ? config.ai.maxTokens : config.ai.retryMaxTokens;
 
     try {
       const response = await this.aiClient.call({
-        model,
+        model: config.ai.model,
         system_prompt: prompts.system,
         user_prompt: prompts.user,
         max_tokens: maxTokens,
-        reasoning_effort: 'low',
+        reasoning_effort: config.ai.reasoningEffort,
         json_schema: this.getDeepAnalysisSchema()
       });
 
@@ -217,8 +261,9 @@ export class AIAnalysisService {
         ? JSON.parse(response.content)
         : response.content;
 
-      const result = {
-        ...parsed,
+      const result: DeepAnalysisResult = {
+        overall_score: parsed.overall_score,
+        summary_text: parsed.summary_text,
         model_used: response.model_used,
         total_cost: response.usage.total_cost,
         input_tokens: response.usage.input_tokens,
@@ -226,7 +271,7 @@ export class AIAnalysisService {
       };
 
       // Log AI response
-      console.log('[ProfileAssessmentAI] Analysis complete', {
+      console.log('[ProfileAssessmentAI] Deep analysis complete', {
         overall_score: result.overall_score,
         summary_length: result.summary_text.length,
         model_used: result.model_used,
