@@ -639,64 +639,70 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         throw new Error('Profile data is null - this should have been caught by pre-analysis checks');
       }
 
-      // Step 6c: Phase 2 - Extract actionable data
-      // This runs the profile extraction and transforms to lean, actionable signals
+      // Step 6c: Phase 2 - Extract actionable data (DEEP only)
+      // MODULAR: Skip extraction for Light analysis - Light only needs score + summary
       let extractedData: ExtractedData | null = null;
       let textDataForAI: TextDataForAI | null = null;
       let phase2AIResponse: AIResponsePayload | null = null;
 
-      const phase2Result = await step.do('extract_data', {
-        retries: { limit: 1, delay: '1 second' }
-      }, async (): Promise<{ extractedData: ExtractedData | null; textDataForAI: TextDataForAI | null }> => {
-        try {
-          logger.info('Extracting actionable data (Phase 2)', logContext);
+      const shouldRunExtraction = isFeatureEnabled(params.analysis_type as AnalysisType, 'runProfileExtraction');
 
-          // Convert cache format to Apify format (fixes likeCount → likesCount mismatch)
-          const apifyProfile = profileDataToApifyFormat(profile);
+      if (shouldRunExtraction) {
+        const phase2Result = await step.do('extract_data', {
+          retries: { limit: 1, delay: '1 second' }
+        }, async (): Promise<{ extractedData: ExtractedData | null; textDataForAI: TextDataForAI | null }> => {
+          try {
+            logger.info('Extracting actionable data (Phase 2)', logContext);
 
-          // Log sample post data to verify transformation
-          logger.info('Sample post data extracted', {
-            firstPost: apifyProfile.latestPosts[0] ? {
-              hasLikesCount: apifyProfile.latestPosts[0].likesCount !== undefined,
-              hasCommentsCount: apifyProfile.latestPosts[0].commentsCount !== undefined,
-              likesValue: apifyProfile.latestPosts[0].likesCount,
-              commentsValue: apifyProfile.latestPosts[0].commentsCount
-            } : 'No posts'
-          });
+            // Convert cache format to Apify format (fixes likeCount → likesCount mismatch)
+            const apifyProfile = profileDataToApifyFormat(profile);
 
-          // Run profile extraction service
-          const extractor = createProfileExtractionService();
-          const extractionResult: ExtractionOutput = extractor.extract(apifyProfile);
+            // Log sample post data to verify transformation
+            logger.info('Sample post data extracted', {
+              firstPost: apifyProfile.latestPosts[0] ? {
+                hasLikesCount: apifyProfile.latestPosts[0].likesCount !== undefined,
+                hasCommentsCount: apifyProfile.latestPosts[0].commentsCount !== undefined,
+                likesValue: apifyProfile.latestPosts[0].likesCount,
+                commentsValue: apifyProfile.latestPosts[0].commentsCount
+              } : 'No posts'
+            });
 
-          if (!extractionResult.success) {
-            logger.warn('Phase 2 extraction failed', { ...logContext, error: extractionResult.error });
+            // Run profile extraction service
+            const extractor = createProfileExtractionService();
+            const extractionResult: ExtractionOutput = extractor.extract(apifyProfile);
+
+            if (!extractionResult.success) {
+              logger.warn('Phase 2 extraction failed', { ...logContext, error: extractionResult.error });
+              return { extractedData: null, textDataForAI: null };
+            }
+
+            // Transform to ExtractedData format (lean, actionable signals only)
+            const data = transformToExtractedData(extractionResult.data);
+
+            logger.info('Phase 2 extraction complete', {
+              sampleSize: data.metadata.sampleSize,
+              hasHashtags: data.static.topHashtags.length > 0,
+              hasMentions: data.static.topMentions.length > 0,
+              fakeFollowerWarning: data.calculated.fakeFollowerWarning
+            });
+
+            return {
+              extractedData: data,
+              textDataForAI: extractionResult.data.textDataForAI
+            };
+
+          } catch (error: any) {
+            logger.error('Phase 2 extraction error (non-fatal)', { ...logContext, error: this.serializeError(error) });
+            // Return null on error
             return { extractedData: null, textDataForAI: null };
           }
+        });
 
-          // Transform to ExtractedData format (lean, actionable signals only)
-          const data = transformToExtractedData(extractionResult.data);
-
-          logger.info('Phase 2 extraction complete', {
-            sampleSize: data.metadata.sampleSize,
-            hasHashtags: data.static.topHashtags.length > 0,
-            hasMentions: data.static.topMentions.length > 0,
-            fakeFollowerWarning: data.calculated.fakeFollowerWarning
-          });
-
-          return {
-            extractedData: data,
-            textDataForAI: extractionResult.data.textDataForAI
-          };
-
-        } catch (error: any) {
-          logger.error('Phase 2 extraction error (non-fatal)', { ...logContext, error: this.serializeError(error) });
-          // Return null on error
-          return { extractedData: null, textDataForAI: null };
-        }
-      });
-
-      extractedData = phase2Result.extractedData;
-      textDataForAI = phase2Result.textDataForAI;
+        extractedData = phase2Result.extractedData;
+        textDataForAI = phase2Result.textDataForAI;
+      } else {
+        logger.info('Skipping profile extraction for light analysis', logContext);
+      }
 
       // Step 6d: Detect niche using AI (DEEP only)
       // MODULAR: Skip niche detection for Light analysis
