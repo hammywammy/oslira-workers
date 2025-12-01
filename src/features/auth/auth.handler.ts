@@ -46,6 +46,7 @@ import { TokenService } from '@/infrastructure/auth/token.service';
 import { GoogleOAuthService } from '@/infrastructure/auth/google-oauth.service';
 import { getAuthContext } from '@/shared/middleware/auth.middleware';
 import { successResponse, errorResponse } from '@/shared/utils/response.util';
+import { logger } from '@/shared/utils/logger.util';
 
 /**
  * Convert Google User ID (string number) to deterministic UUID v5
@@ -495,8 +496,9 @@ if (newAccessToken) {
  * Handles missing subscription/balances gracefully.
  */
 export async function handleBootstrap(c: Context<{ Bindings: Env }>) {
+  const auth = getAuthContext(c);
+
   try {
-    const auth = getAuthContext(c);
     const supabase = await SupabaseClientFactory.createAdminClient(c.env);
 
     // Single JOIN query to fetch all initialization data including balances
@@ -537,7 +539,7 @@ export async function handleBootstrap(c: Context<{ Bindings: Env }>) {
       .single();
 
     if (error || !data) {
-      console.error('[Bootstrap] User not found:', auth.userId, error);
+      logger.error('Bootstrap user not found', { userId: auth.userId, error: error?.message });
       return errorResponse(c, 'Bootstrap failed', 'NOT_FOUND', 404);
     }
 
