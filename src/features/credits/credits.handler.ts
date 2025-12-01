@@ -12,6 +12,7 @@ import { validateQuery, validateBody } from '@/shared/utils/validation.util';
 import { successResponse, errorResponse, paginatedResponse, createdResponse } from '@/shared/utils/response.util';
 import { getAuthContext } from '@/shared/middleware/auth.middleware';
 import { createUserClient, createAdminClient } from '@/infrastructure/database/supabase.client';
+import { logger } from '@/shared/utils/logger.util';
 
 /**
  * GET /api/credits/balance
@@ -30,7 +31,10 @@ export async function getCreditBalance(c: Context<{ Bindings: Env }>) {
     return successResponse(c, balance);
 
   } catch (error: any) {
-    console.error('[GetCreditBalance] Error:', error);
+    logger.error('Failed to get credit balance', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    });
     return errorResponse(c, 'Failed to get credit balance', 'INTERNAL_ERROR', 500);
   }
 }
@@ -64,7 +68,10 @@ export async function getTransactions(c: Context<{ Bindings: Env }>) {
     });
 
   } catch (error: any) {
-    console.error('[GetTransactions] Error:', error);
+    logger.error('Failed to get transactions', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    });
 
     if (error.name === 'ZodError') {
       return errorResponse(c, 'Invalid query parameters', 'VALIDATION_ERROR', 400, error.errors);
@@ -116,13 +123,16 @@ export async function purchaseCredits(c: Context<{ Bindings: Env }>) {
     });
 
   } catch (error: any) {
-    console.error('[PurchaseCredits] Error:', error);
+    logger.error('Failed to purchase credits', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    });
 
     if (error.name === 'ZodError') {
       return errorResponse(c, 'Invalid request body', 'VALIDATION_ERROR', 400, error.errors);
     }
 
-    if (error.message.includes('payment_method')) {
+    if (error.message?.includes('payment_method')) {
       return errorResponse(c, 'Invalid payment method', 'INVALID_PAYMENT_METHOD', 400);
     }
 
@@ -158,7 +168,10 @@ export async function getCreditPricing(c: Context<{ Bindings: Env }>) {
     });
 
   } catch (error: any) {
-    console.error('[GetCreditPricing] Error:', error);
+    logger.error('Failed to calculate pricing', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    });
     return errorResponse(c, 'Failed to calculate pricing', 'INTERNAL_ERROR', 500);
   }
 }
