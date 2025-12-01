@@ -1,14 +1,21 @@
 import { logger } from '@/shared/utils/logger.util';
+import {
+  type AnalysisType,
+  ANALYSIS_TYPES,
+  getAnalysisCreditCost,
+  getAnalysisScrapingCost
+} from './analysis-types.config';
+
+// Re-export AnalysisType for backward compatibility
+export type { AnalysisType };
 
 /**
  * CENTRALIZED OPERATIONS PRICING & COST CONFIGURATION
  *
- * Single source of truth for ALL cost-related configuration.
- * This file controls pricing for operations_ledger tracking.
+ * This file handles AI model pricing and operations ledger tracking.
+ * Analysis-specific configuration (credits, scraping, timing) is delegated
+ * to analysis-types.config.ts (single source of truth).
  */
-
-/** Analysis types - add new tiers here */
-export type AnalysisType = 'light' | 'deep';
 
 /**
  * Credit types - maps to database columns:
@@ -90,44 +97,9 @@ export interface ScraperConfig {
   retry_delay_ms: number;
 }
 
-/**
- * Configuration for each analysis type.
- * Add new types here when implementing additional analysis tiers.
- */
-export const ANALYSIS_CONFIG: Record<AnalysisType, AnalysisTypeConfig> = {
-  light: {
-    credit_cost: 1,
-    posts_limit: 12,
-    ai_model: 'gpt-5-nano',
-    ai_max_tokens: 800,
-    timing: {
-      setup: 1,
-      scraping: 7.5,
-      ai_analysis: 9,
-      teardown: 1
-    },
-    prompt: {
-      summary_sentences: '2-3',
-      caption_truncate_length: 200
-    }
-  },
-  deep: {
-    credit_cost: 1,
-    posts_limit: 12,
-    ai_model: 'gpt-5',
-    ai_max_tokens: 2000,
-    timing: {
-      setup: 1,
-      scraping: 7.5,
-      ai_analysis: 15,
-      teardown: 1
-    },
-    prompt: {
-      summary_sentences: '4-6',
-      caption_truncate_length: 400
-    }
-  }
-};
+// NOTE: Analysis-specific configuration (credit_cost, posts_limit, timing, prompt)
+// is now managed in analysis-types.config.ts (single source of truth).
+// Use ANALYSIS_TYPES from that file for analysis configuration.
 
 /** AI model pricing - update when providers change pricing */
 export const AI_MODEL_PRICING: Record<string, AIModelPricing> = {
@@ -163,17 +135,8 @@ export const AI_MODEL_PRICING: Record<string, AIModelPricing> = {
   }
 };
 
-/** Scraping costs - fixed per-run pricing */
-export const SCRAPING_PRICING: Record<AnalysisType, ScrapingPricing> = {
-  light: {
-    fixed_cost_per_run: 0.003,
-    vendor: 'apify'
-  },
-  deep: {
-    fixed_cost_per_run: 0.003,
-    vendor: 'apify'
-  }
-};
+// NOTE: Scraping costs are now managed in analysis-types.config.ts
+// Use getAnalysisScrapingCost() for scraping costs.
 
 /** Credit pricing for revenue/margin calculations */
 export const CREDIT_REVENUE = {
@@ -207,29 +170,44 @@ export function calculateAICost(
   return parseFloat((inputCost + outputCost).toFixed(6));
 }
 
-/** Get scraping cost for an analysis type */
+/**
+ * Get scraping cost for an analysis type
+ * Delegates to analysis-types.config.ts (single source of truth)
+ */
 export function getScrapingCost(analysisType: AnalysisType): number {
-  return SCRAPING_PRICING[analysisType].fixed_cost_per_run;
+  return getAnalysisScrapingCost(analysisType);
 }
 
-/** Get credit cost for an analysis type */
+/**
+ * Get credit cost for an analysis type
+ * Delegates to analysis-types.config.ts (single source of truth)
+ */
 export function getCreditCost(analysisType: AnalysisType): number {
-  return ANALYSIS_CONFIG[analysisType].credit_cost;
+  return getAnalysisCreditCost(analysisType);
 }
 
-/** Get posts limit for an analysis type */
+/**
+ * Get posts limit for an analysis type
+ * Delegates to analysis-types.config.ts (single source of truth)
+ */
 export function getPostsLimit(analysisType: AnalysisType): number {
-  return ANALYSIS_CONFIG[analysisType].posts_limit;
+  return ANALYSIS_TYPES[analysisType].data.postsLimit;
 }
 
-/** Get AI model for an analysis type */
+/**
+ * Get AI model for an analysis type
+ * Delegates to analysis-types.config.ts (single source of truth)
+ */
 export function getAIModel(analysisType: AnalysisType): string {
-  return ANALYSIS_CONFIG[analysisType].ai_model;
+  return ANALYSIS_TYPES[analysisType].ai.model;
 }
 
-/** Get AI max tokens for an analysis type */
+/**
+ * Get AI max tokens for an analysis type
+ * Delegates to analysis-types.config.ts (single source of truth)
+ */
 export function getAIMaxTokens(analysisType: AnalysisType): number {
-  return ANALYSIS_CONFIG[analysisType].ai_max_tokens;
+  return ANALYSIS_TYPES[analysisType].ai.maxTokens;
 }
 
 /** Get AI model pricing */
@@ -245,17 +223,27 @@ export function getCreditType(analysisType: AnalysisType): CreditType {
   return ANALYSIS_TO_CREDIT_TYPE[analysisType];
 }
 
-/** Get prompt configuration for an analysis type */
+/**
+ * Get prompt configuration for an analysis type
+ * Delegates to analysis-types.config.ts (single source of truth)
+ */
 export function getPromptConfig(analysisType: AnalysisType): {
   summary_sentences: string;
   caption_truncate_length: number;
 } {
-  return ANALYSIS_CONFIG[analysisType].prompt;
+  const config = ANALYSIS_TYPES[analysisType];
+  return {
+    summary_sentences: config.prompt.summarySentences,
+    caption_truncate_length: config.prompt.captionTruncateLength
+  };
 }
 
-/** Get estimated total duration for an analysis type (in seconds) */
+/**
+ * Get estimated total duration for an analysis type (in seconds)
+ * Delegates to analysis-types.config.ts (single source of truth)
+ */
 export function getEstimatedDuration(analysisType: AnalysisType): number {
-  const timing = ANALYSIS_CONFIG[analysisType].timing;
+  const timing = ANALYSIS_TYPES[analysisType].timing;
   return timing.setup + timing.scraping + timing.ai_analysis + timing.teardown;
 }
 

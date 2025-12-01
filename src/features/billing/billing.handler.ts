@@ -7,6 +7,7 @@ import { validateBody } from '@/shared/utils/validation.util';
 import { successResponse, errorResponse } from '@/shared/utils/response.util';
 import { SupabaseClientFactory } from '@/infrastructure/database/supabase.client';
 import { getSecret } from '@/infrastructure/config/secrets';
+import { SECRET_KEYS } from '@/config/secrets.constants';
 import { getStripePriceId, getTierOrder, getStripeConfig, type TierName } from '@/config/stripe.config';
 import { z } from 'zod';
 import Stripe from 'stripe';
@@ -154,7 +155,7 @@ export async function createUpgradeCheckout(c: Context<{ Bindings: Env }>) {
     }
 
     // Initialize Stripe
-    const stripeKey = await getSecret('STRIPE_SECRET_KEY', c.env, c.env.APP_ENV);
+    const stripeKey = await getSecret(SECRET_KEYS.STRIPE_SECRET_KEY, c.env, c.env.APP_ENV);
     const stripe = new Stripe(stripeKey, { apiVersion: '2024-12-18.acacia' });
 
     // Get environment-specific Stripe configuration
@@ -231,8 +232,8 @@ export async function handleStripeWebhook(c: Context<{ Bindings: Env }>) {
 
   try {
     // Fetch secrets
-    const stripeKey = await getSecret('STRIPE_SECRET_KEY', c.env, c.env.APP_ENV);
-    const webhookSecret = await getSecret('STRIPE_WEBHOOK_SECRET', c.env, c.env.APP_ENV);
+    const stripeKey = await getSecret(SECRET_KEYS.STRIPE_SECRET_KEY, c.env, c.env.APP_ENV);
+    const webhookSecret = await getSecret(SECRET_KEYS.STRIPE_WEBHOOK_SECRET, c.env, c.env.APP_ENV);
 
     const stripe = new Stripe(stripeKey, {
       apiVersion: '2024-12-18.acacia'

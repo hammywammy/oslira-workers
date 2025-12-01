@@ -15,6 +15,8 @@ import { AIAnalysisService } from '@/infrastructure/ai/ai-analysis.service';
 import { getSecret } from '@/infrastructure/config/secrets';
 import { toAIProfile, type AIProfileData } from '@/shared/types/profile.types';
 import { getStepProgress } from './workflow-progress.config';
+import { WORKFLOW_STEPS, CRITICAL_PROGRESS_STEPS } from '@/config/workflow-steps.constants';
+import { SECRET_KEYS } from '@/config/secrets.constants';
 import {
   getCreditCost,
   getPostsLimit,
@@ -54,22 +56,8 @@ import {
  * CRITICAL: No step retries - fail fast on errors
  */
 
-/**
- * CRITICAL_PROGRESS_STEPS: Only these steps send progress updates to the DO
- * OPTIMIZATION: Reduces 11 HTTP calls → 4 HTTP calls (saves 700-1400ms)
- *
- * Rationale: Users only need to see progress on major, visible steps
- * - scrape_profile: First major wait (45%)
- * - ai_analysis: Longest step (95%)
- * - upsert_lead: Almost done (97%)
- * - complete_progress: Done (100%)
- */
-const CRITICAL_PROGRESS_STEPS = new Set([
-  'scrape_profile',
-  'ai_analysis',
-  'upsert_lead',
-  'complete_progress'
-]);
+// CRITICAL_PROGRESS_STEPS is imported from @/config/workflow-steps.constants
+// Only these steps send progress updates to reduce HTTP overhead
 
 /**
  * Convert ProfileData (cache format) to ApifyFullProfile (extraction format)
@@ -186,14 +174,14 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       });
 
       // Step 1b: Fetch secrets early (for Phase 2 AI analysis)
-      const secrets = await step.do('fetch_secrets', async () => {
+      const secrets = await step.do(WORKFLOW_STEPS.FETCH_SECRETS, async () => {
         try {
           logger.info('Fetching API secrets', logContext);
 
           const [openaiKey, claudeKey, aiGatewayToken] = await Promise.all([
-            getSecret('OPENAI_API_KEY', this.env, this.env.APP_ENV),
-            getSecret('ANTHROPIC_API_KEY', this.env, this.env.APP_ENV),
-            getSecret('CLOUDFLARE_AI_GATEWAY_TOKEN', this.env, this.env.APP_ENV)
+            getSecret(SECRET_KEYS.OPENAI_API_KEY, this.env, this.env.APP_ENV),
+            getSecret(SECRET_KEYS.ANTHROPIC_API_KEY, this.env, this.env.APP_ENV),
+            getSecret(SECRET_KEYS.CLOUDFLARE_AI_GATEWAY_TOKEN, this.env, this.env.APP_ENV)
           ]);
 
           logger.info('Secrets fetched successfully', logContext);
@@ -209,7 +197,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
       // Step 2: Check duplicate analysis (no retries - fail fast)
       // OPTIMIZED: Uses single JOIN query instead of two sequential queries (saves 2-3s)
-      await step.do('check_duplicate', async () => {
+      await step.do(WORKFLOW_STEPS.CHECK_DUPLICATE, async () => {
         try {
           logger.info('Checking for duplicate analysis', logContext);
 
@@ -244,7 +232,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       // Steps 3-4: Parallel setup (deduct balance + load business profile)
       // OPTIMIZED: Run in parallel since they don't depend on each other (saves ~500ms)
       // NOTE: Progress update skipped - non-critical step (see CRITICAL_PROGRESS_STEPS)
-      const business = await step.do('setup_parallel', async () => {
+      const business = await step.do(WORKFLOW_STEPS.SETUP_PARALLEL, async () => {
         try {
           logger.info('Running setup in parallel', logContext);
 
@@ -315,7 +303,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
       // Step 5: Check R2 cache
       // NOTE: Progress update skipped - non-critical step (see CRITICAL_PROGRESS_STEPS)
-      let profile = await step.do('check_cache', {
+      let profile = await step.do(WORKFLOW_STEPS.CHECK_CACHE, {
         retries: { limit: 2, delay: '500 milliseconds' }
       }, async () => {
         try {
@@ -346,12 +334,12 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       // Step 6: Scrape profile if cache miss
       // Uses scrapeProfileWithMeta to capture error info for pre-analysis checks
       if (!profile) {
-        const scrapeResult = await step.do('scrape_profile', {
+        const scrapeResult = await step.do(WORKFLOW_STEPS.SCRAPE_PROFILE, {
           retries: { limit: 1, delay: '2 seconds' }
         }, async (): Promise<ScrapeResult> => {
           try {
             logger.info('Scraping Instagram profile', logContext);
-            const stepInfo = getStepProgress(params.analysis_type, 'scrape_profile');
+            const stepInfo = getStepProgress(params.analysis_type, WORKFLOW_STEPS.SCRAPE_PROFILE);
             await this.broadcastProgress(
               params.run_id,
               stepInfo.percentage,
@@ -361,7 +349,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
             );
 
             const scrapeStart = Date.now();
-            const apifyToken = await getSecret('APIFY_API_TOKEN', this.env, this.env.APP_ENV);
+            const apifyToken = await getSecret(SECRET_KEYS.APIFY_API_TOKEN, this.env, this.env.APP_ENV);
             const apifyAdapter = new ApifyAdapter(apifyToken);
 
             const postsLimit = getPostsLimit(params.analysis_type);
@@ -421,7 +409,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
       // Step 6b: Run pre-analysis checks (private profile, not found, etc.)
       // This step determines if we should bypass AI analysis
-      const preChecksResult = await step.do('pre_analysis_checks', async (): Promise<PreAnalysisChecksSummary> => {
+      const preChecksResult = await step.do(WORKFLOW_STEPS.PRE_ANALYSIS_CHECKS, async (): Promise<PreAnalysisChecksSummary> => {
         try {
           logger.info('Running pre-analysis checks', logContext);
 
@@ -477,7 +465,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         // Step 6c: Refund if needed (the check said we should)
         // MODULAR: Refunds to correct credit type based on analysis type
         if (failedCheck.shouldRefund) {
-          await step.do('refund_for_bypass', {
+          await step.do(WORKFLOW_STEPS.REFUND_FOR_BYPASS, {
             retries: { limit: 3, delay: '1 second', backoff: 'exponential' }
           }, async () => {
             try {
@@ -511,7 +499,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         // Step 6d: Create minimal lead record if we have any profile data
         let bypassLeadId: string | null = null;
         if (profile) {
-          bypassLeadId = await step.do('upsert_bypass_lead', {
+          bypassLeadId = await step.do(WORKFLOW_STEPS.UPSERT_BYPASS_LEAD, {
             retries: { limit: 3, delay: '1 second' }
           }, async () => {
             try {
@@ -552,7 +540,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         }
 
         // Step 6e: Save bypassed analysis result
-        const bypassAnalysisId = await step.do('save_bypass_analysis', {
+        const bypassAnalysisId = await step.do(WORKFLOW_STEPS.SAVE_BYPASS_ANALYSIS, {
           retries: { limit: 3, delay: '1 second' }
         }, async () => {
           try {
@@ -591,7 +579,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
         });
 
         // Step 6f: Mark complete in progress tracker
-        await step.do('complete_bypass_progress', {
+        await step.do(WORKFLOW_STEPS.COMPLETE_BYPASS_PROGRESS, {
           retries: { limit: 2, delay: '500 milliseconds' }
         }, async () => {
           try {
@@ -648,7 +636,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       const shouldRunExtraction = isFeatureEnabled(params.analysis_type as AnalysisType, 'runProfileExtraction');
 
       if (shouldRunExtraction) {
-        const phase2Result = await step.do('extract_data', {
+        const phase2Result = await step.do(WORKFLOW_STEPS.EXTRACT_DATA, {
           retries: { limit: 1, delay: '1 second' }
         }, async (): Promise<{ extractedData: ExtractedData | null; textDataForAI: TextDataForAI | null }> => {
           try {
@@ -710,7 +698,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       const shouldRunNicheDetection = isFeatureEnabled(params.analysis_type as AnalysisType, 'runNicheDetection');
 
       if (shouldRunNicheDetection) {
-        const nicheResult = await step.do('detect_niche', {
+        const nicheResult = await step.do(WORKFLOW_STEPS.DETECT_NICHE, {
           retries: { limit: 1, delay: '1 second' }
         }, async (): Promise<string | null> => {
           try {
@@ -782,7 +770,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       // - Total time: max(60, 14) = ~60s instead of 60+14 = ~74s sequential
       const shouldRunLeadQualification = isFeatureEnabled(params.analysis_type as AnalysisType, 'runLeadQualificationAI');
 
-      const parallelAIResult = await step.do('parallel_ai_analysis', {
+      const parallelAIResult = await step.do(WORKFLOW_STEPS.PARALLEL_AI_ANALYSIS, {
         retries: { limit: 1, delay: '2 seconds' }
       }, async (): Promise<{
         phase2Response: AIResponsePayload | null;
@@ -799,7 +787,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
           const analysisMode = shouldRunLeadQualification ? 'deep (parallel)' : 'light (profile only)';
           logger.info(`Starting AI analysis [${analysisMode}]`, logContext);
 
-          const stepInfo = getStepProgress(params.analysis_type as AnalysisType, 'ai_analysis');
+          const stepInfo = getStepProgress(params.analysis_type as AnalysisType, WORKFLOW_STEPS.PARALLEL_AI_ANALYSIS);
           await this.broadcastProgress(
             params.run_id,
             stepInfo.percentage,
@@ -1000,12 +988,12 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
       // Step 8: Upsert lead (avatar caching moved off critical path)
       // OPTIMIZED: Avatar caching is now fire-and-forget (saves 1-2s)
-      const leadId = await step.do('upsert_lead', {
+      const leadId = await step.do(WORKFLOW_STEPS.UPSERT_LEAD, {
         retries: { limit: 3, delay: '1 second' }
       }, async () => {
         try {
           logger.info('Upserting lead data', logContext);
-          const stepInfo = getStepProgress(params.analysis_type, 'upsert_lead');
+          const stepInfo = getStepProgress(params.analysis_type, WORKFLOW_STEPS.UPSERT_LEAD);
           await this.broadcastProgress(
             params.run_id,
             stepInfo.percentage,
@@ -1089,7 +1077,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
       // Step 9: Save analysis
       // NOTE: Progress update skipped - non-critical step (see CRITICAL_PROGRESS_STEPS)
-      const analysisId = await step.do('save_analysis', {
+      const analysisId = await step.do(WORKFLOW_STEPS.SAVE_ANALYSIS, {
         retries: { limit: 3, delay: '1 second' }
       }, async () => {
         try {
@@ -1177,7 +1165,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       });
 
       // Step 10: Mark complete
-      await step.do('complete_progress', {
+      await step.do(WORKFLOW_STEPS.COMPLETE_PROGRESS, {
         retries: { limit: 2, delay: '500 milliseconds' }
       }, async () => {
         try {
@@ -1199,7 +1187,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
       });
 
       // Step 11: Log to operations ledger (using centralized pricing config)
-      await step.do('log_operations', {
+      await step.do(WORKFLOW_STEPS.LOG_OPERATIONS, {
         retries: { limit: 2, delay: '500 milliseconds' }
       }, async () => {
         try {
@@ -1403,7 +1391,7 @@ export class AnalysisWorkflow extends WorkflowEntrypoint<Env, AnalysisWorkflowPa
 
       // Refund analyses balance on failure (with retry limit)
       // MODULAR: Refunds to correct credit type based on analysis type
-      await step.do('refund_balance', {
+      await step.do(WORKFLOW_STEPS.REFUND_BALANCE, {
         retries: { limit: 3, delay: '1 second', backoff: 'exponential' }
       }, async () => {
         try {

@@ -1,6 +1,7 @@
 import Stripe from 'stripe';
 import type { Env } from '@/shared/types/env.types';
 import { getSecret } from '@/infrastructure/config/secrets';
+import { SECRET_KEYS } from '@/config/secrets.constants';
 import { SupabaseClientFactory } from '@/infrastructure/database/supabase.client';
 import { logger } from '@/shared/utils/logger.util';
 
@@ -46,7 +47,7 @@ export class StripeService {
       return this.stripe;
     }
 
-    const stripeKey = await getSecret('STRIPE_SECRET_KEY', this.env, this.env.APP_ENV);
+    const stripeKey = await getSecret(SECRET_KEYS.STRIPE_SECRET_KEY, this.env, this.env.APP_ENV);
 
     this.stripe = new Stripe(stripeKey, {
       apiVersion: '2024-12-18.acacia',

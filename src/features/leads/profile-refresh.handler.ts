@@ -8,6 +8,7 @@ import { successResponse, errorResponse } from '@/shared/utils/response.util';
 import { CacheStrategyService } from '@/infrastructure/cache/cache-strategy.service';
 import { ApifyAdapter } from '@/infrastructure/scraping/apify.adapter';
 import { getSecret } from '@/infrastructure/config/secrets';
+import { SECRET_KEYS } from '@/config/secrets.constants';
 import { z } from 'zod';
 import { logger } from '@/shared/utils/logger.util';
 
@@ -66,7 +67,7 @@ export async function checkProfileRefresh(c: Context<{ Bindings: Env }>) {
     }
 
     // Scrape fresh data (lightweight, just basic profile)
-    const apifyKey = await getSecret('APIFY_API_TOKEN', c.env, c.env.APP_ENV);
+    const apifyKey = await getSecret(SECRET_KEYS.APIFY_API_TOKEN, c.env, c.env.APP_ENV);
     const apify = new ApifyAdapter(apifyKey);
 
     const scrapeResult = await apify.scrapeProfileWithMeta(lead.username, { postsLimit: 0 });

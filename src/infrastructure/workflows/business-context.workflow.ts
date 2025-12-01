@@ -9,6 +9,8 @@ import { OnboardingService } from '@/features/onboarding/onboarding.service';
 import { StripeService } from '@/infrastructure/billing/stripe.service';
 import { getSecret } from '@/infrastructure/config/secrets';
 import { logger } from '@/shared/utils/logger.util';
+import { WORKFLOW_STEPS } from '@/config/workflow-steps.constants';
+import { SECRET_KEYS } from '@/config/secrets.constants';
 
 export class BusinessContextWorkflow extends WorkflowEntrypoint<Env, BusinessContextWorkflowParams> {
   
@@ -29,11 +31,11 @@ export class BusinessContextWorkflow extends WorkflowEntrypoint<Env, BusinessCon
       // =========================================================================
       // STEP 1: Fetch Secrets (no progress update - quick operation)
       // =========================================================================
-      const secrets = await step.do('fetch_secrets', async () => {
+      const secrets = await step.do(WORKFLOW_STEPS.FETCH_SECRETS, async () => {
         const [openaiKey, claudeKey, aiGatewayToken] = await Promise.all([
-          getSecret('OPENAI_API_KEY', this.env, this.env.APP_ENV),
-          getSecret('ANTHROPIC_API_KEY', this.env, this.env.APP_ENV),
-          getSecret('CLOUDFLARE_AI_GATEWAY_TOKEN', this.env, this.env.APP_ENV)
+          getSecret(SECRET_KEYS.OPENAI_API_KEY, this.env, this.env.APP_ENV),
+          getSecret(SECRET_KEYS.ANTHROPIC_API_KEY, this.env, this.env.APP_ENV),
+          getSecret(SECRET_KEYS.CLOUDFLARE_AI_GATEWAY_TOKEN, this.env, this.env.APP_ENV)
         ]);
 
         return { openaiKey, claudeKey, aiGatewayToken };
@@ -43,7 +45,7 @@ export class BusinessContextWorkflow extends WorkflowEntrypoint<Env, BusinessCon
       // STEP 2: AI Generation (UPDATE 1: 10%, UPDATE 2: 70%)
       // =========================================================================
       let contextResult: any;
-      await step.do('generate_ai_content', async () => {
+      await step.do(WORKFLOW_STEPS.GENERATE_AI_CONTENT, async () => {
         // UPDATE 1: Start AI generation
         await this.updateProgress(progressDO, 10, 'Generating AI content...');
 
@@ -58,7 +60,7 @@ export class BusinessContextWorkflow extends WorkflowEntrypoint<Env, BusinessCon
       // =========================================================================
       // STEP 3: Save to Database (no progress update - 70% already set)
       // =========================================================================
-      const businessProfileId = await step.do('save_to_database', async () => {
+      const businessProfileId = await step.do(WORKFLOW_STEPS.SAVE_TO_DATABASE, async () => {
         logger.info('Saving business profile to database', logContext);
         const saveStartTime = Date.now();
 
@@ -116,7 +118,7 @@ export class BusinessContextWorkflow extends WorkflowEntrypoint<Env, BusinessCon
 // =========================================================================
 // STEP 4: Mark Business Profile as Onboarded (no progress update)
 // =========================================================================
-await step.do('mark_business_onboarded', async () => {
+await step.do(WORKFLOW_STEPS.MARK_BUSINESS_ONBOARDED, async () => {
   logger.info('Marking business profile as onboarded', logContext);
 
   const supabase = await SupabaseClientFactory.createAdminClient(this.env);
@@ -146,7 +148,7 @@ await step.do('mark_business_onboarded', async () => {
 // =========================================================================
 // STEP 5: Link Stripe Customer to Subscription (no progress update)
 // =========================================================================
-await step.do('link_stripe_to_subscription', async () => {
+await step.do(WORKFLOW_STEPS.LINK_STRIPE_TO_SUBSCRIPTION, async () => {
   logger.info('Linking Stripe customer to subscription', logContext);
 
   try {
@@ -211,7 +213,7 @@ await step.do('link_stripe_to_subscription', async () => {
 // =========================================================================
 // STEP 6: Mark Complete (UPDATE 3: 100% via /complete endpoint)
 // =========================================================================
-await step.do('mark_complete', async () => {
+await step.do(WORKFLOW_STEPS.MARK_COMPLETE, async () => {
   logger.info('Calling complete endpoint', logContext);
 
   const completeResponse = await progressDO.fetch('http://do/complete', {

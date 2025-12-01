@@ -3,6 +3,7 @@
 import type { Env } from '@/shared/types/env.types';
 import type { GoogleOAuthCredentials, GoogleTokenResponse, GoogleUserInfo } from '@/features/auth/auth.types';
 import { getSecret } from '@/infrastructure/config/secrets';
+import { SECRET_KEYS } from '@/config/secrets.constants';
 
 /**
  * GOOGLE OAUTH SERVICE
@@ -34,7 +35,7 @@ export class GoogleOAuthService {
     }
 
     // Fetch from AWS
-    const secretString = await getSecret('GOOGLE_OAUTH', this.env, this.env.APP_ENV);
+    const secretString = await getSecret(SECRET_KEYS.GOOGLE_OAUTH, this.env, this.env.APP_ENV);
     
     // Parse JSON (should have clientId and clientSecret)
     let credentials: GoogleOAuthCredentials;

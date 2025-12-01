@@ -2,6 +2,7 @@
 
 import type { Env } from '@/shared/types/env.types';
 import { getSecret } from '@/infrastructure/config/secrets';
+import { SECRET_KEYS } from '@/config/secrets.constants';
 
 /**
  * SENTRY ERROR TRACKING SERVICE
@@ -58,7 +59,7 @@ export class SentryService {
    */
   async initialize(): Promise<void> {
     try {
-      this.dsn = await getSecret('SENTRY_DSN', this.env, this.env.APP_ENV);
+      this.dsn = await getSecret(SECRET_KEYS.SENTRY_DSN, this.env, this.env.APP_ENV);
       console.log('[Sentry] Initialized for', this.environment);
     } catch (error) {
       console.warn('[Sentry] DSN not configured, error tracking disabled');

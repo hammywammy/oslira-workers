@@ -6,6 +6,7 @@ import { SupabaseClientFactory } from '@/infrastructure/database/supabase.client
 import { CreditsRepository } from '@/infrastructure/database/repositories/credits.repository';
 import Stripe from 'stripe';
 import { getSecret } from '@/infrastructure/config/secrets';
+import { SECRET_KEYS } from '@/config/secrets.constants';
 import { logger } from '@/shared/utils/logger.util';
 
 /**
@@ -153,7 +154,7 @@ async function handleCheckoutCompleted(data: StripeWebhookMessage, env: Env): Pr
     }
 
     // Fetch full subscription details from Stripe API
-    const stripeKey = await getSecret('STRIPE_SECRET_KEY', env, env.APP_ENV);
+    const stripeKey = await getSecret(SECRET_KEYS.STRIPE_SECRET_KEY, env, env.APP_ENV);
     const stripe = new Stripe(stripeKey, { apiVersion: '2024-12-18.acacia' });
 
     const stripeSubscription = await stripe.subscriptions.retrieve(stripeSubscriptionId);

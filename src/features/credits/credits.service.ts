@@ -1,15 +1,16 @@
 // features/credits/credits.service.ts
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { 
-  CreditBalance, 
-  CreditTransaction, 
+import type {
+  CreditBalance,
+  CreditTransaction,
   ListTransactionsQuery,
   PurchaseCreditsInput,
   PurchaseResult
 } from './credits.types';
 import { calculateCreditPrice } from './credits.types';
 import { getSecret } from '@/infrastructure/config/secrets';
+import { SECRET_KEYS } from '@/config/secrets.constants';
 import type { Env } from '@/shared/types/env.types';
 import Stripe from 'stripe';
 
@@ -96,7 +97,7 @@ export class CreditsService {
     const pricing = calculateCreditPrice(input.amount);
 
     // Initialize Stripe
-    const stripeKey = await getSecret('STRIPE_SECRET_KEY', this.env, this.env.APP_ENV);
+    const stripeKey = await getSecret(SECRET_KEYS.STRIPE_SECRET_KEY, this.env, this.env.APP_ENV);
     const stripe = new Stripe(stripeKey, {
       apiVersion: '2024-12-18.acacia'
     });

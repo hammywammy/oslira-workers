@@ -3,6 +3,7 @@
 import type { Env } from '@/shared/types/env.types';
 import type { JWTPayload } from '@/features/auth/auth.types';
 import { getSecret } from '@/infrastructure/config/secrets';
+import { SECRET_KEYS } from '@/config/secrets.constants';
 
 /**
  * JWT SERVICE
@@ -36,7 +37,7 @@ export class JWTService {
     }
 
     // Fetch from AWS
-    const secret = await getSecret('JWT_SECRET', this.env, this.env.APP_ENV);
+    const secret = await getSecret(SECRET_KEYS.JWT_SECRET, this.env, this.env.APP_ENV);
     
     // Cache it
     this.secretCache = {

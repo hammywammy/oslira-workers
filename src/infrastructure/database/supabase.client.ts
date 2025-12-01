@@ -1,5 +1,6 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { getSecret } from '@/infrastructure/config/secrets';
+import { SECRET_KEYS } from '@/config/secrets.constants';
 import type { Env } from '@/shared/types/env.types';
 
 // Client cache (per Worker instance)
@@ -19,9 +20,9 @@ export async function createUserClient(env: Env): Promise<SupabaseClient> {
   if (userClientCache) {
     return userClientCache;
   }
-  
-  const supabaseUrl = await getSecret('SUPABASE_URL', env, env.APP_ENV);
-  const anonKey = await getSecret('SUPABASE_ANON_KEY', env, env.APP_ENV);
+
+  const supabaseUrl = await getSecret(SECRET_KEYS.SUPABASE_URL, env, env.APP_ENV);
+  const anonKey = await getSecret(SECRET_KEYS.SUPABASE_ANON_KEY, env, env.APP_ENV);
   
   userClientCache = createClient(supabaseUrl, anonKey, {
     auth: {
@@ -48,9 +49,9 @@ export async function createAdminClient(env: Env): Promise<SupabaseClient> {
   if (adminClientCache) {
     return adminClientCache;
   }
-  
-  const supabaseUrl = await getSecret('SUPABASE_URL', env, env.APP_ENV);
-  const serviceRoleKey = await getSecret('SUPABASE_SERVICE_ROLE_KEY', env, env.APP_ENV);
+
+  const supabaseUrl = await getSecret(SECRET_KEYS.SUPABASE_URL, env, env.APP_ENV);
+  const serviceRoleKey = await getSecret(SECRET_KEYS.SUPABASE_SERVICE_ROLE_KEY, env, env.APP_ENV);
   
   adminClientCache = createClient(supabaseUrl, serviceRoleKey, {
     auth: {

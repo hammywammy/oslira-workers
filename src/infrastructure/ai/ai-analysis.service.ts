@@ -6,6 +6,7 @@ import type { AIProfileData } from '@/shared/types/profile.types';
 import { PromptBuilder } from './prompt-builder.service';
 import { AIGatewayClient } from './ai-gateway.client';
 import { getSecret } from '@/infrastructure/config/secrets';
+import { SECRET_KEYS } from '@/config/secrets.constants';
 import {
   type AnalysisType,
   getAnalysisConfig,
@@ -94,9 +95,9 @@ export class AIAnalysisService {
    * Factory method to create service with secrets
    */
   static async create(env: Env): Promise<AIAnalysisService> {
-    const openaiKey = await getSecret('OPENAI_API_KEY', env, env.APP_ENV);
-    const claudeKey = await getSecret('ANTHROPIC_API_KEY', env, env.APP_ENV);
-    const aiGatewayToken = await getSecret('CLOUDFLARE_AI_GATEWAY_TOKEN', env, env.APP_ENV);
+    const openaiKey = await getSecret(SECRET_KEYS.OPENAI_API_KEY, env, env.APP_ENV);
+    const claudeKey = await getSecret(SECRET_KEYS.ANTHROPIC_API_KEY, env, env.APP_ENV);
+    const aiGatewayToken = await getSecret(SECRET_KEYS.CLOUDFLARE_AI_GATEWAY_TOKEN, env, env.APP_ENV);
 
     return new AIAnalysisService(env, openaiKey, claudeKey, aiGatewayToken);
   }
