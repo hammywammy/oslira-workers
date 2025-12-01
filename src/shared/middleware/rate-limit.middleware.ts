@@ -1,33 +1,27 @@
-// src/shared/middleware/rate-limit.middleware.ts
 import type { Context, Next } from 'hono';
 import type { Env } from '@/shared/types/env.types';
+import { logger } from '@/shared/utils/logger.util';
 
-/**
- * Re-export rate limit types and configs from centralized config
- */
 export type { RateLimitConfig } from '@/config/rate-limits.config';
 
-/**
- * Rate limiting using Cloudflare KV
- */
+import type { RateLimitConfig } from '@/config/rate-limits.config';
+
+/** Rate limiting middleware using Cloudflare KV */
 export function rateLimitMiddleware(config: RateLimitConfig) {
-  return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    // Skip rate limiting in staging
+  return async (c: Context<{ Bindings: Env }>, next: Next): Promise<Response | void> => {
     if (c.env.APP_ENV === 'staging') {
-      console.log('[RateLimit] Skipped (staging environment)');
       return await next();
     }
 
-    // Get identifier (user ID or IP address)
     const auth = c.get('auth') as { userId?: string } | undefined;
     const ip = c.req.header('cf-connecting-ip');
     const identifier = auth?.userId || ip || 'anonymous';
-    
+
     const key = `ratelimit:${identifier}`;
     const now = Date.now();
     const windowMs = config.windowSeconds * 1000;
     const expirationTtl = Math.max(1, Math.ceil(config.windowSeconds));
-    
+
     try {
       const stored = await c.env.OSLIRA_KV.get(key, 'json') as {
         count: number;
@@ -39,14 +33,13 @@ export function rateLimitMiddleware(config: RateLimitConfig) {
       let shouldWrite = false;
 
       if (stored && stored.resetAt > now) {
-        // Within window - increment in-memory only (no write)
         count = stored.count + 1;
         resetAt = stored.resetAt;
 
         if (count > config.requests) {
           const retryAfter = Math.ceil((resetAt - now) / 1000);
 
-          console.warn(`[RateLimit] BLOCKED`, {
+          logger.warn('Rate limit exceeded', {
             identifier: identifier.substring(0, 8),
             path: c.req.path,
             count,
@@ -66,13 +59,11 @@ export function rateLimitMiddleware(config: RateLimitConfig) {
           });
         }
       } else {
-        // New window - write once
         count = 1;
         resetAt = now + windowMs;
         shouldWrite = true;
       }
 
-      // Only write to KV for new windows
       if (shouldWrite) {
         try {
           await c.env.OSLIRA_KV.put(
@@ -80,16 +71,14 @@ export function rateLimitMiddleware(config: RateLimitConfig) {
             JSON.stringify({ count, resetAt }),
             { expirationTtl }
           );
-          console.log(`[RateLimit] New window started for ${identifier.substring(0, 8)}`);
-        } catch (kvError: any) {
-          console.error(`[RateLimit] KV PUT failed (non-fatal):`, {
+        } catch (kvError: unknown) {
+          logger.warn('Rate limit KV PUT failed', {
             identifier: identifier.substring(0, 8),
-            error: kvError.message
+            error: kvError instanceof Error ? kvError.message : String(kvError)
           });
         }
       }
 
-      // Add rate limit headers
       const remaining = Math.max(0, config.requests - count);
       c.header('X-RateLimit-Limit', config.requests.toString());
       c.header('X-RateLimit-Remaining', remaining.toString());
@@ -97,20 +86,15 @@ export function rateLimitMiddleware(config: RateLimitConfig) {
 
       await next();
 
-    } catch (error: any) {
-      console.error(`[RateLimit] ERROR:`, {
+    } catch (error: unknown) {
+      logger.error('Rate limit middleware error', {
         identifier: identifier.substring(0, 8),
-        error: error.message
+        error: error instanceof Error ? error.message : String(error)
       });
 
-      // Fail open
       await next();
     }
   };
 }
 
-/**
- * Re-export rate limit configurations from centralized config
- * for backward compatibility
- */
 export { RATE_LIMITS } from '@/config/rate-limits.config';
