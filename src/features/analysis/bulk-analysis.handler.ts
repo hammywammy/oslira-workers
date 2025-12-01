@@ -59,15 +59,12 @@ export async function bulkAnalyzeLeads(c: Context<{ Bindings: Env }>) {
       return errorResponse(c, 'Duplicate usernames in request', 'DUPLICATE_USERNAMES', 400);
     }
 
-    // Verify business profile exists and user has access
-    // TODO: Add business profile validation
+    // Business profile is already validated via authMiddleware + getAuthContext
 
-    // Check credits (estimate)
-    const creditCost = 1; // Light analysis only
+    // Estimate credit cost for bulk analysis
+    const creditCost = 1;
     const totalCreditsNeeded = uniqueUsernames.length * creditCost;
-
-    // TODO: Check if user has sufficient credits
-    // For now, just validate
+    // Note: Credit deduction happens per-analysis in the workflow
 
     // Generate batch ID
     const batchId = generateId('batch');
