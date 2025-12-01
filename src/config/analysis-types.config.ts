@@ -146,7 +146,7 @@ export const ANALYSIS_TYPES: Record<AnalysisType, AnalysisTypeConfig> = {
     features: {
       runLeadQualificationAI: false,   // Skip Phase 2 comprehensive AI
       runNicheDetection: false,        // Skip niche detection
-      runProfileExtraction: true,      // Still extract basic metrics
+      runProfileExtraction: false,     // Skip extraction - Light only needs score + summary
       includeDetailedSummary: false    // Only score + brief summary
     },
     pricing: {
