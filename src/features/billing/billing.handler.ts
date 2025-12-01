@@ -29,10 +29,10 @@ const UpgradeSchema = z.object({
  * Get current subscription for authenticated user
  */
 export async function getSubscription(c: Context<{ Bindings: Env }>) {
-  try {
-    const auth = getAuthContext(c);
-    const accountId = auth.accountId;
+  const auth = getAuthContext(c);
+  const accountId = auth.accountId;
 
+  try {
     const supabase = await SupabaseClientFactory.createAdminClient(c.env);
 
     // Get subscription with balance
@@ -79,7 +79,7 @@ export async function getSubscription(c: Context<{ Bindings: Env }>) {
     logger.error('Failed to get subscription', {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
-      accountId: auth.accountId
+      accountId
     });
     return errorResponse(c, 'Failed to get subscription', 'INTERNAL_ERROR', 500);
   }
@@ -90,10 +90,10 @@ export async function getSubscription(c: Context<{ Bindings: Env }>) {
  * Create Stripe Checkout session for subscription upgrade
  */
 export async function createUpgradeCheckout(c: Context<{ Bindings: Env }>) {
-  try {
-    const auth = getAuthContext(c);
-    const accountId = auth.accountId;
+  const auth = getAuthContext(c);
+  const accountId = auth.accountId;
 
+  try {
     // Validate request
     const body = await c.req.json();
     const { newTier } = validateBody(UpgradeSchema, body);
@@ -102,7 +102,6 @@ export async function createUpgradeCheckout(c: Context<{ Bindings: Env }>) {
 
     // Determine environment-specific customer ID column
     const isProduction = c.env.APP_ENV === 'production';
-    const customerIdColumn = isProduction ? 'stripe_customer_id_live' : 'stripe_customer_id_test';
 
     // Get current subscription
     const { data: subscription, error: subError } = await supabase
@@ -207,7 +206,7 @@ export async function createUpgradeCheckout(c: Context<{ Bindings: Env }>) {
     logger.error('Failed to create upgrade checkout session', {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
-      accountId: auth.accountId
+      accountId
     });
 
     if (error instanceof Error && error.name === 'ZodError') {
