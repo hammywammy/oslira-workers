@@ -20,14 +20,11 @@ import {
  * - POST /api/leads/analyze/bulk/:batchId/cancel → Cancel batch
  */
 
-export function registerBulkAnalysisRoutes(app: Hono<{ Bindings: Env }>) {
-  
-  console.log('[Routes] Registering bulk analysis routes');
-  
+export function registerBulkAnalysisRoutes(app: Hono<{ Bindings: Env }>): void {
   // All bulk analysis routes require authentication
   app.use('/api/leads/analyze/bulk', authMiddleware);
   app.use('/api/leads/analyze/bulk/*', authMiddleware);
-  
+
   // Stricter rate limiting for bulk operations
   app.use('/api/leads/analyze/bulk', rateLimitMiddleware(ANALYSIS_RATE_LIMITS.BULK));
 
@@ -49,6 +46,4 @@ export function registerBulkAnalysisRoutes(app: Hono<{ Bindings: Env }>) {
    * Cancel all in-progress analyses in batch
    */
   app.post('/api/leads/analyze/bulk/:batchId/cancel', cancelBatch);
-  
-  console.log('[Routes] Bulk analysis routes registered successfully');
 }
