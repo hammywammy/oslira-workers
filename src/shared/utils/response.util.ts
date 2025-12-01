@@ -1,13 +1,12 @@
-// src/shared/utils/response.util.ts
 import type { Context } from 'hono';
 
-export interface SuccessResponse<T = any> {
+export interface SuccessResponse<T> {
   success: true;
   data: T;
   meta?: {
     timestamp: string;
     requestId?: string;
-    [key: string]: any;
+    [key: string]: unknown;
   };
 }
 
@@ -15,20 +14,18 @@ export interface ErrorResponse {
   success: false;
   error: string;
   code: string;
-  details?: any;
+  details?: Record<string, unknown>;
   meta?: {
     timestamp: string;
     requestId?: string;
   };
 }
 
-/**
- * Standard success response
- */
+/** Standard success response */
 export function successResponse<T>(
   c: Context,
   data: T,
-  meta?: Record<string, any>
+  meta?: Record<string, unknown>
 ): Response {
   const response: SuccessResponse<T> = {
     success: true,
@@ -38,17 +35,15 @@ export function successResponse<T>(
       ...meta
     }
   };
-  
+
   return c.json(response, 200);
 }
 
-/**
- * Created response (201)
- */
+/** Created response (201) */
 export function createdResponse<T>(
   c: Context,
   data: T,
-  meta?: Record<string, any>
+  meta?: Record<string, unknown>
 ): Response {
   const response: SuccessResponse<T> = {
     success: true,
@@ -58,26 +53,22 @@ export function createdResponse<T>(
       ...meta
     }
   };
-  
+
   return c.json(response, 201);
 }
 
-/**
- * No content response (204)
- */
+/** No content response (204) */
 export function noContentResponse(c: Context): Response {
   return c.body(null, 204);
 }
 
-/**
- * Error response
- */
+/** Error response */
 export function errorResponse(
   c: Context,
   message: string,
   code: string = 'ERROR',
   statusCode: number = 400,
-  details?: any
+  details?: Record<string, unknown>
 ): Response {
   const response: ErrorResponse = {
     success: false,
@@ -88,13 +79,11 @@ export function errorResponse(
       timestamp: new Date().toISOString()
     }
   };
-  
+
   return c.json(response, statusCode);
 }
 
-/**
- * Paginated response
- */
+/** Paginated response */
 export function paginatedResponse<T>(
   c: Context,
   data: T[],

@@ -138,9 +138,6 @@ export class AIGatewayClient {
       body.reasoning_effort = request.reasoning_effort;
     }
 
-    // DEBUG: Uncomment to log full request body during development
-    // console.debug('[AIGateway] Request body:', JSON.stringify(body, null, 2));
-
     try {
       const response = await fetch(`${this.openaiBaseURL}/v1/chat/completions`, {
         method: 'POST',

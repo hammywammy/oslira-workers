@@ -1,5 +1,3 @@
-// config/operations-pricing.config.ts
-
 import { logger } from '@/shared/utils/logger.util';
 
 /**
@@ -7,31 +5,13 @@ import { logger } from '@/shared/utils/logger.util';
  *
  * Single source of truth for ALL cost-related configuration.
  * This file controls pricing for operations_ledger tracking.
- *
- * Last updated: 2025-01-25
- *
- * Sections:
- * 1. Analysis Type Configuration (credits, posts limit, timing)
- * 2. AI Model Pricing (per 1M tokens)
- * 3. Scraping Pricing (fixed per-run costs)
- * 4. Credit Revenue Pricing (for margin calculations)
- * 5. Scraper Configuration (actor IDs, timeouts)
- * 6. Helper Functions
  */
 
-// ===============================================================================
-// TYPES
-// ===============================================================================
-
-/**
- * ANALYSIS TYPES
- * Add new analysis tiers here. Each type maps to a credit type.
- */
+/** Analysis types - add new tiers here */
 export type AnalysisType = 'light' | 'deep';
 
 /**
- * CREDIT TYPES
- * Maps to database columns:
+ * Credit types - maps to database columns:
  * - light_analyses: light_analyses_balance (legacy, for light only)
  * - credits: credit_balance (for deep and all future analysis types)
  */
@@ -110,30 +90,21 @@ export interface ScraperConfig {
   retry_delay_ms: number;
 }
 
-// ===============================================================================
-// 1. ANALYSIS TYPE CONFIGURATION
-// ===============================================================================
-
 /**
  * Configuration for each analysis type.
  * Add new types here when implementing additional analysis tiers.
- *
- * MODULAR DESIGN:
- * - Each type defines its own credit cost, AI model, and prompt config
- * - Deep analysis = 2x summary length vs light
- * - Future types can have completely different configurations
  */
 export const ANALYSIS_CONFIG: Record<AnalysisType, AnalysisTypeConfig> = {
   light: {
     credit_cost: 1,
-    posts_limit: 12,   // Use all 12 posts from Apify for better metric accuracy
+    posts_limit: 12,
     ai_model: 'gpt-5-nano',
     ai_max_tokens: 800,
     timing: {
-      setup: 1,        // Steps 1-5: ~1 second total
-      scraping: 7.5,   // Step 6: ~7.5 seconds average
-      ai_analysis: 9,  // Step 7: ~9 seconds average
-      teardown: 1      // Steps 8-11: ~1 second total
+      setup: 1,
+      scraping: 7.5,
+      ai_analysis: 9,
+      teardown: 1
     },
     prompt: {
       summary_sentences: '2-3',
@@ -141,31 +112,24 @@ export const ANALYSIS_CONFIG: Record<AnalysisType, AnalysisTypeConfig> = {
     }
   },
   deep: {
-    credit_cost: 1,    // Uses deep_analyses credits, same cost per credit
-    posts_limit: 12,   // Use all 12 posts from Apify for better metric accuracy
+    credit_cost: 1,
+    posts_limit: 12,
     ai_model: 'gpt-5',
-    ai_max_tokens: 2000, // More tokens for deeper analysis with GPT-5
+    ai_max_tokens: 2000,
     timing: {
       setup: 1,
       scraping: 7.5,
-      ai_analysis: 15,   // Longer due to GPT-5 and detailed output
+      ai_analysis: 15,
       teardown: 1
     },
     prompt: {
-      summary_sentences: '4-6',    // 2x longer summary (4-6 vs 2-3)
-      caption_truncate_length: 400  // 2x more caption context
+      summary_sentences: '4-6',
+      caption_truncate_length: 400
     }
   }
 };
 
-// ===============================================================================
-// 2. AI MODEL PRICING
-// ===============================================================================
-
-/**
- * AI model pricing - update when providers change pricing.
- * Source: OpenAI/Anthropic pricing pages
- */
+/** AI model pricing - update when providers change pricing */
 export const AI_MODEL_PRICING: Record<string, AIModelPricing> = {
   'gpt-5': {
     per_1m_input: 1.25,
@@ -199,60 +163,33 @@ export const AI_MODEL_PRICING: Record<string, AIModelPricing> = {
   }
 };
 
-// ===============================================================================
-// 3. SCRAPING PRICING
-// ===============================================================================
-
-/**
- * Scraping costs - fixed per-run pricing.
- * Apify costs are untrackable at granular level, so we use fixed estimates.
- */
+/** Scraping costs - fixed per-run pricing */
 export const SCRAPING_PRICING: Record<AnalysisType, ScrapingPricing> = {
   light: {
-    fixed_cost_per_run: 0.003,  // $0.003 per light analysis scrape
+    fixed_cost_per_run: 0.003,
     vendor: 'apify'
   },
   deep: {
-    fixed_cost_per_run: 0.003,  // Same scraping cost (same posts_limit)
+    fixed_cost_per_run: 0.003,
     vendor: 'apify'
   }
 };
 
-// ===============================================================================
-// 4. CREDIT REVENUE PRICING
-// ===============================================================================
-
-/**
- * Credit pricing for revenue/margin calculations.
- * Bulk discounts are handled in Supabase/billing logic.
- */
+/** Credit pricing for revenue/margin calculations */
 export const CREDIT_REVENUE = {
-  /** Base price per credit (USD) */
   per_credit_usd: 0.97
 };
 
-// ===============================================================================
-// 5. SCRAPER CONFIGURATION
-// ===============================================================================
-
-/**
- * Scraper configuration - actor IDs, timeouts, retries.
- */
+/** Scraper configuration - actor IDs, timeouts, retries */
 export const SCRAPER_CONFIG: ScraperConfig = {
   name: 'dS_basic',
   actor_id: 'dSCLg0C3YEZ83HzYX',
-  timeout_ms: 60000,      // 60 seconds
+  timeout_ms: 60000,
   max_retries: 3,
-  retry_delay_ms: 2000    // 2 seconds
+  retry_delay_ms: 2000
 };
 
-// ===============================================================================
-// 6. HELPER FUNCTIONS
-// ===============================================================================
-
-/**
- * Calculate AI cost for a completed call
- */
+/** Calculate AI cost for a completed call */
 export function calculateAICost(
   model: string,
   inputTokens: number,
@@ -270,44 +207,32 @@ export function calculateAICost(
   return parseFloat((inputCost + outputCost).toFixed(6));
 }
 
-/**
- * Get scraping cost for an analysis type
- */
+/** Get scraping cost for an analysis type */
 export function getScrapingCost(analysisType: AnalysisType): number {
   return SCRAPING_PRICING[analysisType].fixed_cost_per_run;
 }
 
-/**
- * Get credit cost for an analysis type
- */
+/** Get credit cost for an analysis type */
 export function getCreditCost(analysisType: AnalysisType): number {
   return ANALYSIS_CONFIG[analysisType].credit_cost;
 }
 
-/**
- * Get posts limit for an analysis type
- */
+/** Get posts limit for an analysis type */
 export function getPostsLimit(analysisType: AnalysisType): number {
   return ANALYSIS_CONFIG[analysisType].posts_limit;
 }
 
-/**
- * Get AI model for an analysis type
- */
+/** Get AI model for an analysis type */
 export function getAIModel(analysisType: AnalysisType): string {
   return ANALYSIS_CONFIG[analysisType].ai_model;
 }
 
-/**
- * Get AI max tokens for an analysis type
- */
+/** Get AI max tokens for an analysis type */
 export function getAIMaxTokens(analysisType: AnalysisType): number {
   return ANALYSIS_CONFIG[analysisType].ai_max_tokens;
 }
 
-/**
- * Get AI model pricing
- */
+/** Get AI model pricing */
 export function getAIModelPricing(model: string): AIModelPricing | null {
   return AI_MODEL_PRICING[model] || null;
 }
@@ -320,9 +245,7 @@ export function getCreditType(analysisType: AnalysisType): CreditType {
   return ANALYSIS_TO_CREDIT_TYPE[analysisType];
 }
 
-/**
- * Get prompt configuration for an analysis type
- */
+/** Get prompt configuration for an analysis type */
 export function getPromptConfig(analysisType: AnalysisType): {
   summary_sentences: string;
   caption_truncate_length: number;
@@ -330,17 +253,13 @@ export function getPromptConfig(analysisType: AnalysisType): {
   return ANALYSIS_CONFIG[analysisType].prompt;
 }
 
-/**
- * Get estimated total duration for an analysis type (in seconds)
- */
+/** Get estimated total duration for an analysis type (in seconds) */
 export function getEstimatedDuration(analysisType: AnalysisType): number {
   const timing = ANALYSIS_CONFIG[analysisType].timing;
   return timing.setup + timing.scraping + timing.ai_analysis + timing.teardown;
 }
 
-/**
- * Calculate profit margin for an analysis
- */
+/** Calculate profit margin for an analysis */
 export function calculateMargin(
   analysisType: AnalysisType,
   totalCostUsd: number

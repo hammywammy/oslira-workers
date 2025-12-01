@@ -1,5 +1,3 @@
-// src/config/stripe.config.ts
-
 /**
  * STRIPE CONFIGURATION
  * Maps internal tier names to Stripe Price IDs
@@ -7,17 +5,10 @@
  * Separate configs for staging (test mode) and production (live mode)
  */
 
-// =============================================================================
-// TYPES
-// =============================================================================
-
 export type TierName = 'free' | 'growth' | 'pro' | 'agency' | 'enterprise';
 export type AppEnvironment = 'staging' | 'production';
 
-// =============================================================================
-// STRIPE PRICE IDS - STAGING (TEST MODE)
-// =============================================================================
-
+/** Stripe Price IDs for staging (test mode) */
 const STAGING_PRICE_IDS: Record<Exclude<TierName, 'free'>, string> = {
   growth: 'price_1SW21iFZyrcdK01tvTZ0ZbyJ',
   pro: 'price_1SW21tFZyrcdK01tVR91V4nW',
@@ -25,20 +16,13 @@ const STAGING_PRICE_IDS: Record<Exclude<TierName, 'free'>, string> = {
   enterprise: 'price_1SW225FZyrcdK01tL0zd8t3A',
 };
 
-// =============================================================================
-// STRIPE PRICE IDS - PRODUCTION (LIVE MODE)
-// =============================================================================
-
+/** Stripe Price IDs for production (live mode) */
 const PRODUCTION_PRICE_IDS: Record<Exclude<TierName, 'free'>, string> = {
   growth: 'price_1SW4DhJzvcRSqGG3560s1ZZG',
   pro: 'price_1SW4DgJzvcRSqGG3H2TvVGMK',
   agency: 'price_1SW4DeJzvcRSqGG3r6WDNhU6',
   enterprise: 'price_1SW4DbJzvcRSqGG3gcMITfUW',
 };
-
-// =============================================================================
-// ENVIRONMENT-AWARE CONFIGURATION
-// =============================================================================
 
 export interface StripeConfig {
   priceIds: Record<Exclude<TierName, 'free'>, string>;
@@ -62,10 +46,6 @@ export function getStripeConfig(appEnv: AppEnvironment): StripeConfig {
     webhookPath: '/api/webhooks/stripe',
   };
 }
-
-// =============================================================================
-// TIER UTILITIES
-// =============================================================================
 
 /**
  * Get Stripe Price ID for tier

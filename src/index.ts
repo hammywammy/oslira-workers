@@ -1,5 +1,3 @@
-// src/index.ts - Phase 3 Update (Business Context Generation)
-
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { Env } from '@/shared/types/env.types';
@@ -24,13 +22,9 @@ import { getSentryService } from './infrastructure/monitoring/sentry.service';
 import { errorHandler } from './shared/middleware/error.middleware';
 import { logger } from './shared/utils/logger.util';
 
-
 const app = new Hono<{ Bindings: Env }>();
 
-// ===============================================================================
-// MIDDLEWARE
-// ===============================================================================
-
+/** CORS configuration */
 app.use('*', cors({
   origin: (origin) => {
     const allowedOrigins = [
@@ -59,10 +53,7 @@ app.use('*', cors({
   maxAge: 86400,
 }));
 
-// ===============================================================================
-// HEALTH & INFO
-// ===============================================================================
-
+/** Root endpoint - API info */
 app.get('/', (c) => {
   return c.json({
     status: 'healthy',
@@ -71,7 +62,6 @@ app.get('/', (c) => {
     timestamp: new Date().toISOString(),
     environment: c.env.APP_ENV,
     architecture: 'async-workflows',
-    phase: 'Phase 3 Complete - Business Context Generation',
     features: {
       workflows: !!c.env.ANALYSIS_WORKFLOW && !!c.env.BUSINESS_CONTEXT_WORKFLOW,
       durable_objects: !!c.env.GLOBAL_BROADCASTER && !!c.env.BUSINESS_CONTEXT_PROGRESS,
@@ -90,6 +80,7 @@ app.get('/', (c) => {
   });
 });
 
+/** Health check endpoint */
 app.get('/health', async (c) => {
   return c.json({
     status: 'healthy',
@@ -114,36 +105,18 @@ app.get('/health', async (c) => {
   });
 });
 
-// ===============================================================================
-// PRODUCTION API ENDPOINTS
-// ===============================================================================
-
+/** Register API routes */
 registerAuthRoutes(app);
-
-// Phase 3 endpoints (CRUD)
 registerLeadRoutes(app);
 registerBusinessRoutes(app);
 registerCreditsRoutes(app);
-
-// Phase 4 endpoints (Async Analysis)
 registerAnalysisRoutes(app);
-
-// Phase 5 endpoints (Bulk Analysis)
 registerBulkAnalysisRoutes(app);
-
-// Phase 6-7 endpoints (Cache & Refresh)
 registerProfileRefreshRoutes(app);
-
-// Phase 3 endpoints (Onboarding - NEW)
 registerOnboardingRoutes(app);
-
-// Billing endpoints
 registerBillingRoutes(app);
 
-// ===============================================================================
-// ERROR HANDLING
-// ===============================================================================
-
+/** Global error handler */
 app.onError(async (err, c) => {
   logger.error('Worker error', {
     error: err instanceof Error ? err.message : String(err),
@@ -183,27 +156,19 @@ app.notFound((c) => {
   }, 404);
 });
 
-// ===============================================================================
-// EXPORT WORKER
-// ===============================================================================
-
 export default {
-  /**
-   * HTTP Request Handler
-   */
+  /** HTTP Request Handler */
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     return app.fetch(request, env, ctx);
   },
 
-  /**
-   * Cron Trigger Handler
-   */
+  /** Cron Trigger Handler */
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     logger.info('Cron trigger', { cron: event.cron });
 
     try {
       await executeCronJob(event.cron, env);
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error('Cron job execution failed', {
         cron: event.cron,
         error: error instanceof Error ? error.message : String(error),
@@ -226,9 +191,7 @@ export default {
     }
   },
 
-  /**
-   * Queue Consumer Handler
-   */
+  /** Queue Consumer Handler */
   async queue(batch: MessageBatch, env: Env, ctx: ExecutionContext): Promise<void> {
     if (batch.queue === 'stripe-webhooks' || batch.queue === 'stripe-webhooks-staging') {
       await handleStripeWebhookQueue(batch, env);
@@ -238,16 +201,7 @@ export default {
   }
 };
 
-// ===============================================================================
-// EXPORT WORKFLOWS
-// ===============================================================================
-
 export { AnalysisWorkflow };
 export { BusinessContextWorkflow };
-
-// ===============================================================================
-// EXPORT DURABLE OBJECTS
-// ===============================================================================
-
 export { GlobalBroadcasterDO };
 export { BusinessContextProgressDO };

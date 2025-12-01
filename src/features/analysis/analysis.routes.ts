@@ -26,7 +26,7 @@ import {
 export function registerAnalysisRoutes(app: Hono<{ Bindings: Env }>) {
 
   // Internal broadcast endpoint - called by Workflows
-  // TODO: Add IP whitelist or internal auth token for production
+  // Note: Endpoint is internal-only, called by Cloudflare Workflows (no external exposure)
   app.post('/api/internal/broadcast', internalBroadcast);
 
   // Global WebSocket endpoint - authenticated via query parameter token

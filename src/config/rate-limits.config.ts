@@ -1,5 +1,3 @@
-// src/config/rate-limits.config.ts
-
 /**
  * RATE LIMITING CONFIGURATION - SINGLE SOURCE OF TRUTH
  *
@@ -22,10 +20,7 @@ export interface RateLimitConfig {
   windowSeconds: number;
 }
 
-// =============================================================================
-// AUTH RATE LIMITS
-// =============================================================================
-
+/** Auth rate limits */
 export const AUTH_RATE_LIMITS = {
   /**
    * Google OAuth callback
@@ -70,10 +65,7 @@ export const AUTH_RATE_LIMITS = {
   },
 } as const;
 
-// =============================================================================
-// API RATE LIMITS
-// =============================================================================
-
+/** API rate limits */
 export const API_RATE_LIMITS = {
   /**
    * General API endpoints
@@ -113,10 +105,7 @@ export const API_RATE_LIMITS = {
   },
 } as const;
 
-// =============================================================================
-// ANALYSIS RATE LIMITS
-// =============================================================================
-
+/** Analysis rate limits */
 export const ANALYSIS_RATE_LIMITS = {
   /**
    * Single analysis creation
@@ -159,10 +148,7 @@ export const ANALYSIS_RATE_LIMITS = {
   },
 } as const;
 
-// =============================================================================
-// WEBHOOK RATE LIMITS
-// =============================================================================
-
+/** Webhook rate limits */
 export const WEBHOOK_RATE_LIMITS = {
   /**
    * Stripe webhooks
@@ -185,14 +171,9 @@ export const WEBHOOK_RATE_LIMITS = {
   },
 } as const;
 
-// =============================================================================
-// BILLING RATE LIMITS
-// =============================================================================
-
+/** Billing rate limits */
 export const BILLING_RATE_LIMITS = {
-  /**
-   * Subscription read
-   */
+  /** Subscription read */
   READ: {
     requests: 30,
     windowSeconds: 60,
@@ -219,27 +200,16 @@ export const BILLING_RATE_LIMITS = {
   },
 } as const;
 
-// =============================================================================
-// LEGACY EXPORT (for backward compatibility)
-// =============================================================================
-
 /**
  * @deprecated Use specific rate limit configs instead
  * Kept for backward compatibility during migration
  */
 export const RATE_LIMITS = {
-  // Auth
   AUTH: AUTH_RATE_LIMITS.OAUTH_CALLBACK,
   TOKEN_REFRESH: AUTH_RATE_LIMITS.TOKEN_REFRESH,
-
-  // API
   API_GENERAL: API_RATE_LIMITS.GENERAL,
-
-  // Analysis
   ANALYSIS: ANALYSIS_RATE_LIMITS.PROGRESS,
   ANALYSIS_CREATE: ANALYSIS_RATE_LIMITS.CREATE,
   ANONYMOUS_ANALYSIS: ANALYSIS_RATE_LIMITS.ANONYMOUS,
-
-  // Webhooks
   WEBHOOK: WEBHOOK_RATE_LIMITS.GENERIC,
 } as const;

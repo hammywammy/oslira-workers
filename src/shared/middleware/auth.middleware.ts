@@ -1,27 +1,19 @@
-// src/shared/middleware/auth.middleware.ts
-// UPDATED FOR CUSTOM JWT AUTHENTICATION
-
 import type { Context, Next } from 'hono';
 import type { Env } from '@/shared/types/env.types';
 import type { AuthContext } from '@/features/auth/auth.types';
 import { JWTService } from '@/infrastructure/auth/jwt.service';
+import { logger } from '@/shared/utils/logger.util';
 
 /**
- * AUTH MIDDLEWARE
- * 
- * Validates JWT access token and attaches auth context to request
- * 
+ * Auth middleware - validates JWT access token and attaches auth context
+ *
  * Features:
  * - Validates JWT signature + expiry
  * - Enforces onboarding completion (except for auth/onboarding endpoints)
  * - Attaches auth context: { userId, accountId, email, onboardingCompleted }
- * 
- * Usage:
- * app.get('/api/leads', authMiddleware, handler);
  */
-export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) {
+export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next): Promise<Response | void> {
   try {
-    // Extract token from Authorization header
     const authHeader = c.req.header('Authorization');
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -31,9 +23,7 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) 
       }, 401);
     }
 
-    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
-
-    // Verify JWT
+    const token = authHeader.substring(7);
     const jwtService = new JWTService(c.env);
     const payload = await jwtService.verify(token);
 
@@ -44,8 +34,6 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) 
       }, 401);
     }
 
-    // Check onboarding completion
-    // Skip check for auth and onboarding endpoints
     const path = c.req.path;
     const isAuthEndpoint = path.includes('/api/auth/');
     const isOnboardingEndpoint = path.includes('/api/onboarding/');
@@ -59,7 +47,6 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) 
       }, 403);
     }
 
-    // Attach auth context to request
     const authContext: AuthContext = {
       userId: payload.userId,
       accountId: payload.accountId,
@@ -70,30 +57,27 @@ export async function authMiddleware(c: Context<{ Bindings: Env }>, next: Next) 
     c.set('auth', authContext);
     await next();
 
-  } catch (error: any) {
-    console.error('[AuthMiddleware] Error:', error);
+  } catch (error: unknown) {
+    logger.error('Auth middleware error', {
+      error: error instanceof Error ? error.message : String(error),
+      path: c.req.path
+    });
     return c.json({
       error: 'Authentication failed',
-      message: error.message
+      message: error instanceof Error ? error.message : 'Unknown error'
     }, 401);
   }
 }
 
 /**
- * OPTIONAL AUTH MIDDLEWARE
- * 
- * Attempts to authenticate but doesn't fail if token is missing/invalid
+ * Optional auth middleware - attempts to authenticate but doesn't fail if token is missing/invalid
  * Useful for endpoints that work for both authenticated and anonymous users
- * 
- * Usage:
- * app.get('/api/public-data', optionalAuthMiddleware, handler);
  */
-export async function optionalAuthMiddleware(c: Context<{ Bindings: Env }>, next: Next) {
+export async function optionalAuthMiddleware(c: Context<{ Bindings: Env }>, next: Next): Promise<void> {
   try {
     const authHeader = c.req.header('Authorization');
-    
+
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      // No auth provided - continue without auth context
       await next();
       return;
     }
@@ -103,7 +87,6 @@ export async function optionalAuthMiddleware(c: Context<{ Bindings: Env }>, next
     const payload = await jwtService.verify(token);
 
     if (payload) {
-      // Valid token - attach auth context
       const authContext: AuthContext = {
         userId: payload.userId,
         accountId: payload.accountId,
@@ -115,25 +98,18 @@ export async function optionalAuthMiddleware(c: Context<{ Bindings: Env }>, next
 
     await next();
 
-  } catch (error) {
-    // Ignore errors - proceed without auth
+  } catch {
     await next();
   }
 }
 
 /**
- * GET AUTH CONTEXT
- * 
- * Helper to extract auth context from request
- * Throws error if auth context is missing
- * 
- * Usage:
- * const auth = getAuthContext(c);
- * console.log(auth.userId, auth.accountId);
+ * Get auth context from request
+ * @throws Error if auth context is missing
  */
 export function getAuthContext(c: Context<{ Bindings: Env }>): AuthContext {
   const auth = c.get('auth') as AuthContext | undefined;
-  
+
   if (!auth) {
     throw new Error('Auth context not found - ensure authMiddleware is applied');
   }
@@ -141,29 +117,14 @@ export function getAuthContext(c: Context<{ Bindings: Env }>): AuthContext {
   return auth;
 }
 
-/**
- * CHECK ADMIN
- * 
- * Verify if request has valid admin token
- * Used for admin-only endpoints
- * 
- * Usage:
- * if (!isAdmin(c)) return c.json({ error: 'Unauthorized' }, 403);
- */
+/** Check if request has valid admin token */
 export function isAdmin(c: Context<{ Bindings: Env }>): boolean {
   const adminToken = c.req.header('X-Admin-Token');
   return adminToken === c.env.ADMIN_TOKEN;
 }
 
-/**
- * ADMIN MIDDLEWARE
- * 
- * Requires valid admin token in X-Admin-Token header
- * 
- * Usage:
- * app.post('/api/admin/cleanup', adminMiddleware, handler);
- */
-export async function adminMiddleware(c: Context<{ Bindings: Env }>, next: Next) {
+/** Admin middleware - requires valid admin token in X-Admin-Token header */
+export async function adminMiddleware(c: Context<{ Bindings: Env }>, next: Next): Promise<Response | void> {
   if (!isAdmin(c)) {
     return c.json({ error: 'Admin access required' }, 403);
   }

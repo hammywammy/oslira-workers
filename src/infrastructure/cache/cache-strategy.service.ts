@@ -1,14 +1,13 @@
-// infrastructure/cache/cache-strategy.service.ts
-
-import type { R2Bucket } from '@cloudflare/workers-types';
+import type { R2Bucket, R2Object } from '@cloudflare/workers-types';
+import { logger } from '@/shared/utils/logger.util';
 
 /**
- * CACHE STRATEGY SERVICE
+ * Cache Strategy Service
  *
- * Phase 7: Smart Caching with TTL and Invalidation
+ * Smart Caching with TTL and Invalidation
  *
  * Strategy:
- * - LIGHT: 24h TTL (extensible framework - add more TTL tiers as needed)
+ * - LIGHT/DEEP: 24h TTL
  *
  * Invalidation Triggers:
  * - TTL expired (automatic)
@@ -16,8 +15,6 @@ import type { R2Bucket } from '@cloudflare/workers-types';
  * - Bio changed significantly (>30% different)
  * - Profile went private/public
  * - Verification status changed
- *
- * Cache Key Format: `instagram:${username}:v1`
  */
 
 export interface CachedProfile {
@@ -47,7 +44,7 @@ export interface CachedProfile {
 export interface CacheMetadata {
   cached_at: number;
   ttl_seconds: number;
-  analysis_type: 'light' | 'deep';  // Extensible - add more types as needed
+  analysis_type: 'light' | 'deep';
   version: number;
 }
 
@@ -59,52 +56,51 @@ export interface InvalidationReason {
 export class CacheStrategyService {
   private bucket: R2Bucket;
   private readonly CACHE_VERSION = 1;
-  // TTL configuration - add more tiers as needed
   private readonly TTL_CONFIG: Record<'light' | 'deep', number> = {
-    light: 24 * 60 * 60,  // 24 hours
-    deep: 24 * 60 * 60    // 24 hours (same as light for now)
+    light: 24 * 60 * 60,
+    deep: 24 * 60 * 60
   };
 
   constructor(bucket: R2Bucket) {
     this.bucket = bucket;
   }
 
-  /**
-   * Get cached profile with TTL check
-   */
+  /** Get cached profile with TTL check */
   async get(
     username: string,
     analysisType: 'light' | 'deep'
   ): Promise<CachedProfile | null> {
     const key = this.buildCacheKey(username);
-    
+
     try {
       const object = await this.bucket.get(key);
-      
+
       if (!object) {
-        console.log(`[Cache] MISS: ${username}`);
+        logger.debug('Cache miss', { username });
         return null;
       }
 
       const profile = await object.json<CachedProfile>();
       const metadata = this.parseMetadata(object);
 
-      // Check if TTL expired
       const ageSeconds = this.getAge(metadata);
       const ttlSeconds = this.TTL_CONFIG[analysisType];
       const remainingSeconds = ttlSeconds - ageSeconds;
 
       if (this.isTTLExpired(metadata, analysisType)) {
-        console.log(`[Cache] EXPIRED: ${username} (${analysisType}, age: ${this.formatDuration(ageSeconds)})`);
+        logger.info('Cache expired', {
+          username,
+          analysisType,
+          age: this.formatDuration(ageSeconds)
+        });
         await this.delete(username);
         return null;
       }
 
-      // Calculate age in hours for readability
       const ageHours = ageSeconds / 3600;
       const remainingHours = remainingSeconds / 3600;
 
-      console.log(`[Cache] HIT`, {
+      logger.info('Cache hit', {
         username,
         age: `${ageHours.toFixed(1)}h`,
         remaining: `${remainingHours.toFixed(1)}h`,
@@ -112,25 +108,24 @@ export class CacheStrategyService {
         followerCount: profile.follower_count
       });
 
-      // Alert if cache is stale (> 20 hours old)
-      if (ageSeconds > 72000) { // 20 hours
-        console.warn('[Cache] Stale data', {
+      if (ageSeconds > 72000) {
+        logger.warn('Stale cache data', {
           username,
-          age: `${ageHours.toFixed(1)}h`,
-          recommendation: 'Consider reducing TTL or invalidating old cache'
+          age: `${ageHours.toFixed(1)}h`
         });
       }
 
       return profile;
-    } catch (error) {
-      console.error('[Cache] Get error:', error);
+    } catch (error: unknown) {
+      logger.error('Cache get error', {
+        username,
+        error: error instanceof Error ? error.message : String(error)
+      });
       return null;
     }
   }
 
-  /**
-   * Set cached profile with TTL
-   */
+  /** Set cached profile with TTL */
   async set(
     username: string,
     profile: CachedProfile,
@@ -138,7 +133,7 @@ export class CacheStrategyService {
   ): Promise<void> {
     const key = this.buildCacheKey(username);
     const ttl = this.TTL_CONFIG[analysisType];
-    
+
     const metadata: CacheMetadata = {
       cached_at: Date.now(),
       ttl_seconds: ttl,
@@ -156,15 +151,16 @@ export class CacheStrategyService {
         }
       });
 
-      console.log(`[Cache] SET: ${username} (ttl: ${ttl}s, type: ${analysisType})`);
-    } catch (error) {
-      console.error('[Cache] Set error:', error);
+      logger.info('Cache set', { username, ttl, analysisType });
+    } catch (error: unknown) {
+      logger.error('Cache set error', {
+        username,
+        error: error instanceof Error ? error.message : String(error)
+      });
     }
   }
 
-  /**
-   * Check if cached profile should be invalidated
-   */
+  /** Check if cached profile should be invalidated */
   async shouldInvalidate(
     username: string,
     newProfile: CachedProfile,
@@ -173,17 +169,16 @@ export class CacheStrategyService {
     const cachedProfile = await this.get(username, analysisType);
 
     if (!cachedProfile) {
-      return null; // No cache to invalidate
+      return null;
     }
 
-    // Track follower growth between analyses
     const followerDelta = newProfile.follower_count - cachedProfile.follower_count;
     const cachedAt = new Date(cachedProfile.cached_at).getTime();
     const timeElapsedMs = Date.now() - cachedAt;
     const timeElapsedHours = timeElapsedMs / 3600000;
     const growthRatePerHour = timeElapsedHours > 0 ? followerDelta / timeElapsedHours : 0;
 
-    console.log('[Cache] Follower growth tracking', {
+    logger.info('Follower growth tracking', {
       username,
       previous: cachedProfile.follower_count,
       current: newProfile.follower_count,
@@ -192,7 +187,6 @@ export class CacheStrategyService {
       growthRate: `${growthRatePerHour.toFixed(0)}/hour`
     });
 
-    // Check follower count change (>10%)
     const followerChange = Math.abs(followerDelta);
     const followerChangePercent = (followerChange / cachedProfile.follower_count) * 100;
 
@@ -203,7 +197,6 @@ export class CacheStrategyService {
       };
     }
 
-    // Check bio change (>30% different)
     const bioSimilarity = this.calculateStringSimilarity(
       cachedProfile.bio,
       newProfile.bio
@@ -216,7 +209,6 @@ export class CacheStrategyService {
       };
     }
 
-    // Check privacy status change
     if (cachedProfile.is_private !== newProfile.is_private) {
       return {
         reason: 'privacy_change',
@@ -224,7 +216,6 @@ export class CacheStrategyService {
       };
     }
 
-    // Check verification status change
     if (cachedProfile.is_verified !== newProfile.is_verified) {
       return {
         reason: 'verification_change',
@@ -232,34 +223,35 @@ export class CacheStrategyService {
       };
     }
 
-    return null; // Cache is still valid
+    return null;
   }
 
-  /**
-   * Invalidate (delete) cached profile
-   */
+  /** Invalidate (delete) cached profile */
   async invalidate(username: string, reason: InvalidationReason): Promise<void> {
-    console.log(`[Cache] INVALIDATE: ${username} - ${reason.reason}: ${reason.details}`);
+    logger.info('Cache invalidate', {
+      username,
+      reason: reason.reason,
+      details: reason.details
+    });
     await this.delete(username);
   }
 
-  /**
-   * Delete cached profile
-   */
+  /** Delete cached profile */
   async delete(username: string): Promise<void> {
     const key = this.buildCacheKey(username);
-    
+
     try {
       await this.bucket.delete(key);
-      console.log(`[Cache] DELETE: ${username}`);
-    } catch (error) {
-      console.error('[Cache] Delete error:', error);
+      logger.debug('Cache delete', { username });
+    } catch (error: unknown) {
+      logger.error('Cache delete error', {
+        username,
+        error: error instanceof Error ? error.message : String(error)
+      });
     }
   }
 
-  /**
-   * Get cache statistics
-   */
+  /** Get cache statistics */
   async getStatistics(): Promise<{
     total_cached: number;
     by_type: Record<string, number>;
@@ -267,7 +259,6 @@ export class CacheStrategyService {
   }> {
     const objects = await this.bucket.list({ prefix: 'instagram:' });
 
-    // Extensible - add more types as needed
     const byType: Record<string, number> = {
       light: 0
     };
@@ -275,7 +266,7 @@ export class CacheStrategyService {
     let totalAge = 0;
 
     for (const object of objects.objects) {
-      const metadata = this.parseMetadata(object);
+      const metadata = this.parseMetadataFromListObject(object);
       if (metadata.analysis_type) {
         byType[metadata.analysis_type]++;
       }
@@ -285,78 +276,66 @@ export class CacheStrategyService {
     return {
       total_cached: objects.objects.length,
       by_type: byType,
-      avg_age_seconds: objects.objects.length > 0 
-        ? Math.round(totalAge / objects.objects.length) 
+      avg_age_seconds: objects.objects.length > 0
+        ? Math.round(totalAge / objects.objects.length)
         : 0
     };
   }
 
-  /**
-   * Build cache key
-   */
   private buildCacheKey(username: string): string {
     return `instagram:${username.toLowerCase()}:v${this.CACHE_VERSION}`;
   }
 
-  /**
-   * Parse metadata from R2 object
-   */
-  private parseMetadata(object: any): CacheMetadata {
+  private parseMetadata(object: R2Object): CacheMetadata {
     const customMetadata = object.customMetadata || {};
-    
+
     return {
       cached_at: parseInt(customMetadata.cached_at || '0'),
       ttl_seconds: parseInt(customMetadata.ttl_seconds || '0'),
-      analysis_type: customMetadata.analysis_type || 'light',
+      analysis_type: (customMetadata.analysis_type as 'light' | 'deep') || 'light',
       version: parseInt(customMetadata.version || '1')
     };
   }
 
-  /**
-   * Check if TTL expired
-   */
+  private parseMetadataFromListObject(object: { customMetadata?: Record<string, string> }): CacheMetadata {
+    const customMetadata = object.customMetadata || {};
+
+    return {
+      cached_at: parseInt(customMetadata.cached_at || '0'),
+      ttl_seconds: parseInt(customMetadata.ttl_seconds || '0'),
+      analysis_type: (customMetadata.analysis_type as 'light' | 'deep') || 'light',
+      version: parseInt(customMetadata.version || '1')
+    };
+  }
+
   private isTTLExpired(metadata: CacheMetadata, requestedType: 'light' | 'deep'): boolean {
     const age = this.getAge(metadata);
     const requiredTTL = this.TTL_CONFIG[requestedType];
-    
-    // Use the stricter TTL (requested vs cached)
     const effectiveTTL = Math.min(metadata.ttl_seconds, requiredTTL);
-    
+
     return age > effectiveTTL;
   }
 
-  /**
-   * Get age of cached object in seconds
-   */
   private getAge(metadata: CacheMetadata): number {
     return Math.floor((Date.now() - metadata.cached_at) / 1000);
   }
 
-  /**
-   * Format duration in seconds to human-readable string
-   */
   private formatDuration(seconds: number): string {
     if (seconds < 60) return `${seconds}s`;
     if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
     return `${(seconds / 3600).toFixed(1)}h`;
   }
 
-  /**
-   * Calculate string similarity (Levenshtein distance-based)
-   */
   private calculateStringSimilarity(str1: string, str2: string): number {
     if (str1 === str2) return 1.0;
     if (str1.length === 0 || str2.length === 0) return 0.0;
 
     const maxLength = Math.max(str1.length, str2.length);
     const distance = this.levenshteinDistance(str1, str2);
-    
+
     return 1 - (distance / maxLength);
   }
 
-  /**
-   * Levenshtein distance algorithm
-   */
   private levenshteinDistance(str1: string, str2: string): number {
     const matrix: number[][] = [];
 
@@ -385,30 +364,3 @@ export class CacheStrategyService {
     return matrix[str2.length][str1.length];
   }
 }
-
-/**
- * Usage Example:
- *
- * const cacheStrategy = new CacheStrategyService(env.R2_CACHE_BUCKET);
- *
- * // Get with TTL check
- * const cached = await cacheStrategy.get('nike', 'light');
- *
- * if (!cached) {
- *   // Scrape fresh data
- *   const profile = await scrapeProfile('nike');
- *
- *   // Check if should invalidate existing cache
- *   const invalidation = await cacheStrategy.shouldInvalidate('nike', profile, 'light');
- *   if (invalidation) {
- *     await cacheStrategy.invalidate('nike', invalidation);
- *   }
- *
- *   // Set new cache
- *   await cacheStrategy.set('nike', profile, 'light');
- * }
- *
- * // Get statistics
- * const stats = await cacheStrategy.getStatistics();
- * // { total_cached: 150, by_type: { light: 150 }, avg_age_seconds: 18000 }
- */

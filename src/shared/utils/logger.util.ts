@@ -1,14 +1,10 @@
-// src/shared/utils/logger.util.ts
-
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export interface LogContext {
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
-/**
- * Structured logger for production debugging
- */
+/** Structured logger for production debugging */
 export function log(
   level: LogLevel,
   message: string,
@@ -20,9 +16,7 @@ export function log(
     message,
     ...context
   };
-  
-  // In production, send to external logging service
-  // For now, use console with structured output
+
   switch (level) {
     case 'debug':
       console.debug(JSON.stringify(logEntry));
@@ -39,12 +33,10 @@ export function log(
   }
 }
 
-/**
- * Convenience methods
- */
+/** Convenience methods for structured logging */
 export const logger = {
-  debug: (message: string, context?: LogContext) => log('debug', message, context),
-  info: (message: string, context?: LogContext) => log('info', message, context),
-  warn: (message: string, context?: LogContext) => log('warn', message, context),
-  error: (message: string, context?: LogContext) => log('error', message, context)
+  debug: (message: string, context?: LogContext): void => log('debug', message, context),
+  info: (message: string, context?: LogContext): void => log('info', message, context),
+  warn: (message: string, context?: LogContext): void => log('warn', message, context),
+  error: (message: string, context?: LogContext): void => log('error', message, context)
 };

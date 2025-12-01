@@ -1,4 +1,3 @@
-// src/shared/middleware/error.middleware.ts
 import type { Context } from 'hono';
 import type { Env } from '@/shared/types/env.types';
 import { logger } from '@/shared/utils/logger.util';
@@ -8,23 +7,22 @@ export class AppError extends Error {
     message: string,
     public statusCode: number = 500,
     public code: string = 'INTERNAL_ERROR',
-    public details?: any
+    public details?: Record<string, unknown>
   ) {
     super(message);
     this.name = 'AppError';
   }
 }
 
-/**
- * Classify error by type
- */
-function classifyError(error: any): {
+interface ErrorClassification {
   statusCode: number;
   code: string;
   message: string;
   shouldLog: boolean;
-} {
-  // Known AppError
+}
+
+/** Classify error by type */
+function classifyError(error: unknown): ErrorClassification {
   if (error instanceof AppError) {
     return {
       statusCode: error.statusCode,
@@ -33,38 +31,50 @@ function classifyError(error: any): {
       shouldLog: error.statusCode >= 500
     };
   }
-  
-  // Supabase errors
-  if (error.code?.startsWith('PGRST')) {
-    return {
-      statusCode: 400,
-      code: 'DATABASE_ERROR',
-      message: 'Database operation failed',
-      shouldLog: false
-    };
+
+  if (error instanceof Error) {
+    // Supabase errors
+    if ('code' in error && typeof (error as { code?: string }).code === 'string') {
+      const errCode = (error as { code: string }).code;
+      if (errCode.startsWith('PGRST')) {
+        return {
+          statusCode: 400,
+          code: 'DATABASE_ERROR',
+          message: 'Database operation failed',
+          shouldLog: false
+        };
+      }
+      if (errCode === 'ETIMEDOUT') {
+        return {
+          statusCode: 504,
+          code: 'GATEWAY_TIMEOUT',
+          message: 'Request timed out',
+          shouldLog: true
+        };
+      }
+    }
+
+    // Validation errors
+    if (error.name === 'ZodError') {
+      return {
+        statusCode: 400,
+        code: 'VALIDATION_ERROR',
+        message: 'Invalid request data',
+        shouldLog: false
+      };
+    }
+
+    // Timeout errors
+    if (error.name === 'TimeoutError') {
+      return {
+        statusCode: 504,
+        code: 'GATEWAY_TIMEOUT',
+        message: 'Request timed out',
+        shouldLog: true
+      };
+    }
   }
-  
-  // Validation errors
-  if (error.name === 'ZodError') {
-    return {
-      statusCode: 400,
-      code: 'VALIDATION_ERROR',
-      message: 'Invalid request data',
-      shouldLog: false
-    };
-  }
-  
-  // Network/timeout errors
-  if (error.name === 'TimeoutError' || error.code === 'ETIMEDOUT') {
-    return {
-      statusCode: 504,
-      code: 'GATEWAY_TIMEOUT',
-      message: 'Request timed out',
-      shouldLog: true
-    };
-  }
-  
-  // Default: Unknown server error
+
   return {
     statusCode: 500,
     code: 'INTERNAL_ERROR',
@@ -77,10 +87,9 @@ function classifyError(error: any): {
  * Global error handler
  * Catches all unhandled errors and returns standardized response
  */
-export function errorHandler(error: Error, c: Context<{ Bindings: Env }>) {
+export function errorHandler(error: Error, c: Context<{ Bindings: Env }>): Response {
   const classified = classifyError(error);
-  
-  // Log errors (500+)
+
   if (classified.shouldLog) {
     logger.error('Unhandled error', {
       error: error.message,
@@ -90,12 +99,11 @@ export function errorHandler(error: Error, c: Context<{ Bindings: Env }>) {
       code: classified.code
     });
   }
-  
-  // Never expose internal error details to client
+
   const clientMessage = classified.statusCode >= 500
     ? 'An internal error occurred'
     : classified.message;
-  
+
   return c.json({
     success: false,
     error: clientMessage,
@@ -110,8 +118,8 @@ export function errorHandler(error: Error, c: Context<{ Bindings: Env }>) {
  */
 export function asyncHandler(
   fn: (c: Context<{ Bindings: Env }>) => Promise<Response>
-) {
-  return async (c: Context<{ Bindings: Env }>) => {
+): (c: Context<{ Bindings: Env }>) => Promise<Response> {
+  return async (c: Context<{ Bindings: Env }>): Promise<Response> => {
     try {
       return await fn(c);
     } catch (error) {
