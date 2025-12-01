@@ -1,5 +1,3 @@
-// config/analysis-types.config.ts
-
 /**
  * CENTRALIZED ANALYSIS TYPES CONFIGURATION
  *
@@ -12,13 +10,7 @@
  * - Data requirements (posts limit, features enabled)
  * - Pricing (credits, scraping costs)
  * - Cache-aware progress percentage calculation
- *
- * Last updated: 2025-01-30
  */
-
-// ===============================================================================
-// TYPES
-// ===============================================================================
 
 export type AnalysisType = 'light' | 'deep';
 
@@ -102,10 +94,6 @@ export interface AnalysisTypeConfig {
   /** Data requirements */
   data: AnalysisDataConfig;
 }
-
-// ===============================================================================
-// CONFIGURATION
-// ===============================================================================
 
 /**
  * ANALYSIS TYPE CONFIGURATIONS
@@ -193,10 +181,6 @@ export const ANALYSIS_TYPES: Record<AnalysisType, AnalysisTypeConfig> = {
     }
   }
 };
-
-// ===============================================================================
-// PROGRESS CALCULATION (CACHE-AWARE)
-// ===============================================================================
 
 export interface ProgressStep {
   step: string;
@@ -307,10 +291,6 @@ const CACHE_ADJUSTED_PROGRESS_MAPS: Record<AnalysisType, Map<string, ProgressSte
       .map(step => [step.step, step])
   )
 };
-
-// ===============================================================================
-// HELPER FUNCTIONS
-// ===============================================================================
 
 /**
  * Get analysis type configuration
