@@ -1,31 +1,12 @@
-// src/features/auth/auth.handler.ts
-
 /**
- * AUTH HANDLERS - INDUSTRY STANDARD (2025)
+ * Auth Handlers
  *
- * ENDPOINTS:
+ * Endpoints:
  * - POST /api/auth/google/callback - Complete OAuth flow, issue tokens
- * - POST /api/auth/refresh           - Rotate tokens, extend session
- * - POST /api/auth/logout            - Revoke refresh token
- * - GET  /api/auth/session          - Fetch current user data (requires auth)
- * - GET  /api/auth/bootstrap        - Single source for all init data (requires auth)
- *
- * TOKEN STRATEGY:
- * - Access Token: JWT, 15min expiry, contains user/account claims
- * - Refresh Token: Opaque UUID, 30 days expiry, stored hashed in DB
- * - Token Rotation: Each refresh creates NEW token, invalidates old one
- * 
- * USER CREATION:
- * - Uses deterministic UUID generation from Google ID
- * - Calls create_account_atomic() Postgres function
- * - Atomic user + account creation (no race conditions)
- * - Creates Stripe customer for ALL users (free and paid)
- * 
- * INITIALIZATION FLOW (Frontend):
- * 1. App loads → Frontend checks localStorage for refresh token
- * 2. If exists → Frontend calls /api/auth/refresh
- * 3. Backend validates refresh token → Issues new tokens
- * 4. Frontend stores new tokens → Fetches user data via /session
+ * - POST /api/auth/refresh - Rotate tokens, extend session
+ * - POST /api/auth/logout - Revoke refresh token
+ * - GET /api/auth/session - Fetch current user data (requires auth)
+ * - GET /api/auth/bootstrap - Single source for all init data (requires auth)
  */
 
 import type { Context } from 'hono';
@@ -49,27 +30,16 @@ import { successResponse, errorResponse } from '@/shared/utils/response.util';
 import { logger } from '@/shared/utils/logger.util';
 
 /**
- * Convert Google User ID (string number) to deterministic UUID v5
- * 
- * Google IDs: "112093094941937129431" (not UUID format)
- * Solution: Hash to UUID using namespace UUID
- * 
- * This ensures:
- * - Same Google ID always produces same UUID
- * - UUID is valid for PostgreSQL uuid type
- * - Consistent across sessions
+ * Convert Google User ID to deterministic UUID v5
  */
 async function googleIdToUUID(googleId: string): Promise<string> {
-  // Use a fixed namespace UUID for Google IDs
   const GOOGLE_NAMESPACE = '6ba7b810-9dad-11d1-80b4-00c04fd430c8';
-  
-  // Create deterministic UUID from Google ID
+
   const encoder = new TextEncoder();
   const data = encoder.encode(GOOGLE_NAMESPACE + googleId);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
-  
-  // Take first 16 bytes and format as UUID v5
+
   const uuid = [
     hashArray.slice(0, 4).map(b => b.toString(16).padStart(2, '0')).join(''),
     hashArray.slice(4, 6).map(b => b.toString(16).padStart(2, '0')).join(''),
@@ -77,30 +47,16 @@ async function googleIdToUUID(googleId: string): Promise<string> {
     hashArray.slice(8, 10).map(b => b.toString(16).padStart(2, '0')).join(''),
     hashArray.slice(10, 16).map(b => b.toString(16).padStart(2, '0')).join('')
   ].join('-');
-  
-  // Set version to 5 (SHA-1 name-based) and variant bits
+
   const chars = uuid.split('');
-  chars[14] = '5'; // Version 5
-  chars[19] = '8'; // Variant 10xx
-  
+  chars[14] = '5';
+  chars[19] = '8';
+
   return chars.join('');
 }
 
-/**
- * POST /api/auth/google/callback
- * Complete Google OAuth flow and issue tokens
- * 
- * Flow:
- * 1. Exchange auth code with Google for access token
- * 2. Fetch user profile from Google
- * 3. Convert Google ID to deterministic UUID
- * 4. Create or update user/account in database (atomic function)
- * 5. Create Stripe customer (for new users only)
- * 6. Issue JWT access token
- * 7. Create refresh token (stored hashed in DB)
- * 8. Return tokens + user data to frontend
- */
-export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
+/** POST /api/auth/google/callback - Complete Google OAuth flow */
+export async function handleGoogleCallback(c: Context<{ Bindings: Env }>): Promise<Response> {
   try {
     const body = await c.req.json() as GoogleCallbackRequest;
 
@@ -108,22 +64,10 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
       return c.json({ error: 'Missing authorization code' }, 400);
     }
 
-    // ===========================================================================
-    // STEP 1: Exchange code with Google
-    // ===========================================================================
-
     const googleOAuth = new GoogleOAuthService(c.env);
     const googleUser = await googleOAuth.completeOAuthFlow(body.code);
 
-    // ===========================================================================
-    // STEP 2: Convert Google ID to UUID
-    // ===========================================================================
-
     const userId = await googleIdToUUID(googleUser.id);
-
-    // ===========================================================================
-    // STEP 3: Create/update user atomically
-    // ===========================================================================
 
     const supabase = await SupabaseClientFactory.createAdminClient(c.env);
 
@@ -136,7 +80,7 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
       });
 
     if (accountError || !accountData) {
-      console.error('[GoogleCallback] Account creation failed', {
+      logger.error('Account creation failed', {
         error_code: accountError?.code,
         error_message: accountError?.message,
         error_details: accountError?.details
@@ -147,20 +91,17 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
       }, 500);
     }
 
-    // Ensure is_new_user has a default value if undefined
     const isNewUser = accountData.is_new_user ?? false;
-
-    // ===========================================================================
-    // STEP 4: Create Stripe customer (NEW USERS ONLY)
-    // ===========================================================================
 
     if (isNewUser) {
       try {
-        console.log('[GoogleCallback] Creating Stripe customer (new user)');
-        
+        logger.info('Creating Stripe customer for new user', {
+          account_id: accountData.account_id
+        });
+
         const { StripeService } = await import('@/infrastructure/billing/stripe.service');
         const stripeService = new StripeService(c.env);
-        
+
         const stripeCustomerId = await stripeService.createCustomer({
           email: googleUser.email,
           name: googleUser.name,
@@ -172,12 +113,11 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
           }
         });
 
-        console.log('[GoogleCallback] ✓ Stripe customer created', {
+        logger.info('Stripe customer created', {
           stripe_customer_id: stripeCustomerId,
           account_id: accountData.account_id
         });
 
-        // Save stripe_customer_id to accounts table (environment-specific column)
         const isProduction = c.env.APP_ENV === 'production';
         const columnName = isProduction ? 'stripe_customer_id_live' : 'stripe_customer_id_test';
 
@@ -187,45 +127,22 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
           .eq('id', accountData.account_id);
 
         if (updateError) {
-          console.error('[GoogleCallback] ✗ Failed to save stripe_customer_id to database', {
+          logger.warn('Failed to save stripe_customer_id to database', {
             error_code: updateError.code,
             error_message: updateError.message,
             account_id: accountData.account_id,
             stripe_customer_id: stripeCustomerId
           });
-          
-          // DON'T fail OAuth flow - customer exists in Stripe
-          // Recovery strategy: Search Stripe by metadata['account_id']
-          console.warn('[GoogleCallback] ⚠ OAuth flow continuing despite DB save failure');
-          console.warn('[GoogleCallback] ⚠ Recovery: Use StripeService.searchCustomersByMetadata("account_id", "...")');
-          
-        } else {
-          console.log('[GoogleCallback] ✓ stripe_customer_id saved to database');
         }
 
-      } catch (error: any) {
-        // Log error but DON'T fail entire OAuth flow
-        console.error('[GoogleCallback] ⚠ Stripe customer creation failed (NON-FATAL)', {
-          error_name: error.name,
-          error_message: error.message,
-          error_stack: error.stack?.split('\n')[0],
+      } catch (error: unknown) {
+        logger.warn('Stripe customer creation failed (non-fatal)', {
+          error: error instanceof Error ? error.message : String(error),
           account_id: accountData.account_id,
           email: googleUser.email
         });
-        
-        // User can still sign up and use 25 free credits
-        // Stripe customer will be created on first purchase attempt
-        // Recovery strategy: Queue job to create missing customers nightly
-        console.warn('[GoogleCallback] ⚠ User can still complete OAuth');
-        console.warn('[GoogleCallback] ⚠ Stripe customer will be created on first purchase');
       }
-    } else {
-      console.log('[GoogleCallback] Existing user login - skipping Stripe customer creation');
     }
-
-    // ===========================================================================
-    // STEP 5: Issue JWT access token
-    // ===========================================================================
 
     const jwtService = new JWTService(c.env);
     const accessToken = await jwtService.sign({
@@ -235,19 +152,11 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
       onboardingCompleted: accountData.onboarding_completed
     });
 
-    // ===========================================================================
-    // STEP 6: Create refresh token
-    // ===========================================================================
-
     const tokenService = new TokenService(supabase);
     const refreshToken = await tokenService.create(
       accountData.user_id,
       accountData.account_id
     );
-
-    // ===========================================================================
-    // STEP 7: Return response
-    // ===========================================================================
 
     const response: AuthResponse = {
       accessToken,
@@ -270,32 +179,21 @@ export async function handleGoogleCallback(c: Context<{ Bindings: Env }>) {
 
     return successResponse(c, response);
 
-  } catch (error: any) {
-    console.error('[GoogleCallback] ========== FATAL ERROR ==========', {
-      error_name: error.name,
-      error_message: error.message,
-      error_stack: error.stack
+  } catch (error: unknown) {
+    logger.error('Google callback fatal error', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
     });
-    
-    return c.json({ 
+
+    return c.json({
       error: 'Authentication failed',
-      message: error.message 
+      message: error instanceof Error ? error.message : 'Unknown error'
     }, 500);
   }
 }
 
-/**
- * POST /api/auth/refresh
- * Rotate refresh token and issue new access token
- * 
- * Flow:
- * 1. Validate refresh token (check DB, expiry, revoked status)
- * 2. Create NEW refresh token (token rotation)
- * 3. Invalidate old refresh token in DB
- * 4. Issue new JWT access token
- * 5. Return new tokens
- */
-export async function handleRefresh(c: Context<{ Bindings: Env }>) {
+/** POST /api/auth/refresh - Rotate refresh token and issue new access token */
+export async function handleRefresh(c: Context<{ Bindings: Env }>): Promise<Response> {
   try {
     const body = await c.req.json() as RefreshRequest;
 
@@ -307,28 +205,24 @@ export async function handleRefresh(c: Context<{ Bindings: Env }>) {
     const tokenService = new TokenService(supabase);
     const jwtService = new JWTService(c.env);
 
-    // Validate refresh token
     const tokenData = await tokenService.validate(body.refreshToken);
 
     if (!tokenData) {
       return c.json({ error: 'Invalid or expired refresh token' }, 401);
     }
 
-    // Rotate token (create new, invalidate old)
     const newRefreshToken = await tokenService.rotate(
       body.refreshToken,
       tokenData.user_id,
       tokenData.account_id
     );
 
-    // Fetch user's email
     const { data: user } = await supabase
       .from('users')
       .select('email')
       .eq('id', tokenData.user_id)
       .single();
 
-    // Check if user has any completed business profiles
     const { data: businesses } = await supabase
       .from('business_profiles')
       .select('onboarding_completed')
@@ -336,7 +230,6 @@ export async function handleRefresh(c: Context<{ Bindings: Env }>) {
 
     const hasCompletedBusiness = businesses?.some(b => b.onboarding_completed) || false;
 
-    // Issue new access token
     const newAccessToken = await jwtService.sign({
       userId: tokenData.user_id,
       accountId: tokenData.account_id,
@@ -352,23 +245,22 @@ export async function handleRefresh(c: Context<{ Bindings: Env }>) {
 
     return c.json(response, 200);
 
-  } catch (error: any) {
-    console.error('[Refresh] Error:', error);
-    return c.json({ 
+  } catch (error: unknown) {
+    logger.error('Token refresh failed', {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return c.json({
       error: 'Token refresh failed',
-      message: error.message 
+      message: error instanceof Error ? error.message : 'Unknown error'
     }, 500);
   }
 }
 
-/**
- * POST /api/auth/logout
- * Revoke refresh token
- */
-export async function handleLogout(c: Context<{ Bindings: Env }>) {
+/** POST /api/auth/logout - Revoke refresh token */
+export async function handleLogout(c: Context<{ Bindings: Env }>): Promise<Response> {
   try {
     const body = await c.req.json() as LogoutRequest;
-    
+
     if (!body.refreshToken) {
       return c.json({ error: 'Missing refresh token' }, 400);
     }
@@ -380,130 +272,113 @@ export async function handleLogout(c: Context<{ Bindings: Env }>) {
 
     return c.json({ success: true }, 200);
 
-  } catch (error: any) {
-    console.error('[Logout] Error:', error);
-    return c.json({ 
+  } catch (error: unknown) {
+    logger.error('Logout failed', {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return c.json({
       error: 'Logout failed',
-      message: error.message 
+      message: error instanceof Error ? error.message : 'Unknown error'
     }, 500);
   }
 }
 
-/**
- * GET /api/auth/session
- * Get current user session info
- */
-export async function handleGetSession(c: Context<{ Bindings: Env }>) {
+/** GET /api/auth/session - Get current user session info */
+export async function handleGetSession(c: Context<{ Bindings: Env }>): Promise<Response> {
   try {
     const auth = getAuthContext(c);
     const supabase = await SupabaseClientFactory.createAdminClient(c.env);
 
-   // Fetch user data
-const { data: user, error: userError } = await supabase
-  .from('users')
-  .select('id, email, full_name, avatar_url')
-  .eq('id', auth.userId)
-  .single();
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('id, email, full_name, avatar_url')
+      .eq('id', auth.userId)
+      .single();
 
-if (userError || !user) {
-  console.error('[GetSession] User not found:', auth.userId, userError);
-  return c.json({ error: 'User not found' }, 404);
-}
+    if (userError || !user) {
+      logger.error('User not found', { userId: auth.userId, error: userError?.message });
+      return c.json({ error: 'User not found' }, 404);
+    }
 
-// Fetch account data
-const { data: account, error: accountError } = await supabase
-  .from('accounts')
-  .select('id, name')
-  .eq('id', auth.accountId)
-  .single();
+    const { data: account, error: accountError } = await supabase
+      .from('accounts')
+      .select('id, name')
+      .eq('id', auth.accountId)
+      .single();
 
-if (accountError || !account) {
-  console.error('[GetSession] Account not found:', auth.accountId, accountError);
-  return c.json({ error: 'Account not found' }, 404);
-}
+    if (accountError || !account) {
+      logger.error('Account not found', { accountId: auth.accountId, error: accountError?.message });
+      return c.json({ error: 'Account not found' }, 404);
+    }
 
-// Check if user has any completed business profiles
-const { data: businesses } = await supabase
-  .from('business_profiles')
-  .select('onboarding_completed')
-  .eq('account_id', auth.accountId);
+    const { data: businesses } = await supabase
+      .from('business_profiles')
+      .select('onboarding_completed')
+      .eq('account_id', auth.accountId);
 
-const hasCompletedBusiness = businesses?.some(b => b.onboarding_completed) || false;
+    const hasCompletedBusiness = businesses?.some(b => b.onboarding_completed) || false;
 
-// Issue fresh JWT if onboarding status changed (JWT claims are stale)
-let newAccessToken: string | undefined;
-if (hasCompletedBusiness !== auth.onboardingCompleted) {
-  console.log('[GetSession] Onboarding status changed, issuing fresh JWT', {
-    jwt_claim: auth.onboardingCompleted,
-    actual_status: hasCompletedBusiness
-  });
-  const jwtService = new JWTService(c.env);
-  newAccessToken = await jwtService.sign({
-    userId: auth.userId,
-    accountId: auth.accountId,
-    email: user.email,
-    onboardingCompleted: hasCompletedBusiness
-  });
-}
+    let newAccessToken: string | undefined;
+    if (hasCompletedBusiness !== auth.onboardingCompleted) {
+      logger.info('Onboarding status changed, issuing fresh JWT', {
+        jwt_claim: auth.onboardingCompleted,
+        actual_status: hasCompletedBusiness
+      });
+      const jwtService = new JWTService(c.env);
+      newAccessToken = await jwtService.sign({
+        userId: auth.userId,
+        accountId: auth.accountId,
+        email: user.email,
+        onboardingCompleted: hasCompletedBusiness
+      });
+    }
 
-// Fetch credit balance and light analyses balance
-const { data: balances } = await supabase
-  .from('balances')
-  .select('credit_balance, light_analyses_balance')
-  .eq('account_id', auth.accountId)
-  .single();
+    const { data: balances } = await supabase
+      .from('balances')
+      .select('credit_balance, light_analyses_balance')
+      .eq('account_id', auth.accountId)
+      .single();
 
-const response: SessionResponse & { newAccessToken?: string } = {
-  user: {
-    id: user.id,
-    email: user.email,
-    full_name: user.full_name,
-    avatar_url: user.avatar_url,
-    onboarding_completed: hasCompletedBusiness
-  },
-  account: {
-    id: account.id,
-    name: account.name,
-    credit_balance: balances?.credit_balance || 0,
-    light_analyses_balance: balances?.light_analyses_balance || 0
-  }
-};
+    const response: SessionResponse & { newAccessToken?: string } = {
+      user: {
+        id: user.id,
+        email: user.email,
+        full_name: user.full_name,
+        avatar_url: user.avatar_url,
+        onboarding_completed: hasCompletedBusiness
+      },
+      account: {
+        id: account.id,
+        name: account.name,
+        credit_balance: balances?.credit_balance || 0,
+        light_analyses_balance: balances?.light_analyses_balance || 0
+      }
+    };
 
-// Include fresh JWT if onboarding status changed
-if (newAccessToken) {
-  response.newAccessToken = newAccessToken;
-}
+    if (newAccessToken) {
+      response.newAccessToken = newAccessToken;
+    }
 
     return successResponse(c, response);
 
-  } catch (error: any) {
-    console.error('[GetSession] Error:', error);
+  } catch (error: unknown) {
+    logger.error('Get session failed', {
+      error: error instanceof Error ? error.message : String(error)
+    });
     return c.json({
       error: 'Failed to fetch session',
-      message: error.message
+      message: error instanceof Error ? error.message : 'Unknown error'
     }, 500);
   }
 }
 
-/**
- * GET /api/auth/bootstrap
- * Single endpoint for all user initialization data
- *
- * Purpose: Replace multiple API calls (/session, /subscription, /balance)
- * with a single bootstrap call on app initialization.
- *
- * Uses JOIN query for single database round-trip.
- * Handles missing subscription/balances gracefully.
- */
-export async function handleBootstrap(c: Context<{ Bindings: Env }>) {
+/** GET /api/auth/bootstrap - Single endpoint for all user initialization data */
+export async function handleBootstrap(c: Context<{ Bindings: Env }>): Promise<Response> {
   const auth = getAuthContext(c);
 
   try {
     const supabase = await SupabaseClientFactory.createAdminClient(c.env);
 
-    // Single JOIN query to fetch all initialization data including balances
-    // Use explicit FK syntax (fk_accounts_owner) to avoid PGRST201 ambiguity error
-    // (accounts table has two FKs to users: owner_id and suspended_by)
     const { data, error } = await supabase
       .from('users')
       .select(`
@@ -543,23 +418,20 @@ export async function handleBootstrap(c: Context<{ Bindings: Env }>) {
       return errorResponse(c, 'Bootstrap failed', 'NOT_FOUND', 404);
     }
 
-    // Extract nested data
     const user = data;
     const account = Array.isArray(data.accounts) ? data.accounts[0] : data.accounts;
     const subscription = account?.subscriptions?.[0] || null;
     const balance = account?.balances?.[0] || null;
 
-    // Determine environment-specific Stripe IDs
     const isProduction = c.env.APP_ENV === 'production';
 
-    // Build response
     const response: BootstrapResponse = {
       user: {
         id: user.id,
         email: user.email,
         full_name: user.full_name,
         avatar_url: user.avatar_url,
-        onboarding_completed: auth.onboardingCompleted // From JWT claims
+        onboarding_completed: auth.onboardingCompleted
       },
       account: {
         id: account.id,
@@ -586,7 +458,6 @@ export async function handleBootstrap(c: Context<{ Bindings: Env }>) {
         created_at: balance.created_at,
         updated_at: balance.updated_at
       } : {
-        // Default balances if not found
         account_id: account.id,
         credit_balance: 0,
         light_analyses_balance: 0,
@@ -598,7 +469,7 @@ export async function handleBootstrap(c: Context<{ Bindings: Env }>) {
 
     return successResponse(c, response);
 
-  } catch (error) {
+  } catch (error: unknown) {
     logger.error('Bootstrap failed', {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
