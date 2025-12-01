@@ -12,9 +12,9 @@ import {
 import { validateQuery } from '@/shared/utils/validation.util';
 import { successResponse, errorResponse, paginatedResponse, noContentResponse } from '@/shared/utils/response.util';
 import { getAuthContext } from '@/shared/middleware/auth.middleware';
-import { AppError } from '@/shared/middleware/error.middleware';
 import { SupabaseClientFactory } from '@/infrastructure/database/supabase.client';
 import { AvatarCacheService } from '@/infrastructure/cache/avatar-cache.service';
+import { logger } from '@/shared/utils/logger.util';
 
 /**
  * GET /api/leads
@@ -48,12 +48,15 @@ export async function listLeads(c: Context<{ Bindings: Env }>) {
     });
 
   } catch (error: any) {
-    console.error('[ListLeads] Error:', error);
-    
+    logger.error('Failed to list leads', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    });
+
     if (error.name === 'ZodError') {
       return errorResponse(c, 'Invalid query parameters', 'VALIDATION_ERROR', 400, error.errors);
     }
-    
+
     return errorResponse(c, 'Failed to list leads', 'INTERNAL_ERROR', 500);
   }
 }
@@ -83,12 +86,15 @@ export async function getLead(c: Context<{ Bindings: Env }>) {
     return successResponse(c, lead);
 
   } catch (error: any) {
-    console.error('[GetLead] Error:', error);
-    
+    logger.error('Failed to get lead', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    });
+
     if (error.name === 'ZodError') {
       return errorResponse(c, 'Invalid lead ID', 'VALIDATION_ERROR', 400);
     }
-    
+
     return errorResponse(c, 'Failed to get lead', 'INTERNAL_ERROR', 500);
   }
 }
@@ -125,12 +131,15 @@ export async function getLeadAnalyses(c: Context<{ Bindings: Env }>) {
     return successResponse(c, analyses);
 
   } catch (error: any) {
-    console.error('[GetLeadAnalyses] Error:', error);
-    
+    logger.error('Failed to get lead analyses', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    });
+
     if (error.name === 'ZodError') {
       return errorResponse(c, 'Invalid parameters', 'VALIDATION_ERROR', 400);
     }
-    
+
     return errorResponse(c, 'Failed to get analyses', 'INTERNAL_ERROR', 500);
   }
 }
@@ -140,11 +149,11 @@ export async function getLeadAnalyses(c: Context<{ Bindings: Env }>) {
  * Soft delete lead and clean up R2 avatar
  */
 export async function deleteLead(c: Context<{ Bindings: Env }>) {
-  try {
-    const auth = getAuthContext(c);
-    const accountId = auth.accountId;
-    const leadId = c.req.param('leadId');
+  const auth = getAuthContext(c);
+  const accountId = auth.accountId;
+  const leadId = c.req.param('leadId');
 
+  try {
     // Validate params
     validateQuery(DeleteLeadParamsSchema, { leadId });
 
@@ -162,10 +171,13 @@ export async function deleteLead(c: Context<{ Bindings: Env }>) {
     try {
       const avatarService = new AvatarCacheService(c.env.R2_MEDIA_BUCKET);
       await avatarService.deleteAvatar(leadId);
-      console.log(`[DeleteLead] Deleted R2 avatar for lead ${leadId}`);
+      logger.info('Deleted R2 avatar for lead', { leadId });
     } catch (avatarError) {
       // Non-critical - log and continue with lead deletion
-      console.error(`[DeleteLead] Failed to delete R2 avatar for lead ${leadId}:`, avatarError);
+      logger.warn('Failed to delete R2 avatar for lead', {
+        leadId,
+        error: avatarError instanceof Error ? avatarError.message : String(avatarError)
+      });
     }
 
     // Soft delete lead from database
@@ -178,7 +190,7 @@ export async function deleteLead(c: Context<{ Bindings: Env }>) {
     logger.error('Failed to delete lead', {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
-      accountId: auth.accountId,
+      accountId,
       leadId
     });
 
