@@ -1,5 +1,7 @@
 // config/operations-pricing.config.ts
 
+import { logger } from '@/shared/utils/logger.util';
+
 /**
  * CENTRALIZED OPERATIONS PRICING & COST CONFIGURATION
  *
@@ -258,7 +260,7 @@ export function calculateAICost(
 ): number {
   const pricing = AI_MODEL_PRICING[model];
   if (!pricing) {
-    console.warn(`[Pricing] Unknown model: ${model}, cost set to 0`);
+    logger.warn('Unknown AI model for pricing calculation', { model, costSetTo: 0 });
     return 0;
   }
 

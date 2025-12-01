@@ -2,8 +2,8 @@
 
 import type { Env } from '@/shared/types/env.types';
 import { SupabaseClientFactory } from '@/infrastructure/database/supabase.client';
-import { CreditsRepository } from '@/infrastructure/database/repositories/credits.repository';
 import { getSentryService } from '@/infrastructure/monitoring/sentry.service';
+import { logger } from '@/shared/utils/logger.util';
 
 /**
  * CRON JOBS HANDLER
@@ -25,7 +25,7 @@ export class CronJobsHandler {
    * Uses Supabase RPC function for transaction safety and idempotency
    */
   async resetFreePlanCredits(): Promise<void> {
-    console.log('[Cron] Starting free plan credit reset...');
+    logger.info('Starting free plan credit reset');
     const sentry = await getSentryService(this.env);
 
     sentry.addBreadcrumb('Free plan credit reset started', 'cron', 'info');
@@ -54,17 +54,17 @@ export class CronJobsHandler {
         throw new Error(`Reset failed: ${JSON.stringify(result)}`);
       }
 
-      console.log('[Cron] Free plan credit reset complete:', {
+      logger.info('Free plan credit reset complete', {
         processed: result.processed,
         skipped: result.skipped,
-        errors: result.errors.length,
-        plan_credits: result.plan_credits,
-        plan_light_analyses: result.plan_light_analyses
+        errorsCount: result.errors.length,
+        planCredits: result.plan_credits,
+        planLightAnalyses: result.plan_light_analyses
       });
 
       // Log errors if any accounts failed
       if (result.errors.length > 0) {
-        console.warn('[Cron] Some accounts failed to reset:', result.errors);
+        logger.warn('Some accounts failed to reset', { errors: result.errors });
 
         await sentry.captureMessage(
           `Free plan reset: ${result.errors.length} accounts failed`,
@@ -92,7 +92,10 @@ export class CronJobsHandler {
       );
 
     } catch (error: any) {
-      console.error('[Cron] Free plan credit reset error:', error);
+      logger.error('Free plan credit reset error', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
 
       await sentry.captureException(error, {
         tags: { cron_job: 'free_plan_reset' }
@@ -106,111 +109,119 @@ export class CronJobsHandler {
    * Monthly credit renewal (1st of month, 3 AM UTC)
    * Grants subscription credits to all active subscribers
    */
- async monthlyRenewal(): Promise<void> {
-  console.log('[Cron] Starting monthly credit renewal...');
-  const sentry = await getSentryService(this.env);
-  
-  sentry.addBreadcrumb('Monthly renewal started', 'cron', 'info');
+  async monthlyRenewal(): Promise<void> {
+    logger.info('Starting monthly credit renewal');
+    const sentry = await getSentryService(this.env);
 
-  try {
-    const supabase = await SupabaseClientFactory.createAdminClient(this.env);
-    
-    // Get all active subscriptions with their plan details
-    const { data: subscriptions, error } = await supabase
-      .from('subscriptions')
-      .select(`
-        account_id,
-        plan_type,
-        plans!inner(
-          credits_per_month,
-          features
-        )
-      `)
-      .eq('status', 'active')
-      .is('deleted_at', null);
+    sentry.addBreadcrumb('Monthly renewal started', 'cron', 'info');
 
-    if (error) throw error;
+    try {
+      const supabase = await SupabaseClientFactory.createAdminClient(this.env);
 
-    if (!subscriptions || subscriptions.length === 0) {
-      console.log('[Cron] No active subscriptions found');
-      return;
-    }
+      // Get all active subscriptions with their plan details
+      const { data: subscriptions, error } = await supabase
+        .from('subscriptions')
+        .select(`
+          account_id,
+          plan_type,
+          plans!inner(
+            credits_per_month,
+            features
+          )
+        `)
+        .eq('status', 'active')
+        .is('deleted_at', null);
 
-    console.log(`[Cron] Processing ${subscriptions.length} active subscriptions`);
+      if (error) throw error;
 
-    let successCount = 0;
-    let failCount = 0;
-
-    for (const sub of subscriptions) {
-      try {
-        const plan = sub.plans;
-        const creditsQuota = plan.credits_per_month;
-        const lightQuota = parseInt(plan.features.light_analyses);
-
-        // Reset both balances
-        const { error: updateError } = await supabase
-          .from('balances')
-          .update({
-            credit_balance: creditsQuota,
-            light_analyses_balance: lightQuota,
-            last_transaction_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          })
-          .eq('account_id', sub.account_id);
-
-        if (updateError) throw updateError;
-
-        // Update subscription period
-        await supabase
-          .from('subscriptions')
-          .update({
-            current_period_start: new Date().toISOString(),
-            current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
-          })
-          .eq('account_id', sub.account_id);
-
-        successCount++;
-        console.log(
-          `[Cron] Reset balances for ${sub.account_id} (${sub.plan_type}): ` +
-          `${creditsQuota} credits + ${lightQuota} light analyses`
-        );
-      } catch (subError: any) {
-        failCount++;
-        console.error(`[Cron] Failed to reset ${sub.account_id}:`, subError);
-        
-        await sentry.captureException(subError, {
-          tags: {
-            cron_job: 'monthly_renewal',
-            account_id: sub.account_id
-          },
-          extra: { subscription: sub }
-        });
+      if (!subscriptions || subscriptions.length === 0) {
+        logger.info('No active subscriptions found for monthly renewal');
+        return;
       }
-    }
 
-    console.log(`[Cron] Monthly renewal complete: ${successCount} success, ${failCount} failed`);
-    
-    await sentry.captureMessage(
-      `Monthly renewal: ${successCount}/${subscriptions.length} successful`,
-      'info',
-      { tags: { cron_job: 'monthly_renewal' } }
-    );
-  } catch (error: any) {
-    console.error('[Cron] Monthly renewal error:', error);
-    await sentry.captureException(error, {
-      tags: { cron_job: 'monthly_renewal' }
-    });
-    throw error;
+      logger.info('Processing active subscriptions', { count: subscriptions.length });
+
+      let successCount = 0;
+      let failCount = 0;
+
+      for (const sub of subscriptions) {
+        try {
+          const plan = sub.plans;
+          const creditsQuota = plan.credits_per_month;
+          const lightQuota = parseInt(plan.features.light_analyses);
+
+          // Reset both balances
+          const { error: updateError } = await supabase
+            .from('balances')
+            .update({
+              credit_balance: creditsQuota,
+              light_analyses_balance: lightQuota,
+              last_transaction_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+            .eq('account_id', sub.account_id);
+
+          if (updateError) throw updateError;
+
+          // Update subscription period
+          await supabase
+            .from('subscriptions')
+            .update({
+              current_period_start: new Date().toISOString(),
+              current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+            })
+            .eq('account_id', sub.account_id);
+
+          successCount++;
+          logger.info('Reset balances for account', {
+            accountId: sub.account_id,
+            planType: sub.plan_type,
+            credits: creditsQuota,
+            lightAnalyses: lightQuota
+          });
+        } catch (subError: any) {
+          failCount++;
+          logger.error('Failed to reset account balances', {
+            accountId: sub.account_id,
+            error: subError instanceof Error ? subError.message : String(subError)
+          });
+
+          await sentry.captureException(subError, {
+            tags: {
+              cron_job: 'monthly_renewal',
+              account_id: sub.account_id
+            },
+            extra: { subscription: sub }
+          });
+        }
+      }
+
+      logger.info('Monthly renewal complete', { successCount, failCount });
+
+      await sentry.captureMessage(
+        `Monthly renewal: ${successCount}/${subscriptions.length} successful`,
+        'info',
+        { tags: { cron_job: 'monthly_renewal' } }
+      );
+    } catch (error: any) {
+      logger.error('Monthly renewal error', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      await sentry.captureException(error, {
+        tags: { cron_job: 'monthly_renewal' }
+      });
+      throw error;
+    }
   }
-}
   /**
    * Daily cleanup (2 AM UTC)
    * Removes old soft-deleted records and stale analyses
    */
   async dailyCleanup(): Promise<void> {
-    console.log('[Cron] Starting daily cleanup...');
+    logger.info('Starting daily cleanup');
     const sentry = await getSentryService(this.env);
-    
+
     sentry.addBreadcrumb('Daily cleanup started', 'cron', 'info');
 
     try {
@@ -229,10 +240,10 @@ export class CronJobsHandler {
         .select('id');
 
       if (leadsError) {
-        console.error('[Cron] Error deleting old leads:', leadsError);
+        logger.error('Error deleting old leads', { error: leadsError.message });
       } else {
         totalDeleted += leadsDeleted?.length || 0;
-        console.log(`[Cron] Deleted ${leadsDeleted?.length || 0} old leads`);
+        logger.info('Deleted old leads', { count: leadsDeleted?.length || 0 });
       }
 
       // 2. Hard delete business profiles soft-deleted >30 days ago
@@ -244,10 +255,10 @@ export class CronJobsHandler {
         .select('id');
 
       if (profilesError) {
-        console.error('[Cron] Error deleting old profiles:', profilesError);
+        logger.error('Error deleting old profiles', { error: profilesError.message });
       } else {
         totalDeleted += profilesDeleted?.length || 0;
-        console.log(`[Cron] Deleted ${profilesDeleted?.length || 0} old business profiles`);
+        logger.info('Deleted old business profiles', { count: profilesDeleted?.length || 0 });
       }
 
       // 3. Hard delete old completed analyses (>90 days)
@@ -259,10 +270,10 @@ export class CronJobsHandler {
         .select('id');
 
       if (analysesError) {
-        console.error('[Cron] Error deleting old analyses:', analysesError);
+        logger.error('Error deleting old analyses', { error: analysesError.message });
       } else {
         totalDeleted += analysesDeleted?.length || 0;
-        console.log(`[Cron] Deleted ${analysesDeleted?.length || 0} old completed analyses`);
+        logger.info('Deleted old completed analyses', { count: analysesDeleted?.length || 0 });
       }
 
       // 4. Hard delete failed analyses (>30 days)
@@ -274,10 +285,10 @@ export class CronJobsHandler {
         .select('id');
 
       if (failedError) {
-        console.error('[Cron] Error deleting failed analyses:', failedError);
+        logger.error('Error deleting failed analyses', { error: failedError.message });
       } else {
         totalDeleted += failedDeleted?.length || 0;
-        console.log(`[Cron] Deleted ${failedDeleted?.length || 0} old failed analyses`);
+        logger.info('Deleted old failed analyses', { count: failedDeleted?.length || 0 });
       }
 
       // 5. Delete abandoned pending analyses (>24 hours)
@@ -291,21 +302,24 @@ export class CronJobsHandler {
         .select('id');
 
       if (pendingError) {
-        console.error('[Cron] Error deleting pending analyses:', pendingError);
+        logger.error('Error deleting pending analyses', { error: pendingError.message });
       } else {
         totalDeleted += pendingDeleted?.length || 0;
-        console.log(`[Cron] Deleted ${pendingDeleted?.length || 0} abandoned pending analyses`);
+        logger.info('Deleted abandoned pending analyses', { count: pendingDeleted?.length || 0 });
       }
 
-      console.log(`[Cron] Daily cleanup complete: ${totalDeleted} total records deleted`);
-      
+      logger.info('Daily cleanup complete', { totalDeleted });
+
       await sentry.captureMessage(
         `Daily cleanup: ${totalDeleted} records deleted`,
         'info',
         { tags: { cron_job: 'daily_cleanup' } }
       );
     } catch (error: any) {
-      console.error('[Cron] Daily cleanup error:', error);
+      logger.error('Daily cleanup error', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
       await sentry.captureException(error, {
         tags: { cron_job: 'daily_cleanup' }
       });
@@ -319,7 +333,7 @@ export class CronJobsHandler {
    * Note: Credit refunds are handled automatically by the workflow error handler
    */
   async hourlyFailedAnalysisCleanup(): Promise<void> {
-    console.log('[Cron] Starting failed analysis cleanup...');
+    logger.info('Starting failed analysis cleanup');
     const sentry = await getSentryService(this.env);
 
     sentry.addBreadcrumb('Failed analysis cleanup started', 'cron', 'info');
@@ -339,11 +353,11 @@ export class CronJobsHandler {
       if (error) throw error;
 
       if (!failedAnalyses || failedAnalyses.length === 0) {
-        console.log('[Cron] No failed analyses found');
+        logger.info('No failed analyses found for cleanup');
         return;
       }
 
-      console.log(`[Cron] Processing ${failedAnalyses.length} failed analyses`);
+      logger.info('Processing failed analyses', { count: failedAnalyses.length });
 
       let cleanedCount = 0;
 
@@ -356,10 +370,13 @@ export class CronJobsHandler {
             .eq('id', analysis.id);
 
           cleanedCount++;
-          console.log(`[Cron] Soft-deleted failed analysis ${analysis.id}`);
+          logger.info('Soft-deleted failed analysis', { analysisId: analysis.id });
 
         } catch (analysisError: any) {
-          console.error(`[Cron] Failed to process analysis ${analysis.id}:`, analysisError);
+          logger.error('Failed to process analysis', {
+            analysisId: analysis.id,
+            error: analysisError instanceof Error ? analysisError.message : String(analysisError)
+          });
 
           await sentry.captureException(analysisError, {
             tags: {
@@ -370,7 +387,7 @@ export class CronJobsHandler {
         }
       }
 
-      console.log(`[Cron] Failed analysis cleanup complete: ${cleanedCount} analyses soft-deleted`);
+      logger.info('Failed analysis cleanup complete', { cleanedCount });
 
       await sentry.captureMessage(
         `Failed analysis cleanup: ${cleanedCount} analyses cleaned`,
@@ -378,7 +395,10 @@ export class CronJobsHandler {
         { tags: { cron_job: 'failed_analysis_cleanup' } }
       );
     } catch (error: any) {
-      console.error('[Cron] Failed analysis cleanup error:', error);
+      logger.error('Failed analysis cleanup error', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
       await sentry.captureException(error, {
         tags: { cron_job: 'failed_analysis_cleanup' }
       });
@@ -391,7 +411,7 @@ export class CronJobsHandler {
    * Removes revoked and expired refresh tokens to keep table clean
    */
   async cleanupRefreshTokens(): Promise<void> {
-    console.log('[Cron] Starting refresh token cleanup...');
+    logger.info('Starting refresh token cleanup');
     const sentry = await getSentryService(this.env);
 
     sentry.addBreadcrumb('Refresh token cleanup started', 'cron', 'info');
@@ -407,7 +427,7 @@ export class CronJobsHandler {
         .select('*', { count: 'exact', head: true });
 
       if (revokedError) {
-        console.error('[Cron] Failed to delete revoked tokens:', revokedError);
+        logger.error('Failed to delete revoked tokens', { error: revokedError.message });
         throw revokedError;
       }
 
@@ -419,16 +439,16 @@ export class CronJobsHandler {
         .select('*', { count: 'exact', head: true });
 
       if (expiredError) {
-        console.error('[Cron] Failed to delete expired tokens:', expiredError);
+        logger.error('Failed to delete expired tokens', { error: expiredError.message });
         throw expiredError;
       }
 
       const totalDeleted = (revokedCount || 0) + (expiredCount || 0);
 
-      console.log('[Cron] Refresh token cleanup complete', {
-        revoked_deleted: revokedCount || 0,
-        expired_deleted: expiredCount || 0,
-        total_deleted: totalDeleted,
+      logger.info('Refresh token cleanup complete', {
+        revokedDeleted: revokedCount || 0,
+        expiredDeleted: expiredCount || 0,
+        totalDeleted
       });
 
       // Track metrics in Analytics Engine
@@ -447,7 +467,10 @@ export class CronJobsHandler {
       );
 
     } catch (error: any) {
-      console.error('[Cron] Refresh token cleanup error:', error);
+      logger.error('Refresh token cleanup error', {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
       await sentry.captureException(error, {
         tags: { cron_job: 'refresh_token_cleanup' },
       });
@@ -489,10 +512,14 @@ export async function executeCronJob(cronExpression: string, env: Env): Promise<
         break;
 
       default:
-        console.warn('[Cron] Unknown cron expression:', cronExpression);
+        logger.warn('Unknown cron expression', { cronExpression });
     }
   } catch (error) {
-    console.error('[Cron] Job execution failed:', error);
+    logger.error('Cron job execution failed', {
+      cronExpression,
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    });
     throw error;
   }
 }

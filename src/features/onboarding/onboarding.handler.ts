@@ -38,8 +38,9 @@ function generateUUID(): string {
  * 4. Return run_id for polling
  */
 export async function generateBusinessContext(c: Context<{ Bindings: Env }>) {
+  const auth = getAuthContext(c);
+
   try {
-    const auth = getAuthContext(c);
     const body = await c.req.json();
 
     // Validate flat structure from frontend
@@ -121,10 +122,10 @@ export async function generateBusinessContext(c: Context<{ Bindings: Env }>) {
  * Get current generation progress
  */
 export async function getGenerationProgress(c: Context<{ Bindings: Env }>) {
-  try {
-    const auth = getAuthContext(c);
-    const runId = c.req.param('runId');
+  const auth = getAuthContext(c);
+  const runId = c.req.param('runId');
 
+  try {
     // Validate runId format (UUID)
     validateBody(GetProgressParamsSchema, { runId });
 
@@ -157,10 +158,9 @@ export async function getGenerationProgress(c: Context<{ Bindings: Env }>) {
  * Get final generation result (when complete)
  */
 export async function getGenerationResult(c: Context<{ Bindings: Env }>) {
-  try {
-    const auth = getAuthContext(c);
-    const runId = c.req.param('runId');
+  const runId = c.req.param('runId');
 
+  try {
     // Validate runId format
     validateBody(GetProgressParamsSchema, { runId });
 

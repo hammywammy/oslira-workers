@@ -11,9 +11,7 @@ import {
   handleStripeWebhook
 } from './billing.handler';
 
-export function registerBillingRoutes(app: Hono) {
-  console.log('[Routes] Registering billing routes');
-
+export function registerBillingRoutes(app: Hono): void {
   // ===============================================================================
   // STRIPE WEBHOOK (NO AUTH - signature verified in handler)
   // ===============================================================================
@@ -31,6 +29,4 @@ export function registerBillingRoutes(app: Hono) {
 
   app.get('/api/billing/subscription', getSubscription);
   app.post('/api/billing/upgrade', createUpgradeCheckout);
-
-  console.log('[Routes] Billing routes registered');
 }

@@ -22,6 +22,7 @@ import { BusinessContextProgressDO } from './infrastructure/durable-objects/busi
 import { executeCronJob } from './infrastructure/cron/cron-jobs.handler';
 import { getSentryService } from './infrastructure/monitoring/sentry.service';
 import { errorHandler } from './shared/middleware/error.middleware';
+import { logger } from './shared/utils/logger.util';
 
 
 const app = new Hono<{ Bindings: Env }>();
@@ -144,7 +145,12 @@ registerBillingRoutes(app);
 // ===============================================================================
 
 app.onError(async (err, c) => {
-  console.error('Worker error:', err);
+  logger.error('Worker error', {
+    error: err instanceof Error ? err.message : String(err),
+    stack: err instanceof Error ? err.stack : undefined,
+    path: c.req.path,
+    method: c.req.method
+  });
 
   try {
     const sentry = await getSentryService(c.env);
@@ -159,7 +165,9 @@ app.onError(async (err, c) => {
       }
     });
   } catch (sentryError) {
-    console.error('Sentry error:', sentryError);
+    logger.error('Sentry capture failed', {
+      error: sentryError instanceof Error ? sentryError.message : String(sentryError)
+    });
   }
 
   return errorHandler(err, c);
@@ -191,12 +199,16 @@ export default {
    * Cron Trigger Handler
    */
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
-    console.log('[Cron] Trigger:', event.cron);
+    logger.info('Cron trigger', { cron: event.cron });
 
     try {
       await executeCronJob(event.cron, env);
     } catch (error: any) {
-      console.error('[Cron] Job execution failed:', error);
+      logger.error('Cron job execution failed', {
+        cron: event.cron,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
 
       try {
         const sentry = await getSentryService(env);
@@ -207,7 +219,9 @@ export default {
           }
         });
       } catch (sentryError) {
-        console.error('Sentry error:', sentryError);
+        logger.error('Sentry capture failed', {
+          error: sentryError instanceof Error ? sentryError.message : String(sentryError)
+        });
       }
     }
   },
