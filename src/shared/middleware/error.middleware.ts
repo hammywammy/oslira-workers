@@ -1,6 +1,7 @@
 // src/shared/middleware/error.middleware.ts
 import type { Context } from 'hono';
 import type { Env } from '@/shared/types/env.types';
+import { logger } from '@/shared/utils/logger.util';
 
 export class AppError extends Error {
   constructor(
@@ -81,16 +82,13 @@ export function errorHandler(error: Error, c: Context<{ Bindings: Env }>) {
   
   // Log errors (500+)
   if (classified.shouldLog) {
-    console.error('Unhandled error:', {
+    logger.error('Unhandled error', {
       error: error.message,
       stack: error.stack,
       path: c.req.path,
       method: c.req.method,
       code: classified.code
     });
-    
-    // TODO: Send to Sentry in production
-    // await Sentry.captureException(error);
   }
   
   // Never expose internal error details to client
